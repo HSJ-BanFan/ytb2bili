@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
+	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"gorm.io/gorm"
 )
@@ -78,16 +80,61 @@ type VideoMetadata struct {
 	Tags        []string `json:"tags"`
 }
 
-func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
+// checkUserPermission 检查用户是否有 AI 元数据生成权限
+func (g *GenerateMetadata) checkUserPermission() bool {
+	// 获取视频信息，包含提交用户ID
+	savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID)
+	if err != nil {
+		g.App.Logger.Warnf("无法获取视频信息: %v，默认允许执行", err)
+		return true // 获取失败时默认允许（向后兼容）
+	}
+
+	// 如果没有用户ID（旧数据），默认允许
+	if savedVideo.UserID == 0 {
+		g.App.Logger.Debug("视频没有关联用户ID（旧数据），默认允许执行")
+		return true
+	}
+
+	userID := strconv.FormatUint(uint64(savedVideo.UserID), 10)
+	g.App.Logger.Infof("📋 检查用户 %s 的 AI 功能权限...", userID)
+
+	// 创建会员存储和检查器
+	membershipStore := membership.NewDBMembershipStore(g.App.DB)
+	checker := membership.NewFeatureChecker(membershipStore)
+
+	// 检查 Gemini 视频分析权限
+	result := checker.CanUseFeature(context.Background(), userID, "gemini_video_analysis")
+	if !result.Allowed {
+		g.App.Logger.Warnf("用户 %s 没有 Gemini 视频分析权限: %s", userID, result.Reason)
+		return false
+	}
+
+	g.App.Logger.Infof("✅ 用户 %s 有 AI 元数据生成权限", userID)
+	return true
+}
+
+func (g *GenerateMetadata) Execute(ctx map[string]interface{}) bool {
 	g.App.Logger.Info("========================================")
 	g.App.Logger.Infof("开始生成视频标题和描述: VideoID=%s", g.StateManager.VideoID)
 	g.App.Logger.Infof("📁 工作目录: %s", g.StateManager.CurrentDir)
 	g.App.Logger.Info("========================================")
 
+	// 0. 检查用户会员权限
+	if !g.checkUserPermission() {
+		g.App.Logger.Warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		g.App.Logger.Warn("⚠️ 用户没有 AI 元数据生成权限，跳过此步骤")
+		g.App.Logger.Warn("💡 升级到 Pro 会员可解锁 Gemini 视频分析功能")
+		g.App.Logger.Warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		// 设置跳过标记，让 TaskStepWrapper 设置正确的状态
+		ctx["skipped"] = "需要 Pro 会员才能使用 AI 生成元数据功能，请升级会员"
+		// 返回 true 表示步骤完成（跳过），不阻塞后续任务
+		return true
+	}
+
 	// 列出工作目录中的文件，帮助调试
 	g.logDirectoryContents()
 
-	// 0. 刷新AI服务管理器配置
+	// 1. 刷新AI服务管理器配置
 	g.AIManager.RefreshConfig(g.App.Config)
 
 	// ⚠️ 元数据生成必须使用 Gemini（多模态视频分析能力）
@@ -104,7 +151,7 @@ func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
 
 		// 尝试使用备选方案（用户首选AI或DeepSeek）生成基础元数据
 		g.App.Logger.Info("🔄 尝试使用备选AI服务生成基础元数据...")
-		return g.executeWithFallbackAI(context)
+		return g.executeWithFallbackAI(ctx)
 	}
 
 	// 1. 首选：使用 Gemini 多模态服务生成元数据
@@ -117,7 +164,7 @@ func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
 	// 如果配置了视频分析，尝试使用视频文件
 	if g.App.Config.GeminiConfig.AnalyzeVideo {
 		g.App.Logger.Info("🎬 尝试 Gemini 视频分析模式...")
-		if success := g.executeWithGeminiVideo(context); success {
+		if success := g.executeWithGeminiVideo(ctx); success {
 			return true
 		}
 		g.App.Logger.Warn("⚠️ Gemini 视频分析失败，回退到文本模式")
@@ -125,13 +172,13 @@ func (g *GenerateMetadata) Execute(context map[string]interface{}) bool {
 
 	// 使用 Gemini 处理字幕文本
 	g.App.Logger.Info("📝 尝试 Gemini 文本分析模式...")
-	if success := g.executeWithGeminiText(context); success {
+	if success := g.executeWithGeminiText(ctx); success {
 		return true
 	}
 
 	// 2. Gemini 失败时，使用备选AI服务
 	g.App.Logger.Warn("⚠️ Gemini 分析失败，尝试备选AI服务...")
-	return g.executeWithFallbackAI(context)
+	return g.executeWithFallbackAI(ctx)
 }
 
 // executeWithFallbackAI 使用备选AI服务生成元数据（当Gemini不可用时）

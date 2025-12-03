@@ -33,31 +33,37 @@ type staticHandler struct {
 
 func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	
+
 	// 如果路径为空，提供 index.html
 	if path == "" {
 		path = "index.html"
 	}
-	
-	// 对于 SPA 路由，如果文件不存在且不是 API 请求，返回 index.html
+
+	// 对于 SPA 路由，如果文件不存在且不是 API 请求，尝试找到正确的文件
 	if !strings.HasPrefix(path, "api/") && !strings.HasPrefix(path, "_next/") {
 		if _, err := fs.Stat(h.fs, path); err != nil {
 			// 文件不存在，检查是否有相应的 HTML 文件
 			if !strings.HasSuffix(path, ".html") && !strings.Contains(path, ".") {
-				// 尝试添加 .html 后缀
-				htmlPath := path + ".html"
-				if _, err := fs.Stat(h.fs, htmlPath); err == nil {
-					path = htmlPath
+				// 尝试 path/index.html (Next.js 静态导出格式)
+				indexPath := path + "/index.html"
+				if _, err := fs.Stat(h.fs, indexPath); err == nil {
+					path = indexPath
 				} else {
-					// 回退到 index.html (SPA 路由)
-					path = "index.html"
+					// 尝试添加 .html 后缀
+					htmlPath := path + ".html"
+					if _, err := fs.Stat(h.fs, htmlPath); err == nil {
+						path = htmlPath
+					} else {
+						// 回退到 index.html (SPA 路由)
+						path = "index.html"
+					}
 				}
 			} else {
 				path = "index.html"
 			}
 		}
 	}
-	
+
 	// 设置正确的 Content-Type
 	ext := filepath.Ext(path)
 	switch ext {
@@ -80,7 +86,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case ".ico":
 		w.Header().Set("Content-Type", "image/x-icon")
 	}
-	
+
 	// 提供文件
 	http.FileServer(http.FS(h.fs)).ServeHTTP(w, r)
 }

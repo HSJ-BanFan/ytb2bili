@@ -32,11 +32,20 @@ build/
 .next/
 */_next/
 web/output/
+web/out/
 internal/web/bili-up-web/_next/
+
+# 编译产物
+*.exe
+*.exe~
 
 # 依赖
 node_modules/
 vendor/
+
+# local demos (keep private)
+nextjs-learn-demos/
+xianyu-auto-reply/
 
 output/
 # 临时文件

@@ -48,11 +48,12 @@ type User struct {
 	BaseModel
 	Username    string     `gorm:"uniqueIndex;size:50;not null" json:"username"`
 	Email       string     `gorm:"uniqueIndex;size:100" json:"email"`
-	Phone       string     `gorm:"uniqueIndex;size:20" json:"phone"`
-	Password    string     `gorm:"size:100;not null" json:"-"`
+	Phone       string     `gorm:"size:20" json:"phone"`
+	Password    string     `gorm:"size:100" json:"-"` // B站用户可为空
 	Avatar      string     `gorm:"size:255" json:"avatar"`
 	Status      int        `gorm:"default:1" json:"status"` // 1:正常 0:禁用
 	LastLoginAt *time.Time `json:"last_login_at"`
+	BiliMid     string     `gorm:"uniqueIndex;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号
 
 	// 会员系统字段
 	MembershipTier   string     `gorm:"size:20;default:free" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
@@ -99,6 +100,7 @@ type SavedVideo struct {
 	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"`             // 播放列表ID
 	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`                      // 时间戳
 	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`                       // 保存时间
+	UserID         uint   `gorm:"index" json:"user_id"`                                   // 提交用户ID
 }
 
 // TableName 指定表名

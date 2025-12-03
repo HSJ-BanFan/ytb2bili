@@ -1,35 +1,28 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown } from 'lucide-react';
 import { MembershipCard, QuotaDisplay, UpgradeModal } from '@/components/membership';
-
-interface UserInfo {
-  id: string;
-  name: string;
-  mid: string;
-  avatar?: string;
-}
+import { useJWTAuth } from '@/hooks/useJWTAuth';
 
 interface AppLayoutProps {
   children: React.ReactNode;
+  userName?: string;
+  onLogout?: () => void;
 }
 
-interface AppLayoutWithAuthProps extends AppLayoutProps {
-  user: UserInfo;
-  onLogout: () => void;
-}
-
-export default function AppLayout({ children, user, onLogout }: AppLayoutWithAuthProps) {
+export default function AppLayout({ children, userName, onLogout }: AppLayoutProps) {
+  const { user: jwtUser, logout: jwtLogout } = useJWTAuth();
   const pathname = usePathname();
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
-  // 已登录状态 - 显示完整的应用布局
+  const displayName = userName || jwtUser?.username || '用户';
+  const handleLogout = onLogout || jwtLogout;
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* 顶部导航 */}
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
@@ -40,7 +33,6 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
             </div>
             
             <div className="flex items-center space-x-4">
-              {/* 配额显示 */}
               <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
                 <span className="text-xs text-gray-500">配额</span>
                 <QuotaDisplay compact />
@@ -48,11 +40,11 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
 
               <div className="flex items-center space-x-2 text-sm text-gray-600">
                 <User className="w-4 h-4" />
-                <span>{user.name}</span>
+                <span>{displayName}</span>
               </div>
               
               <button
-                onClick={onLogout}
+                onClick={handleLogout}
                 className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 hover:text-red-600 transition-colors"
               >
                 <LogOut className="w-4 h-4" />
@@ -65,114 +57,55 @@ export default function AppLayout({ children, user, onLogout }: AppLayoutWithAut
 
       <div className="container mx-auto px-4 py-8">
         <div className="flex gap-8">
-          {/* 侧边栏 */}
           <div className="w-64 flex-shrink-0">
             <nav className="bg-white rounded-lg shadow-sm p-4">
               <ul className="space-y-2">
                 <li>
-                  <Link
-                    href="/"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <User className="w-5 h-5" />
                     <span>主页</span>
                   </Link>
                 </li>
-                
                 <li>
-                  <Link
-                    href="/dashboard"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/dashboard'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/dashboard" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/dashboard' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <BarChart3 className="w-5 h-5" />
                     <span>任务队列</span>
                   </Link>
                 </li>
-                
                 <li>
-                  <Link
-                    href="/schedule"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/schedule'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/schedule" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/schedule' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Clock className="w-5 h-5" />
                     <span>定时上传</span>
                   </Link>
                 </li>
-                
                 <li>
-                  <Link
-                    href="/extension"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/extension'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/extension" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/extension' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Puzzle className="w-5 h-5" />
                     <span>浏览器插件</span>
                   </Link>
                 </li>
-                
                 <li>
-                  <Link
-                    href="/membership"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/membership'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/membership" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/membership' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Crown className="w-5 h-5" />
                     <span>会员中心</span>
                   </Link>
                 </li>
-
                 <li>
-                  <Link
-                    href="/settings"
-                    className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${
-                      pathname === '/settings'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
+                  <Link href="/settings" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/settings' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Settings className="w-5 h-5" />
                     <span>设置</span>
                   </Link>
                 </li>
               </ul>
             </nav>
-
-            {/* 会员信息卡片 */}
             <div className="mt-4">
               <MembershipCard onUpgradeClick={() => setShowUpgradeModal(true)} />
             </div>
           </div>
-
-          {/* 主内容区 */}
-          <div className="flex-1">
-            {children}
-          </div>
+          <div className="flex-1">{children}</div>
         </div>
       </div>
-
-      {/* 升级弹窗 */}
-      <UpgradeModal 
-        isOpen={showUpgradeModal} 
-        onClose={() => setShowUpgradeModal(false)} 
-      />
+      <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </div>
   );
 }

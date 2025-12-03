@@ -131,6 +131,10 @@ func (m *UserMembership) IsExpired() bool {
 	if m.Tier == TierFree {
 		return false // 免费用户永不过期
 	}
+	// 如果过期时间为零值，认为是永久会员（不过期）
+	if m.ExpiresAt.IsZero() {
+		return false
+	}
 	return time.Now().After(m.ExpiresAt)
 }
 

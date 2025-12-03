@@ -3,8 +3,10 @@
 import AppLayout from '@/components/layout/AppLayout';
 import QRLogin from '@/components/auth/QRLogin';
 import { useAuth } from '@/hooks/useAuth';
+import { videoApi } from '@/lib/api';
 import { Plus, Youtube, Video, Globe, AlertCircle, CheckCircle } from 'lucide-react';
 import { useState } from 'react';
+import Link from 'next/link';
 
 export default function HomePage() {
   const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
@@ -27,33 +29,16 @@ export default function HomePage() {
     setMessageType('');
 
     try {
-      // 获取API基础URL
-      const apiBaseUrl = process.env.NODE_ENV === 'development' 
-        ? '/api/v1'  // 开发模式下使用代理
-        : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8096/api/v1';
-      
-      const response = await fetch(`${apiBaseUrl}/submit`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: videoUrl,
-          title: '', // 可以为空，后端会自动提取
-          description: '',
-          operationType: '1', // 默认操作类型
-          subtitles: [],
-          playlistId: '',
-          timestamp: new Date().toISOString(),
-          savedAt: new Date().toISOString(),
-        }),
+      // 使用配置了 JWT 认证的 API 实例
+      const result = await videoApi.submitVideo({
+        url: videoUrl,
+        title: '',
+        subtitles: [],
       });
 
-      const result = await response.json();
-
-      if (result.success) {
+      if (result.code === 0 || result.data) {
         setMessageType('success');
-        setSubmitMessage(`视频链接已成功提交！${result.data?.isExisting ? '(更新了现有记录)' : ''}`);
+        setSubmitMessage('视频链接已成功提交！');
         setVideoUrl(''); // 清空输入框
       } else {
         setMessageType('error');
@@ -103,7 +88,33 @@ export default function HomePage() {
               </p>
             </div>
             
+            {/* 登录方式选择 */}
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
+              <h2 className="text-lg font-semibold text-center mb-4">选择登录方式</h2>
+              
+              {/* 账号密码登录 */}
+              <Link 
+                href="/login"
+                className="w-full flex items-center justify-center px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors mb-3"
+              >
+                📧 账号密码登录
+              </Link>
+              
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-white text-gray-500">或</span>
+                </div>
+              </div>
+            </div>
+
+            {/* B站扫码登录 */}
             <div className="bg-white rounded-lg shadow-lg">
+              <div className="p-4 border-b">
+                <h3 className="text-center font-medium text-gray-700">B站扫码登录</h3>
+              </div>
               <QRLogin 
                 onLoginSuccess={handleLoginSuccess}
                 onRefreshStatus={handleRefreshStatus}
@@ -116,7 +127,7 @@ export default function HomePage() {
   }
 
   return (
-    <AppLayout user={user} onLogout={handleLogout}>
+    <AppLayout userName={user?.name} onLogout={handleLogout}>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* 主要功能区域 - 视频链接提交 */}
         <div className="bg-white rounded-lg shadow-md p-8">

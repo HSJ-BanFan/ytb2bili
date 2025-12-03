@@ -197,6 +197,7 @@ func main() {
 			analyticsMiddleware *analytics.Middleware,
 			analyticsClient *analytics.Client,
 			membershipHandler *membership.MembershipHandler,
+			membershipStore membership.MembershipStore,
 			authHandler *auth.AuthHandler,
 			authMiddleware *auth.AuthMiddleware,
 		) {
@@ -210,7 +211,7 @@ func main() {
 			}
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, authHandler, authMiddleware)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -429,6 +430,7 @@ func registerHandlers(
 	uploadScheduler *chain_task.UploadScheduler,
 	analyticsClient *analytics.Client,
 	membershipHandler *membership.MembershipHandler,
+	membershipStore membership.MembershipStore,
 	authHandler *auth.AuthHandler,
 	authMiddleware *auth.AuthMiddleware,
 ) {
@@ -453,10 +455,10 @@ func registerHandlers(
 	categoryHandler.RegisterRoutes(server)
 	logger.Info("✓ Category routes registered")
 
-	// 字幕 Handler
-	subtitleHandler := handler.NewSubtitleHandler(server)
+	// 字幕 Handler（需要 JWT 认证）
+	subtitleHandler := handler.NewSubtitleHandler(server, membershipStore, authMiddleware.JWTAuth)
 	subtitleHandler.RegisterRoutes(server)
-	logger.Info("✓ Subtitle routes registered")
+	logger.Info("✓ Subtitle routes registered (JWT protected)")
 
 	// 分析 Handler
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsClient, logger)
@@ -475,8 +477,10 @@ func registerHandlers(
 	configHandler.RegisterRoutes(server)
 	logger.Info("✓ Config routes registered")
 
-	// 会员 Handler
-	membershipHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
+	// 会员 Handler（使用可选 JWT 中间件获取用户 ID）
+	membershipGroup := server.Engine.Group("/api/v1")
+	membershipGroup.Use(authMiddleware.OptionalJWTAuth())
+	membershipHandler.RegisterRoutes(membershipGroup)
 	logger.Info("✓ Membership routes registered")
 
 	logger.Info("All handlers registered successfully")

@@ -569,8 +569,11 @@ const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[
                     {step.status}
                   </span>
                 </div>
-                {step.error_msg && (
+                {step.error_msg && step.status === 'failed' && (
                   <p className="text-xs text-red-600 mt-1">错误: {step.error_msg}</p>
+                )}
+                {step.error_msg && step.status === 'skipped' && (
+                  <p className="text-xs text-yellow-600 mt-1">⚠️ 已跳过: {step.error_msg}</p>
                 )}
               </div>
               {step.can_retry && (

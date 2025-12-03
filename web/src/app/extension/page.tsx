@@ -86,7 +86,7 @@ export default function ExtensionPage() {
   }
 
   return (
-    <AppLayout user={user} onLogout={handleLogout}>
+    <AppLayout userName={user?.name} onLogout={handleLogout}>
       <div className="space-y-6">
         {/* 插件介绍 */}
         <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border border-purple-200 p-6">

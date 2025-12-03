@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/difyz9/ytb2bili/internal/core"
+	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 
@@ -15,12 +17,18 @@ import (
 
 type SubtitleHandler struct {
 	BaseHandler
+	quotaService   *membership.QuotaService
+	featureChecker *membership.FeatureChecker
+	jwtMiddleware  func() gin.HandlerFunc
 }
 
-func NewSubtitleHandler(app *core.AppServer) *SubtitleHandler {
-
+func NewSubtitleHandler(app *core.AppServer, membershipStore membership.MembershipStore, jwtMiddleware func() gin.HandlerFunc) *SubtitleHandler {
+	checker := membership.NewFeatureChecker(membershipStore)
 	return &SubtitleHandler{
-		BaseHandler: BaseHandler{App: app},
+		BaseHandler:    BaseHandler{App: app},
+		quotaService:   membership.NewQuotaService(membershipStore, checker),
+		featureChecker: checker,
+		jwtMiddleware:  jwtMiddleware,
 	}
 }
 
@@ -44,6 +52,59 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 			"message": "Invalid request parameters: " + err.Error(),
 		})
 		return
+	}
+
+	// 获取用户ID（从 JWT context 获取，JWT 中间件已验证）
+	var userID string
+	var userIDUint uint
+	if uid, exists := c.Get("user_id"); exists {
+		switch v := uid.(type) {
+		case uint:
+			userID = fmt.Sprintf("%d", v)
+			userIDUint = v
+		case string:
+			userID = v
+			if parsed, err := strconv.ParseUint(v, 10, 64); err == nil {
+				userIDUint = uint(parsed)
+			}
+		default:
+			userID = fmt.Sprintf("%v", v)
+		}
+	}
+
+	// 如果没有用户ID，说明 JWT 认证失败（理论上不会到这里，因为中间件会拦截）
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "请先登录",
+			"code":    "UNAUTHORIZED",
+		})
+		return
+	}
+
+	fmt.Printf("📋 视频提交请求 - UserID: '%s', URL: %s\n", userID, req.URL)
+
+	// 检查配额
+	if h.quotaService != nil {
+		quotaInfo, err := h.quotaService.GetQuotaInfo(c.Request.Context(), userID)
+		if err == nil && !quotaInfo.IsUnlimited && quotaInfo.TotalRemaining <= 0 {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "配额已用完，请升级会员或购买加油包",
+				"code":    "QUOTA_EXCEEDED",
+			})
+			return
+		}
+	}
+
+	// 检查 AI 功能权限（Gemini 视频分析需要 Pro 会员）
+	// 注意：这里只是警告，不阻止提交，因为基础功能（下载、字幕）不需要会员
+	if h.featureChecker != nil {
+		geminiCheck := h.featureChecker.CanUseFeature(c.Request.Context(), userID, "gemini_video_analysis")
+		if !geminiCheck.Allowed {
+			fmt.Printf("⚠️ 用户 %s 没有 Gemini 视频分析权限: %s (建议升级到: %s)\n", userID, geminiCheck.Reason, geminiCheck.Upgrade)
+			// 不阻止提交，但在日志中记录，任务执行时会跳过 AI 元数据生成
+		}
 	}
 
 	fmt.Println("Received saveVideoSubtitles request for URL:", req.URL)
@@ -100,6 +161,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 		existingVideo.SavedAt = req.SavedAt
 		existingVideo.Status = "001"               // 重置状态为待处理
 		existingVideo.DeletedAt = gorm.DeletedAt{} // 恢复记录（清除删除标记）
+		existingVideo.UserID = userIDUint          // 更新提交用户ID
 
 		// 更新到数据库（使用 Unscoped 以便更新已删除的记录）
 		if err := h.App.DB.Unscoped().Save(&existingVideo).Error; err != nil {
@@ -128,6 +190,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 			PlaylistID:    req.PlaylistID,
 			Timestamp:     req.Timestamp,
 			SavedAt:       req.SavedAt,
+			UserID:        userIDUint, // 保存提交用户ID
 		}
 
 		// 保存到数据库
@@ -151,6 +214,15 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 	// 计算字幕数量
 	subtitleCount := len(req.Subtitles)
 
+	// 消耗配额（仅对新视频，不是更新已存在的视频）
+	if !isExisting && userID != "" && h.quotaService != nil {
+		if err := h.quotaService.ConsumeQuota(c.Request.Context(), userID); err != nil {
+			fmt.Printf("⚠️ 消耗配额失败: %v\n", err)
+		} else {
+			fmt.Printf("✅ 已消耗用户 %s 的配额\n", userID)
+		}
+	}
+
 	message := "Video saved successfully"
 	if isExisting {
 		message = "Video updated successfully"
@@ -173,5 +245,10 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 func (h *SubtitleHandler) RegisterRoutes(server *core.AppServer) {
 	api := server.Engine.Group("/api/v1")
 
-	api.POST("/submit", h.saveVideoSubtitles)
+	// /submit 接口需要 JWT 认证
+	if h.jwtMiddleware != nil {
+		api.POST("/submit", h.jwtMiddleware(), h.saveVideoSubtitles)
+	} else {
+		api.POST("/submit", h.saveVideoSubtitles)
+	}
 }

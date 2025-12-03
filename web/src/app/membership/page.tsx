@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { membershipApi } from '@/lib/api';
 import { MembershipCard, QuotaDisplay, BoostPackCard, UpgradeModal } from '@/components/membership';
+import AppLayout from '@/components/layout/AppLayout';
+import { useAuth } from '@/hooks/useAuth';
 import type { MembershipInfo, TierConfig, AvailableFeatures } from '@/types';
 
 const FEATURE_NAMES: Record<string, string> = {
@@ -19,19 +21,22 @@ const FEATURE_NAMES: Record<string, string> = {
 };
 
 export default function MembershipPage() {
+  const { user, loading: authLoading, handleLogout } = useAuth();
   const [membership, setMembership] = useState<MembershipInfo | null>(null);
   const [tiers, setTiers] = useState<TierConfig[]>([]);
   const [features, setFeatures] = useState<AvailableFeatures | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
 
   const fetchData = async () => {
     try {
-      setLoading(true);
+      setDataLoading(true);
       const [membershipRes, tiersRes, featuresRes] = await Promise.all([
         membershipApi.getMembershipInfo(),
         membershipApi.getAllTiers(),
@@ -44,26 +49,24 @@ export default function MembershipPage() {
     } catch (err) {
       console.error('获取会员信息失败:', err);
     } finally {
-      setLoading(false);
+      setDataLoading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="h-48 bg-gray-200 rounded-lg"></div>
-            <div className="h-48 bg-gray-200 rounded-lg"></div>
+  return (
+    <AppLayout userName={user?.name} onLogout={handleLogout}>
+      {(authLoading || dataLoading) ? (
+        <div className="space-y-6">
+          <div className="animate-pulse">
+            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="h-48 bg-gray-200 rounded-lg"></div>
+              <div className="h-48 bg-gray-200 rounded-lg"></div>
+            </div>
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
+      ) : (
+      <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">会员中心</h1>
         {membership?.tier === 'free' && (
@@ -203,6 +206,8 @@ export default function MembershipPage() {
         onClose={() => setShowUpgrade(false)}
         currentTier={membership?.tier}
       />
-    </div>
+      </div>
+      )}
+    </AppLayout>
   );
 }

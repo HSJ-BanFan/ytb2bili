@@ -177,9 +177,16 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
                     </div>
 
                     {/* 错误信息 */}
-                    {step.error_msg && (
+                    {step.error_msg && step.status === 'failed' && (
                       <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
                         {step.error_msg}
+                      </div>
+                    )}
+
+                    {/* 跳过原因（会员限制等） */}
+                    {step.error_msg && step.status === 'skipped' && (
+                      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                        <span className="font-medium">⚠️ 已跳过：</span>{step.error_msg}
                       </div>
                     )}
 

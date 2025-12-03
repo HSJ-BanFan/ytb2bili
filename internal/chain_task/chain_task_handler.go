@@ -203,7 +203,7 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
 
 	// 任务4: 生成视频标题和描述（动态检查配置）
-	metadataTask := handlers.NewGenerateMetadata("生成视频元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
+	metadataTask := handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(metadataTask, video.VideoId))
 
 	// 注意: 上传任务已移至 UploadScheduler 定时执行
@@ -391,19 +391,29 @@ func (w *TaskStepWrapper) Execute(context map[string]interface{}) bool {
 
 	// 更新步骤状态
 	if success {
-		if err := w.taskStepService.UpdateTaskStepStatus(w.videoID, stepName, "completed"); err != nil {
-			w.logger.Errorf("更新任务步骤状态失败: %v", err)
-		}
-
-		// 保存执行结果
-		result := map[string]interface{}{}
-		for k, v := range context {
-			if k != "error" { // 排除错误信息
-				result[k] = v
+		// 检查是否是跳过状态（权限不足等原因）
+		if skipReason, skipped := context["skipped"]; skipped {
+			skipMsg := fmt.Sprintf("%v", skipReason)
+			if err := w.taskStepService.UpdateTaskStepStatus(w.videoID, stepName, "skipped", skipMsg); err != nil {
+				w.logger.Errorf("更新任务步骤状态失败: %v", err)
 			}
-		}
-		if err := w.taskStepService.UpdateTaskStepResult(w.videoID, stepName, result); err != nil {
-			w.logger.Errorf("更新任务步骤结果失败: %v", err)
+			// 清除 skipped 标记，避免影响后续任务
+			delete(context, "skipped")
+		} else {
+			if err := w.taskStepService.UpdateTaskStepStatus(w.videoID, stepName, "completed"); err != nil {
+				w.logger.Errorf("更新任务步骤状态失败: %v", err)
+			}
+
+			// 保存执行结果
+			result := map[string]interface{}{}
+			for k, v := range context {
+				if k != "error" { // 排除错误信息
+					result[k] = v
+				}
+			}
+			if err := w.taskStepService.UpdateTaskStepResult(w.videoID, stepName, result); err != nil {
+				w.logger.Errorf("更新任务步骤结果失败: %v", err)
+			}
 		}
 	} else {
 		errorMsg := ""

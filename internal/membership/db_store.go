@@ -19,8 +19,47 @@ func NewDBMembershipStore(db *gorm.DB) *DBMembershipStore {
 	return &DBMembershipStore{db: db}
 }
 
+// ensureUserExists 确保用户存在，如果不存在则自动创建免费会员
+func (s *DBMembershipStore) ensureUserExists(ctx context.Context, userID string) error {
+	var count int64
+	s.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).Count(&count)
+	if count > 0 {
+		return nil // 用户已存在
+	}
+
+	// 自动创建免费会员用户
+	now := time.Now()
+	username := fmt.Sprintf("bili_%s", userID)
+	email := fmt.Sprintf("%s@bilibili.user", userID)
+
+	// 使用原始 SQL 插入，因为 ID 是 B站的 MID（大数字）
+	// password 字段是 NOT NULL，使用空字符串占位（B站用户不需要密码）
+	result := s.db.WithContext(ctx).Exec(
+		`INSERT INTO cw_users (id, username, email, password, status, membership_tier, created_at, updated_at, daily_usage_count, boost_pack_videos) 
+		 VALUES (?, ?, ?, '', 1, 'free', ?, ?, 0, 0)`,
+		userID, username, email, now, now,
+	)
+	if result.Error != nil {
+		return fmt.Errorf("创建用户失败: %w", result.Error)
+	}
+
+	fmt.Printf("✅ 自动创建会员用户: %s\n", userID)
+	return nil
+}
+
 // GetUserMembership 获取用户会员状态
 func (s *DBMembershipStore) GetUserMembership(ctx context.Context, userID string) (*UserMembership, error) {
+	// 确保用户存在
+	if err := s.ensureUserExists(ctx, userID); err != nil {
+		// 如果创建失败，仍然返回默认免费会员（不阻塞流程）
+		return &UserMembership{
+			UserID:    userID,
+			Tier:      TierFree,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}, nil
+	}
+
 	var user model.User
 	err := s.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error
 	if err == gorm.ErrRecordNotFound {

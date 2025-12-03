@@ -1,15 +1,22 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/difyz9/ytb2bili/internal/storage"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+// GetBiliStore 获取B站登录存储
+func GetBiliStore() *storage.LoginStore {
+	return storage.GetDefaultStore()
+}
 
 // AuthHandler 认证处理器
 type AuthHandler struct {
@@ -35,6 +42,7 @@ func (h *AuthHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		userAuth.POST("/register", h.Register)
 		userAuth.POST("/login", h.Login)
 		userAuth.POST("/refresh", h.RefreshToken)
+		userAuth.GET("/exchange-token", h.ExchangeBiliSessionForJWT) // B站Session换JWT
 	}
 
 	// 需要认证的路由
@@ -114,9 +122,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	if err := h.db.Create(&user).Error; err != nil {
+		fmt.Printf("❌ 创建用户失败: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
-			"message": "创建用户失败",
+			"message": "创建用户失败: " + err.Error(),
 		})
 		return
 	}
@@ -345,6 +354,102 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			"tier":              user.MembershipTier,
 			"membership_expire": user.MembershipExpire,
 			"created_at":        user.CreatedAt,
+		},
+	})
+}
+
+// ExchangeBiliSessionForJWT B站Session换取JWT Token
+// 当用户通过B站扫码登录后，调用此接口获取JWT Token
+func (h *AuthHandler) ExchangeBiliSessionForJWT(c *gin.Context) {
+	// 1. 从 storage 获取 B站登录信息
+	store := GetBiliStore()
+	if store == nil || !store.IsValid() {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "B站未登录，请先扫码登录",
+		})
+		return
+	}
+
+	// 2. 获取B站用户信息
+	biliUserInfo, err := store.GetUserInfo()
+	if err != nil || biliUserInfo == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    401,
+			"message": "无法获取B站用户信息",
+		})
+		return
+	}
+
+	// 3. 查找或创建对应的 JWT 用户
+	biliMid := fmt.Sprintf("%d", biliUserInfo.Mid)
+	biliUsername := biliUserInfo.Name
+	if biliUsername == "" {
+		biliUsername = fmt.Sprintf("bili_%s", biliMid)
+	}
+
+	var user model.User
+	// 先按 bili_mid 查找
+	err = h.db.Where("bili_mid = ?", biliMid).First(&user).Error
+	if err != nil {
+		// 用户不存在，创建新用户
+		user = model.User{
+			Username:       biliUsername,
+			Email:          fmt.Sprintf("%s@bilibili.local", biliMid), // 虚拟邮箱
+			Password:       "",                                        // B站用户无需密码
+			Status:         1,
+			MembershipTier: "free",
+			Avatar:         biliUserInfo.Face,
+			BiliMid:        biliMid,
+		}
+
+		// 检查用户名是否已存在，如果存在则添加后缀
+		var existingUser model.User
+		if h.db.Where("username = ?", user.Username).First(&existingUser).Error == nil {
+			user.Username = fmt.Sprintf("%s_%s", biliUsername, biliMid[:4])
+		}
+
+		if err := h.db.Create(&user).Error; err != nil {
+			fmt.Printf("❌ 创建B站关联用户失败: %v\n", err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    500,
+				"message": "创建用户失败: " + err.Error(),
+			})
+			return
+		}
+		fmt.Printf("✅ 创建B站关联用户成功: %s (ID: %d, BiliMid: %s)\n", user.Username, user.ID, biliMid)
+	} else {
+		// 用户已存在，更新头像
+		if biliUserInfo.Face != "" && user.Avatar != biliUserInfo.Face {
+			h.db.Model(&user).Update("avatar", biliUserInfo.Face)
+		}
+	}
+
+	// 4. 生成 JWT Token
+	appID := GetAppID(c)
+	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.MembershipTier, appID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "生成 Token 失败",
+		})
+		return
+	}
+
+	// 5. 返回给前端
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Token 换取成功",
+		"data": gin.H{
+			"token": tokenPair,
+			"user": gin.H{
+				"id":       user.ID,
+				"username": user.Username,
+				"email":    user.Email,
+				"avatar":   user.Avatar,
+				"tier":     user.MembershipTier,
+				"bili_mid": user.BiliMid,
+			},
 		},
 	})
 }
