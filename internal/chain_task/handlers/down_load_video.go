@@ -86,9 +86,17 @@ func (t *DownloadVideo) getVideoURL() string {
 
 func (t *DownloadVideo) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Info("========================================")
-	t.App.Logger.Info("DownloadVideo Handler Version: with-cookies-support-v3") // 版本标记
+	t.App.Logger.Info("DownloadVideo Handler Version: with-cookies-support-v4") // 版本标记
 	t.App.Logger.Infof("开始下载视频: %s", t.StateManager.VideoID)
 	t.App.Logger.Info("========================================")
+
+	// 0. 检查视频文件是否已存在且完整
+	if existingVideo := t.checkExistingVideo(); existingVideo != "" {
+		t.App.Logger.Infof("✅ 视频文件已存在: %s", existingVideo)
+		t.App.Logger.Info("✅ 跳过下载，直接标记为完成")
+		context["video_path"] = existingVideo
+		return true
+	}
 
 	// 1. 查找 yt-dlp 可执行文件
 	ytdlpPath, err := t.findYtDlp()
@@ -228,21 +236,45 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 	}
 
 	// 检查是否存在 cookies.txt
-	configDir := filepath.Dir(t.App.Config.Path)
-	cookiesPath := filepath.Join(configDir, "cookies.txt")
+	// 尝试多个可能的位置
+	var cookiesPath string
+	possiblePaths := []string{}
 
-	// 如果配置文件目录下的 cookies.txt 不存在，尝试当前目录
-	if _, err := os.Stat(cookiesPath); err != nil {
-		cookiesPath = "cookies.txt"
+	// 1. 配置文件目录
+	if t.App.Config != nil && t.App.Config.Path != "" {
+		configDir := filepath.Dir(t.App.Config.Path)
+		possiblePaths = append(possiblePaths, filepath.Join(configDir, "cookies.txt"))
 	}
 
-	if _, err := os.Stat(cookiesPath); err == nil {
+	// 2. 可执行文件目录
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		possiblePaths = append(possiblePaths, filepath.Join(exeDir, "cookies.txt"))
+	}
+
+	// 3. 当前工作目录
+	if cwd, err := os.Getwd(); err == nil {
+		possiblePaths = append(possiblePaths, filepath.Join(cwd, "cookies.txt"))
+	}
+
+	// 4. 相对路径
+	possiblePaths = append(possiblePaths, "cookies.txt")
+
+	// 查找第一个存在的 cookies 文件
+	for _, p := range possiblePaths {
+		if _, err := os.Stat(p); err == nil {
+			cookiesPath = p
+			break
+		}
+	}
+
+	if cookiesPath != "" {
 		absPath, _ := filepath.Abs(cookiesPath)
 		command = append(command, "--cookies", absPath)
 		t.App.Logger.Infof("🍪 使用 Cookies 文件: %s", absPath)
 	} else {
 		// 如果没有 cookies 文件，尝试从浏览器读取（Chrome 优先）
-		t.App.Logger.Info("🍪 未找到 cookies 文件，尝试从浏览器读取...")
+		t.App.Logger.Warnf("🍪 未找到 cookies 文件，尝试的路径: %v", possiblePaths)
 		command = append(command, "--cookies-from-browser", "chrome")
 		t.App.Logger.Info("🍪 将从 Chrome 浏览器读取 cookies")
 		t.App.Logger.Warn("⚠️ 未找到 cookies.txt，可能会遇到 'Sign in to confirm you're not a bot' 错误")
@@ -296,11 +328,32 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 	var lastOutput strings.Builder
 	var lastProgressTime int64
 
+	// 自定义分割函数，同时处理 \n 和 \r
+	splitFunc := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		// 查找 \n 或 \r
+		for i := 0; i < len(data); i++ {
+			if data[i] == '\n' || data[i] == '\r' {
+				return i + 1, data[0:i], nil
+			}
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	}
+
 	// 实时读取输出并收集错误信息
 	go func() {
 		scanner := bufio.NewScanner(stdout)
+		scanner.Split(splitFunc)
 		for scanner.Scan() {
 			line := scanner.Text()
+			if line == "" {
+				continue
+			}
 			t.logDownloadProgress(line, &lastProgressTime)
 			lastOutput.WriteString(line + "\n")
 		}
@@ -308,8 +361,12 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 
 	go func() {
 		scanner := bufio.NewScanner(stderr)
+		scanner.Split(splitFunc)
 		for scanner.Scan() {
 			line := scanner.Text()
+			if line == "" {
+				continue
+			}
 			t.logDownloadProgress(line, &lastProgressTime)
 			errorOutput.WriteString(line + "\n")
 			lastOutput.WriteString(line + "\n")
@@ -578,17 +635,21 @@ func (t *DownloadVideo) logDownloadProgress(line string, lastProgressTime *int64
 		return
 	}
 
-	// yt-dlp 进度格式: [download]  10.5% of 500.00MiB at 1.50MiB/s ETA 05:30
-	ytdlpRegex := regexp.MustCompile(`\[download\]\s+([0-9.]+)%\s+of\s+~?([0-9.]+[KMGT]?i?B)\s+at\s+([0-9.]+[KMGT]?i?B/s)(?:\s+ETA\s+([0-9:]+))?`)
-	if matches := ytdlpRegex.FindStringSubmatch(line); len(matches) >= 4 {
+	// yt-dlp 进度格式: [download]  10.5% of  239.12MiB at    4.62MiB/s ETA 00:42
+	// 也可能是: [download]   8.3% of  239.12MiB at  Unknown B/s ETA Unknown
+	ytdlpRegex := regexp.MustCompile(`\[download\]\s+([0-9.]+)%\s+of\s+~?\s*([0-9.]+\s*[KMGT]?i?B)\s+at\s+(.+?)\s+ETA\s+(.+)`)
+	if matches := ytdlpRegex.FindStringSubmatch(line); len(matches) >= 5 {
 		if now-*lastProgressTime >= 3 {
 			*lastProgressTime = now
 			percent := matches[1]
-			total := matches[2]
-			speed := matches[3]
-			eta := "计算中"
-			if len(matches) >= 5 && matches[4] != "" {
-				eta = matches[4]
+			total := strings.TrimSpace(matches[2])
+			speed := strings.TrimSpace(matches[3])
+			eta := strings.TrimSpace(matches[4])
+			if speed == "Unknown B/s" {
+				speed = "计算中"
+			}
+			if strings.HasPrefix(eta, "Unkn") {
+				eta = "计算中"
 			}
 			t.App.Logger.Infof("📥 下载进度: %s%% of %s | 速度: %s | 剩余时间: %s",
 				percent, total, speed, eta)
@@ -638,4 +699,62 @@ func (t *DownloadVideo) logDownloadProgress(line string, lastProgressTime *int64
 
 	// 其他信息使用 Debug 级别
 	t.App.Logger.Debug(line)
+}
+
+// checkExistingVideo 检查视频文件是否已存在且完整
+// 返回视频文件路径，如果不存在或不完整则返回空字符串
+func (t *DownloadVideo) checkExistingVideo() string {
+	videoID := t.StateManager.VideoID
+	currentDir := t.StateManager.CurrentDir
+
+	// 检查目录是否存在
+	if _, err := os.Stat(currentDir); os.IsNotExist(err) {
+		return ""
+	}
+
+	// 支持的视频格式
+	videoExtensions := []string{".mp4", ".mkv", ".webm", ".flv", ".avi", ".mov"}
+
+	// 查找匹配的视频文件
+	for _, ext := range videoExtensions {
+		// 尝试精确匹配: VideoID.ext
+		exactPath := filepath.Join(currentDir, videoID+ext)
+		if info, err := os.Stat(exactPath); err == nil && !info.IsDir() {
+			// 检查文件大小是否合理（至少 1MB，排除空文件或损坏文件）
+			if info.Size() > 1024*1024 {
+				t.App.Logger.Infof("📁 找到已存在的视频文件: %s (%.2f MB)", exactPath, float64(info.Size())/(1024*1024))
+				return exactPath
+			}
+		}
+	}
+
+	// 使用 glob 模式查找包含 VideoID 的视频文件
+	for _, ext := range videoExtensions {
+		pattern := filepath.Join(currentDir, "*"+videoID+"*"+ext)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			// 排除 .part 文件（未完成的下载）
+			if strings.HasSuffix(match, ".part") {
+				continue
+			}
+			if info, err := os.Stat(match); err == nil && !info.IsDir() {
+				// 检查文件大小是否合理
+				if info.Size() > 1024*1024 {
+					t.App.Logger.Infof("📁 找到已存在的视频文件: %s (%.2f MB)", match, float64(info.Size())/(1024*1024))
+					return match
+				}
+			}
+		}
+	}
+
+	// 检查是否有未完成的下载（.part 文件）
+	partPattern := filepath.Join(currentDir, "*.part")
+	if partMatches, _ := filepath.Glob(partPattern); len(partMatches) > 0 {
+		t.App.Logger.Infof("📥 发现未完成的下载文件，将继续下载...")
+	}
+
+	return ""
 }

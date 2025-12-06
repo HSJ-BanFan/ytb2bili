@@ -3,18 +3,25 @@ package handler
 import (
 	"bytes"
 	"fmt"
-	"github.com/difyz9/bilibili-go-sdk/bilibili"
-	"github.com/difyz9/ytb2bili/internal/core"
-	"github.com/difyz9/ytb2bili/internal/storage"
 	"image/color"
 	"image/png"
 	"log"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/difyz9/bilibili-go-sdk/bilibili"
+	"github.com/difyz9/ytb2bili/internal/core"
+	"github.com/difyz9/ytb2bili/internal/storage"
 
 	"github.com/gin-gonic/gin"
 	"github.com/skip2/go-qrcode"
 )
+
+// currentTime 返回当前时间
+func currentTime() time.Time {
+	return time.Now()
+}
 
 type AuthHandler struct {
 	BaseHandler
@@ -39,6 +46,13 @@ func (h *AuthHandler) RegisterRoutes(server *core.AppServer) {
 		auth.GET("/status", h.checkLoginStatus)
 		auth.GET("/userinfo", h.getUserInfo)
 		auth.POST("/logout", h.logout)
+
+		// 多账号管理 API
+		auth.GET("/accounts", h.getAccounts)
+		auth.POST("/accounts", h.addAccount)
+		auth.DELETE("/accounts/:mid", h.removeAccount)
+		auth.PUT("/accounts/:mid/enable", h.setAccountEnabled)
+		auth.PUT("/accounts/:mid/primary", h.setPrimaryAccount)
 	}
 }
 
@@ -196,21 +210,28 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 		} else {
 			log.Printf("Warning: Failed to get myinfo: %v", err)
 		}
-	} // 登录成功后自动保存到本地（包括用户信息）
-	store := storage.GetDefaultStore()
-	if userBasicInfo != nil {
-		// 保存登录信息和用户信息
-		if err := store.SaveWithUserInfo(loginInfo, userBasicInfo); err != nil {
-			log.Printf("Warning: Failed to save login info with user info: %v", err)
-			// 回退到只保存登录信息
+	}
+
+	// 保存到多账号存储
+	multiStore := storage.GetMultiAccountStore()
+	account, err := multiStore.AddAccount(loginInfo, userBasicInfo)
+	if err != nil {
+		log.Printf("Warning: Failed to add account to multi-account store: %v", err)
+	} else {
+		log.Printf("Account added/updated in multi-account store (Mid: %d, Name: %s)", account.Mid, account.Name)
+	}
+
+	// 如果是主账号，同时保存到旧的单账号存储（保持向后兼容）
+	if account != nil && account.IsPrimary {
+		store := storage.GetDefaultStore()
+		if userBasicInfo != nil {
+			if err := store.SaveWithUserInfo(loginInfo, userBasicInfo); err != nil {
+				log.Printf("Warning: Failed to save login info with user info: %v", err)
+			}
+		} else {
 			if err := store.Save(loginInfo); err != nil {
 				log.Printf("Warning: Failed to save login info: %v", err)
 			}
-		}
-	} else {
-		// 只保存登录信息
-		if err := store.Save(loginInfo); err != nil {
-			log.Printf("Warning: Failed to save login info: %v", err)
 		}
 	}
 
@@ -457,4 +478,238 @@ func buildCookieString(cookieInfo map[string]interface{}) string {
 	}
 
 	return ""
+}
+
+// ============== 多账号管理 API ==============
+
+// AccountInfo 账号信息（用于 API 响应）
+type AccountInfo struct {
+	ID        string `json:"id"`
+	Mid       int64  `json:"mid"`
+	Name      string `json:"name"`
+	Face      string `json:"face"`
+	IsEnabled bool   `json:"is_enabled"`
+	IsPrimary bool   `json:"is_primary"`
+	IsExpired bool   `json:"is_expired"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// getAccounts 获取所有账号列表
+func (h *AuthHandler) getAccounts(c *gin.Context) {
+	store := storage.GetMultiAccountStore()
+	accounts, err := store.GetAllAccounts()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to get accounts: " + err.Error(),
+		})
+		return
+	}
+
+	// 转换为 API 响应格式
+	var accountInfos []AccountInfo
+	now := currentTime()
+	for _, acc := range accounts {
+		accountInfos = append(accountInfos, AccountInfo{
+			ID:        acc.ID,
+			Mid:       acc.Mid,
+			Name:      acc.Name,
+			Face:      acc.Face,
+			IsEnabled: acc.IsEnabled,
+			IsPrimary: acc.IsPrimary,
+			IsExpired: now.After(acc.ExpiresAt),
+			CreatedAt: acc.CreatedAt.Format("2006-01-02 15:04:05"),
+			ExpiresAt: acc.ExpiresAt.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":     0,
+		"message":  "success",
+		"accounts": accountInfos,
+	})
+}
+
+// addAccount 添加新账号（通过扫码登录后调用）
+func (h *AuthHandler) addAccount(c *gin.Context) {
+	var req PollQRCodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid request parameters: " + err.Error(),
+		})
+		return
+	}
+
+	client := bilibili.NewClient()
+
+	loginInfo, err := client.PollQRCode(req.AuthCode)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Login failed: " + err.Error(),
+		})
+		return
+	}
+
+	// 获取用户完整信息
+	var userBasicInfo *storage.UserBasicInfo
+	if loginInfo.TokenInfo.Mid > 0 {
+		cookies := buildCookieString(loginInfo.CookieInfo)
+		myInfo, err := client.GetMyInfoWithRetry(cookies, 2)
+		if err == nil {
+			loginInfo.TokenInfo.Uname = myInfo.Uname
+			loginInfo.TokenInfo.Face = myInfo.Face
+			if myInfo.Mid > 0 {
+				loginInfo.TokenInfo.Mid = myInfo.Mid
+			}
+			userBasicInfo = storage.ConvertMyInfoToUserInfo(myInfo)
+		} else {
+			log.Printf("Warning: Failed to get myinfo: %v", err)
+		}
+	}
+
+	// 添加到多账号存储
+	multiStore := storage.GetMultiAccountStore()
+	account, err := multiStore.AddAccount(loginInfo, userBasicInfo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to add account: " + err.Error(),
+		})
+		return
+	}
+
+	// 同时保存到旧的单账号存储（保持向后兼容）
+	if account.IsPrimary {
+		oldStore := storage.GetDefaultStore()
+		if userBasicInfo != nil {
+			oldStore.SaveWithUserInfo(loginInfo, userBasicInfo)
+		} else {
+			oldStore.Save(loginInfo)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Account added successfully",
+		"account": AccountInfo{
+			ID:        account.ID,
+			Mid:       account.Mid,
+			Name:      account.Name,
+			Face:      account.Face,
+			IsEnabled: account.IsEnabled,
+			IsPrimary: account.IsPrimary,
+			IsExpired: false,
+			CreatedAt: account.CreatedAt.Format("2006-01-02 15:04:05"),
+			ExpiresAt: account.ExpiresAt.Format("2006-01-02 15:04:05"),
+		},
+	})
+}
+
+// removeAccount 删除账号
+func (h *AuthHandler) removeAccount(c *gin.Context) {
+	midStr := c.Param("mid")
+	var mid int64
+	if _, err := fmt.Sscanf(midStr, "%d", &mid); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid mid parameter",
+		})
+		return
+	}
+
+	store := storage.GetMultiAccountStore()
+	if err := store.RemoveAccount(mid); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to remove account: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Account removed successfully",
+	})
+}
+
+// SetAccountEnabledRequest 设置账号启用状态请求
+type SetAccountEnabledRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// setAccountEnabled 设置账号启用/禁用状态
+func (h *AuthHandler) setAccountEnabled(c *gin.Context) {
+	midStr := c.Param("mid")
+	var mid int64
+	if _, err := fmt.Sscanf(midStr, "%d", &mid); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid mid parameter",
+		})
+		return
+	}
+
+	var req SetAccountEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid request parameters: " + err.Error(),
+		})
+		return
+	}
+
+	store := storage.GetMultiAccountStore()
+	if err := store.SetAccountEnabled(mid, req.Enabled); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to update account: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Account updated successfully",
+	})
+}
+
+// setPrimaryAccount 设置主账号
+func (h *AuthHandler) setPrimaryAccount(c *gin.Context) {
+	midStr := c.Param("mid")
+	var mid int64
+	if _, err := fmt.Sscanf(midStr, "%d", &mid); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid mid parameter",
+		})
+		return
+	}
+
+	multiStore := storage.GetMultiAccountStore()
+	if err := multiStore.SetPrimaryAccount(mid); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to set primary account: " + err.Error(),
+		})
+		return
+	}
+
+	// 同步更新旧的单账号存储
+	account, err := multiStore.GetAccountByMid(mid)
+	if err == nil && account != nil {
+		oldStore := storage.GetDefaultStore()
+		if account.UserInfo != nil {
+			oldStore.SaveWithUserInfo(account.LoginInfo, account.UserInfo)
+		} else {
+			oldStore.Save(account.LoginInfo)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "Primary account set successfully",
+	})
 }

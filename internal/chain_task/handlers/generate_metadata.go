@@ -82,16 +82,21 @@ type VideoMetadata struct {
 
 // checkUserPermission 检查用户是否有 AI 元数据生成权限
 func (g *GenerateMetadata) checkUserPermission() bool {
+	g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	g.App.Logger.Info("🔐 开始检查用户会员权限...")
+
 	// 获取视频信息，包含提交用户ID
 	savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID)
 	if err != nil {
-		g.App.Logger.Warnf("无法获取视频信息: %v，默认允许执行", err)
+		g.App.Logger.Warnf("⚠️ 无法获取视频信息: %v，默认允许执行", err)
 		return true // 获取失败时默认允许（向后兼容）
 	}
 
+	g.App.Logger.Infof("📹 视频ID: %s, 关联用户ID: %d", savedVideo.VideoID, savedVideo.UserID)
+
 	// 如果没有用户ID（旧数据），默认允许
 	if savedVideo.UserID == 0 {
-		g.App.Logger.Debug("视频没有关联用户ID（旧数据），默认允许执行")
+		g.App.Logger.Info("ℹ️ 视频没有关联用户ID（旧数据），默认允许执行")
 		return true
 	}
 
@@ -102,14 +107,36 @@ func (g *GenerateMetadata) checkUserPermission() bool {
 	membershipStore := membership.NewDBMembershipStore(g.App.DB)
 	checker := membership.NewFeatureChecker(membershipStore)
 
+	// 获取用户会员信息用于日志
+	userMembership, err := checker.GetUserMembership(context.Background(), userID)
+	if err != nil {
+		g.App.Logger.Warnf("⚠️ 获取用户会员信息失败: %v", err)
+	} else {
+		g.App.Logger.Infof("👤 用户会员信息:")
+		g.App.Logger.Infof("   - 用户ID: %s", userMembership.UserID)
+		g.App.Logger.Infof("   - 会员等级: %s", userMembership.Tier)
+		g.App.Logger.Infof("   - 过期时间: %s", userMembership.ExpiresAt.Format("2006-01-02 15:04:05"))
+		g.App.Logger.Infof("   - 是否过期: %v", userMembership.IsExpired())
+		g.App.Logger.Infof("   - 有效等级: %s", userMembership.GetEffectiveTier())
+
+		// 获取等级配置
+		config := userMembership.GetConfig()
+		g.App.Logger.Infof("   - 等级名称: %s", config.Name)
+		g.App.Logger.Infof("   - Gemini视频分析权限: %v", config.Features.GeminiVideoAnalysis)
+	}
+
 	// 检查 Gemini 视频分析权限
 	result := checker.CanUseFeature(context.Background(), userID, "gemini_video_analysis")
+	g.App.Logger.Infof("🔍 权限检查结果: Allowed=%v, Reason=%s, Code=%s", result.Allowed, result.Reason, result.Code)
+
 	if !result.Allowed {
-		g.App.Logger.Warnf("用户 %s 没有 Gemini 视频分析权限: %s", userID, result.Reason)
+		g.App.Logger.Warnf("❌ 用户 %s 没有 Gemini 视频分析权限: %s", userID, result.Reason)
+		g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 		return false
 	}
 
 	g.App.Logger.Infof("✅ 用户 %s 有 AI 元数据生成权限", userID)
+	g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	return true
 }
 

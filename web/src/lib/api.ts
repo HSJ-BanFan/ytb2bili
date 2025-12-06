@@ -40,7 +40,7 @@ api.interceptors.request.use(
       const jwtToken = localStorage.getItem("jwt_token");
       if (jwtToken) {
         config.headers["Authorization"] = `Bearer ${jwtToken}`;
-        
+
         // 同时从 JWT 用户信息获取用户 ID
         const jwtUserStr = localStorage.getItem("jwt_user");
         if (jwtUserStr) {
@@ -118,17 +118,26 @@ export const authApi = {
   },
 
   // JWT 用户注册
-  register: (data: { username: string; email: string; password: string }): Promise<ApiResponse<JWTLoginResponse>> => {
+  register: (data: {
+    username: string;
+    email: string;
+    password: string;
+  }): Promise<ApiResponse<JWTLoginResponse>> => {
     return api.post("/user/register", data);
   },
 
   // JWT 用户登录
-  login: (data: { username: string; password: string }): Promise<ApiResponse<JWTLoginResponse>> => {
+  login: (data: {
+    username: string;
+    password: string;
+  }): Promise<ApiResponse<JWTLoginResponse>> => {
     return api.post("/user/login", data);
   },
 
   // JWT Token 刷新
-  refreshToken: (refreshToken: string): Promise<ApiResponse<JWTLoginResponse>> => {
+  refreshToken: (
+    refreshToken: string
+  ): Promise<ApiResponse<JWTLoginResponse>> => {
     return api.post("/user/refresh", { refresh_token: refreshToken });
   },
 
@@ -141,7 +150,49 @@ export const authApi = {
   jwtLogout: (): Promise<ApiResponse> => {
     return api.post("/user/logout");
   },
+
+  // ============== 多账号管理 API ==============
+
+  // 获取所有 B站账号
+  getAccounts: (): Promise<ApiResponse<{ accounts: BiliAccount[] }>> => {
+    return api.get("/auth/accounts");
+  },
+
+  // 添加新账号（扫码登录后调用）
+  addAccount: (
+    authCode: string
+  ): Promise<ApiResponse<{ account: BiliAccount }>> => {
+    return api.post("/auth/accounts", { auth_code: authCode });
+  },
+
+  // 删除账号
+  removeAccount: (mid: string): Promise<ApiResponse> => {
+    return api.delete(`/auth/accounts/${mid}`);
+  },
+
+  // 设置账号启用/禁用状态
+  setAccountEnabled: (mid: string, enabled: boolean): Promise<ApiResponse> => {
+    return api.put(`/auth/accounts/${mid}/enable`, { enabled });
+  },
+
+  // 设置主账号
+  setPrimaryAccount: (mid: string): Promise<ApiResponse> => {
+    return api.put(`/auth/accounts/${mid}/primary`);
+  },
 };
+
+// B站账号类型
+export interface BiliAccount {
+  id: string;
+  mid: number;
+  name: string;
+  face: string;
+  is_enabled: boolean;
+  is_primary: boolean;
+  is_expired: boolean;
+  created_at: string;
+  expires_at: string;
+}
 
 // 视频相关 API
 export const videoApi = {

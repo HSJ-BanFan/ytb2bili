@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -62,14 +63,19 @@ func testGeminiConnection(config *types.AppConfig, logger *zap.SugaredLogger) er
 		config.GeminiConfig.MaxTokens,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("创建客户端失败: %v", err)
 	}
 	defer client.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 增加超时时间到 30 秒，因为首次连接可能较慢
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	return client.TestConnection(ctx)
+	err = client.TestConnection(ctx)
+	if err != nil {
+		return fmt.Errorf("连接测试失败: %v", err)
+	}
+	return nil
 }
 
 func main() {
@@ -319,15 +325,7 @@ func main() {
 						logger.Infof("│  🔑 使用 API Key 轮询 (%d 个密钥)", config.GeminiConfig.GetApiKeysCount())
 						logger.Infof("│  🎬 视频分析: %v", config.GeminiConfig.AnalyzeVideo)
 						logger.Infof("│  📝 用于元数据: %v", config.GeminiConfig.UseForMetadata)
-
-						// 测试 Gemini API 连接
-						logger.Info("│  🔄 测试连接...")
-						if err := testGeminiConnection(config, logger); err != nil {
-							logger.Warnf("│  ⚠️ 连接失败: %v", err)
-							logger.Info("└─ ❌ 服务不可用")
-						} else {
-							logger.Info("└─ ✅ 连接成功")
-						}
+						logger.Info("└─ ✅ 已配置 (请在设置页面验证 API Key)")
 					} else {
 						logger.Info("│  ⚪ Gemini原生: 未配置")
 					}
