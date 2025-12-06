@@ -27,6 +27,7 @@ type AppConfig struct {
 	OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"` // OpenAI兼容API配置
 	TranslatorConfig       *TranslatorConfig       `toml:"TranslatorConfig"`       // 翻译器总配置
 	ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`            // 代理配置
+	DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`         // 下载配置
 	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
 	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
 	MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`       // 会员系统配置
@@ -224,6 +225,16 @@ type ProxyConfig struct {
 	ProxyHost string `toml:"proxy_host"` // 代理地址 (例如: http://127.0.0.1:7890)
 }
 
+// DownloadConfig 下载配置
+type DownloadConfig struct {
+	UseAria2c           bool   `toml:"use_aria2c"`           // 是否使用 aria2c 多线程下载
+	Aria2cPath          string `toml:"aria2c_path"`          // aria2c 可执行文件路径
+	ConcurrentFragments int    `toml:"concurrent_fragments"` // 并发分片数（默认8）
+	Aria2cConnections   int    `toml:"aria2c_connections"`   // aria2c 连接数（默认16）
+	HttpChunkSize       string `toml:"http_chunk_size"`      // HTTP 分块大小（默认10M）
+	PreferFormat        string `toml:"prefer_format"`        // 首选格式: best, 1080p, 720p, 480p
+}
+
 // AnalyticsConfig 数据分析配置
 type AnalyticsConfig struct {
 	Enabled       bool   `toml:"enabled"`        // 是否启用数据分析
@@ -309,6 +320,16 @@ func NewDefaultConfig() *AppConfig {
 			ProxyHost: "",
 		},
 
+		// 下载配置（默认值，可被 config.toml 覆盖）
+		DownloadConfig: &DownloadConfig{
+			UseAria2c:           true,   // 默认启用 aria2c（如果可用）
+			Aria2cPath:          "",     // 空表示自动检测
+			ConcurrentFragments: 8,      // yt-dlp 并发分片数
+			Aria2cConnections:   16,     // aria2c 连接数
+			HttpChunkSize:       "10M",  // HTTP 分块大小
+			PreferFormat:        "best", // 默认最佳质量
+		},
+
 		// 数据分析配置（默认值，可被 config.toml 覆盖）
 		AnalyticsConfig: &AnalyticsConfig{
 			Enabled:   false,
@@ -374,6 +395,7 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		GeminiConfig           *GeminiConfig           `toml:"GeminiConfig"`
 		OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"`
 		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
+		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
@@ -408,6 +430,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.ProxyConfig != nil {
 		config.ProxyConfig = fileConfig.ProxyConfig
 	}
+	if fileConfig.DownloadConfig != nil {
+		config.DownloadConfig = fileConfig.DownloadConfig
+	}
 	if fileConfig.AnalyticsConfig != nil {
 		config.AnalyticsConfig = fileConfig.AnalyticsConfig
 	}
@@ -437,6 +462,7 @@ func SaveConfig(config *AppConfig) error {
 		GeminiConfig           *GeminiConfig           `toml:"GeminiConfig"`
 		OpenAICompatibleConfig *OpenAICompatibleConfig `toml:"OpenAICompatibleConfig"`
 		ProxyConfig            *ProxyConfig            `toml:"ProxyConfig"`
+		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
@@ -453,6 +479,7 @@ func SaveConfig(config *AppConfig) error {
 		GeminiConfig:           config.GeminiConfig,
 		OpenAICompatibleConfig: config.OpenAICompatibleConfig,
 		ProxyConfig:            config.ProxyConfig,
+		DownloadConfig:         config.DownloadConfig,
 		AnalyticsConfig:        config.AnalyticsConfig,
 		BilibiliConfig:         config.BilibiliConfig,
 		MembershipConfig:       config.MembershipConfig,

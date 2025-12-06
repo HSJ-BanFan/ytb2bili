@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
@@ -122,6 +124,54 @@ func (t *DownloadVideo) Execute(context map[string]interface{}) bool {
 	return t.executeDownload(ytdlpPath, videoURL, false, context)
 }
 
+// findAria2c 查找系统中的 aria2c 可执行文件
+func (t *DownloadVideo) findAria2c() string {
+	// 首先检查配置中是否指定了路径
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil &&
+		t.App.Config.DownloadConfig.Aria2cPath != "" {
+		if _, err := os.Stat(t.App.Config.DownloadConfig.Aria2cPath); err == nil {
+			return t.App.Config.DownloadConfig.Aria2cPath
+		}
+	}
+
+	// 尝试从 PATH 查找
+	if path, err := exec.LookPath("aria2c"); err == nil {
+		return path
+	}
+	// Windows 常见安装位置
+	windowsPaths := []string{
+		"C:\\Program Files\\aria2\\aria2c.exe",
+		"C:\\aria2\\aria2c.exe",
+	}
+	for _, p := range windowsPaths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// getDownloadConfig 获取下载配置，使用默认值填充未设置的字段
+func (t *DownloadVideo) getDownloadConfig() (concurrentFragments int, aria2cConnections int, httpChunkSize string) {
+	concurrentFragments = 8
+	aria2cConnections = 16
+	httpChunkSize = "10M"
+
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
+		cfg := t.App.Config.DownloadConfig
+		if cfg.ConcurrentFragments > 0 {
+			concurrentFragments = cfg.ConcurrentFragments
+		}
+		if cfg.Aria2cConnections > 0 {
+			aria2cConnections = cfg.Aria2cConnections
+		}
+		if cfg.HttpChunkSize != "" {
+			httpChunkSize = cfg.HttpChunkSize
+		}
+	}
+	return
+}
+
 // executeDownload 执行实际的下载操作
 func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy bool, context map[string]interface{}) bool {
 	// 构建下载命令
@@ -130,6 +180,51 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		"-P", t.StateManager.CurrentDir,
 		"-o", "%(id)s.%(ext)s",
 		"--merge-output-format", "mp4",
+	}
+
+	// 获取下载配置
+	concurrentFragments, aria2cConnections, httpChunkSize := t.getDownloadConfig()
+
+	// 检查是否启用 aria2c（默认启用）
+	useAria2c := true
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
+		useAria2c = t.App.Config.DownloadConfig.UseAria2c
+	}
+
+	// 获取代理配置
+	proxyHost := ""
+	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
+		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != "" {
+		proxyHost = t.App.Config.ProxyConfig.ProxyHost
+	}
+
+	// 检查是否有 aria2c 可用，用于多线程下载加速
+	// 注意：当使用代理时，aria2c 可能会遇到 403 错误，因此使用代理时优先使用 yt-dlp 内置下载器
+	aria2cPath := t.findAria2c()
+	if useAria2c && aria2cPath != "" && proxyHost == "" {
+		// 不使用代理时，aria2c 可以正常工作
+		t.App.Logger.Infof("🚀 检测到 aria2c，启用多线程下载加速 (连接数: %d)", aria2cConnections)
+		aria2cArgs := fmt.Sprintf("aria2c:-x %d -s %d -k 1M --file-allocation=none --async-dns=false --check-certificate=false", aria2cConnections, aria2cConnections)
+		command = append(command,
+			"--downloader", "aria2c",
+			"--downloader-args", aria2cArgs,
+		)
+	} else {
+		if proxyHost != "" {
+			t.App.Logger.Info("ℹ️ 使用代理时，采用 yt-dlp 内置并发下载器（避免 aria2c 403 错误）")
+		} else if !useAria2c {
+			t.App.Logger.Info("ℹ️ aria2c 已在配置中禁用，使用 yt-dlp 内置下载器")
+		} else {
+			t.App.Logger.Warn("⚠️ 未检测到 aria2c，使用 yt-dlp 内置下载器")
+			t.App.Logger.Info("💡 建议安装 aria2c 以启用多线程下载加速: https://aria2.github.io/")
+		}
+		// 使用 yt-dlp 内置的并发分片下载
+		t.App.Logger.Infof("📊 使用并发分片数: %d, HTTP分块大小: %s", concurrentFragments, httpChunkSize)
+		command = append(command,
+			"--concurrent-fragments", fmt.Sprintf("%d", concurrentFragments),
+			"--buffer-size", "16K",
+			"--http-chunk-size", httpChunkSize,
+		)
 	}
 
 	// 检查是否存在 cookies.txt
@@ -199,13 +294,14 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 	// 收集错误输出
 	var errorOutput strings.Builder
 	var lastOutput strings.Builder
+	var lastProgressTime int64
 
 	// 实时读取输出并收集错误信息
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
-			t.App.Logger.Debug(line)
+			t.logDownloadProgress(line, &lastProgressTime)
 			lastOutput.WriteString(line + "\n")
 		}
 	}()
@@ -214,7 +310,7 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			t.App.Logger.Debug(line)
+			t.logDownloadProgress(line, &lastProgressTime)
 			errorOutput.WriteString(line + "\n")
 			lastOutput.WriteString(line + "\n")
 		}
@@ -455,4 +551,91 @@ func (t *DownloadVideo) truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// logDownloadProgress 解析并输出下载进度
+func (t *DownloadVideo) logDownloadProgress(line string, lastProgressTime *int64) {
+	now := time.Now().Unix()
+
+	// aria2c 进度格式: [#abc123 100MiB/500MiB(20%) CN:16 DL:1.5MiB ETA:5m30s]
+	aria2cRegex := regexp.MustCompile(`\[#\w+\s+([0-9.]+[KMGT]?i?B)/([0-9.]+[KMGT]?i?B)\((\d+)%\)\s+CN:(\d+)\s+DL:([0-9.]+[KMGT]?i?B)(?:\s+ETA:([^\]]+))?\]`)
+	if matches := aria2cRegex.FindStringSubmatch(line); len(matches) >= 6 {
+		// 每3秒输出一次进度，避免日志过多
+		if now-*lastProgressTime >= 3 {
+			*lastProgressTime = now
+			downloaded := matches[1]
+			total := matches[2]
+			percent := matches[3]
+			connections := matches[4]
+			speed := matches[5]
+			eta := "计算中"
+			if len(matches) >= 7 && matches[6] != "" {
+				eta = matches[6]
+			}
+			t.App.Logger.Infof("📥 下载进度: %s/%s (%s%%) | 速度: %s/s | 连接数: %s | 剩余时间: %s",
+				downloaded, total, percent, speed, connections, eta)
+		}
+		return
+	}
+
+	// yt-dlp 进度格式: [download]  10.5% of 500.00MiB at 1.50MiB/s ETA 05:30
+	ytdlpRegex := regexp.MustCompile(`\[download\]\s+([0-9.]+)%\s+of\s+~?([0-9.]+[KMGT]?i?B)\s+at\s+([0-9.]+[KMGT]?i?B/s)(?:\s+ETA\s+([0-9:]+))?`)
+	if matches := ytdlpRegex.FindStringSubmatch(line); len(matches) >= 4 {
+		if now-*lastProgressTime >= 3 {
+			*lastProgressTime = now
+			percent := matches[1]
+			total := matches[2]
+			speed := matches[3]
+			eta := "计算中"
+			if len(matches) >= 5 && matches[4] != "" {
+				eta = matches[4]
+			}
+			t.App.Logger.Infof("📥 下载进度: %s%% of %s | 速度: %s | 剩余时间: %s",
+				percent, total, speed, eta)
+		}
+		return
+	}
+
+	// 下载目标文件
+	if strings.Contains(line, "[download] Destination:") {
+		t.App.Logger.Infof("📁 %s", line)
+		return
+	}
+
+	// 恢复下载
+	if strings.Contains(line, "Resuming download") {
+		t.App.Logger.Infof("🔄 %s", line)
+		return
+	}
+
+	// 合并文件
+	if strings.Contains(line, "[Merger]") || strings.Contains(line, "[ffmpeg]") {
+		t.App.Logger.Infof("🔧 %s", line)
+		return
+	}
+
+	// 下载完成
+	if strings.Contains(line, "100%") || strings.Contains(line, "has already been downloaded") {
+		t.App.Logger.Infof("✅ %s", line)
+		return
+	}
+
+	// 睡眠等待
+	if strings.Contains(line, "Sleeping") {
+		t.App.Logger.Infof("⏳ %s", line)
+		return
+	}
+
+	// 错误和警告
+	if strings.Contains(line, "ERROR") || strings.Contains(line, "error") {
+		t.App.Logger.Errorf("❌ %s", line)
+		return
+	}
+	if strings.Contains(line, "WARNING") || strings.Contains(line, "warning") {
+		t.App.Logger.Warnf("⚠️ %s", line)
+		return
+	}
+
+	// 其他信息使用 Debug 级别
+	t.App.Logger.Debug(line)
 }

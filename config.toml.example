@@ -91,3 +91,8 @@ yt_dlp_path = ""
   # 【原视频描述】
   # {original_desc}
   # """
+[DownloadConfig]
+use_aria2c = true           # 是否使用 aria2c（无代理时）
+concurrent_fragments = 8    # yt-dlp 并发分片数
+aria2c_connections = 16     # aria2c 连接数
+http_chunk_size = "10M"     # HTTP 分块大小
