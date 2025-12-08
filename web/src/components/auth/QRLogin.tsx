@@ -107,6 +107,12 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
               });
             }
           }, 1000);
+        } else if (response.status === 403) {
+          // 权限不足（多账号上传需要企业版）
+          setStatus('error');
+          setMessage(data.message || '多账号上传是企业版功能，请升级会员');
+          setPolling(false);
+          clearInterval(pollInterval);
         } else if (response.status === 400 || response.status === 500) {
           // 二维码过期或无效
           setStatus('error');

@@ -135,8 +135,8 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 		return
 	}
 
-	// 转换为响应格式
-	var videos []VideoInfo
+	// 转换为响应格式（确保返回空数组而不是 null）
+	videos := make([]VideoInfo, 0, len(savedVideos))
 	for _, sv := range savedVideos {
 		videos = append(videos, VideoInfo{
 			ID:             sv.ID,

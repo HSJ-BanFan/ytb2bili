@@ -20,13 +20,14 @@ import (
 // UploadScheduler 上传调度器
 // 负责定时上传视频和字幕到Bilibili
 type UploadScheduler struct {
-	App               *core.AppServer
-	SavedVideoService *services.SavedVideoService
-	TaskStepService   *services.TaskStepService
-	Db                *gorm.DB
-	Task              *cron.Cron
-	mutex             sync.Mutex
-	logger            *zap.SugaredLogger
+	App                *core.AppServer
+	SavedVideoService  *services.SavedVideoService
+	TaskStepService    *services.TaskStepService
+	BiliAccountService *services.BiliAccountService
+	Db                 *gorm.DB
+	Task               *cron.Cron
+	mutex              sync.Mutex
+	logger             *zap.SugaredLogger
 
 	// 上传队列跟踪
 	lastVideoUploadTime    time.Time // 最后一次视频上传时间
@@ -40,14 +41,16 @@ func NewUploadScheduler(
 	db *gorm.DB,
 	savedVideoService *services.SavedVideoService,
 	taskStepService *services.TaskStepService,
+	biliAccountService *services.BiliAccountService,
 ) *UploadScheduler {
 	return &UploadScheduler{
-		App:               app,
-		Task:              task,
-		Db:                db,
-		SavedVideoService: savedVideoService,
-		TaskStepService:   taskStepService,
-		logger:            app.Logger,
+		App:                app,
+		Task:               task,
+		Db:                 db,
+		SavedVideoService:  savedVideoService,
+		TaskStepService:    taskStepService,
+		BiliAccountService: biliAccountService,
+		logger:             app.Logger,
 	}
 }
 
@@ -218,7 +221,7 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	// 根据任务名称创建对应的任务
 	switch taskName {
 	case "上传到Bilibili":
-		task = handlers.NewUploadToBilibili("上传到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService)
+		task = handlers.NewUploadToBilibili("上传到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService)
 	case "上传字幕到Bilibili":
 		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService)
 	default:

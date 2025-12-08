@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ConsoleFilter } from "@/components/ConsoleFilter";
 
 export const metadata: Metadata = {
   title: "Bili-Up Web - Bilibili 视频管理平台",
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="min-h-screen bg-gray-50">
+        <ConsoleFilter />
         {children}
       </body>
     </html>

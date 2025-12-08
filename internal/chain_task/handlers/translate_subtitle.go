@@ -12,6 +12,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/pkg/cos"
+	"github.com/difyz9/ytb2bili/pkg/prompts"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 	"gorm.io/gorm"
 )
@@ -372,8 +373,14 @@ func (t *TranslateSubtitle) translateGroupSimple(texts []string) ([]string, erro
 	// 直接组合文本
 	combinedText := strings.Join(texts, "\n###SENTENCE_BREAK###\n")
 
-	// 简化的系统提示
-	systemPrompt := fmt.Sprintf(`你是一个专业的视频字幕翻译专家。将给出的 %d 句英文字幕翻译成中文。
+	// 从提示词管理器获取提示词
+	promptManager := prompts.GetGlobalManager()
+	systemPrompt, err := promptManager.RenderSystemPrompt(prompts.PromptTranslateSubtitle, &prompts.PromptParams{
+		Count: len(texts),
+	})
+	if err != nil {
+		// 回退到默认提示词
+		systemPrompt = fmt.Sprintf(`你是一个专业的视频字幕翻译专家。将给出的 %d 句英文字幕翻译成中文。
 
 翻译要求：
 1. 自然流畅：使用口语化表达，符合中文字幕习惯
@@ -382,10 +389,8 @@ func (t *TranslateSubtitle) translateGroupSimple(texts []string) ([]string, erro
 4. 数量严格：必须输出 %d 句翻译，不多不少
 5. 分隔符：每句翻译用"###SENTENCE_BREAK###"分隔
 
-输入格式：句子用"###SENTENCE_BREAK###"分隔
-输出格式：只返回中文翻译，用"###SENTENCE_BREAK###"分隔
-
 注意：只返回翻译的中文文本，不要添加序号、解释或其他内容。`, len(texts), len(texts))
+	}
 
 	translatedText, err := t.callDeepSeekAPI(systemPrompt, combinedText)
 	if err != nil {
@@ -505,7 +510,14 @@ func (t *TranslateSubtitle) translateGroupWithContext(texts []string, prevContex
 			len(nextContext), targetStartIndex+1, targetEndIndex)
 	}
 
-	systemPrompt := fmt.Sprintf(`你是一个专业的视频字幕翻译专家。我将给你一段连续的英文字幕，其中包含 %d 句需要翻译的内容。%s
+	// 从提示词管理器获取提示词
+	promptManager := prompts.GetGlobalManager()
+	systemPrompt, err := promptManager.RenderSystemPrompt(prompts.PromptTranslateContext, &prompts.PromptParams{
+		Count: len(texts),
+	})
+	if err != nil {
+		// 回退到默认提示词
+		systemPrompt = fmt.Sprintf(`你是一个专业的视频字幕翻译专家。我将给你一段连续的英文字幕，其中包含 %d 句需要翻译的内容。%s
 
 翻译要求：
 1. 自然流畅：使用口语化表达，符合中文字幕习惯
@@ -515,10 +527,11 @@ func (t *TranslateSubtitle) translateGroupWithContext(texts []string, prevContex
 5. 数量严格：必须输出 %d 句翻译，不多不少
 6. 分隔符：每句翻译用"###SENTENCE_BREAK###"分隔
 
-输入格式：句子用"###SENTENCE_BREAK###"分隔
-输出格式：只返回目标部分的中文翻译，用"###SENTENCE_BREAK###"分隔
-
 注意：只返回翻译的中文文本，不要添加序号、解释或其他内容。`, len(texts), contextInfo, len(texts))
+	} else {
+		// 添加上下文信息到提示词
+		systemPrompt = systemPrompt + contextInfo
+	}
 
 	translatedText, err := t.callDeepSeekAPI(systemPrompt, combinedText)
 	if err != nil {

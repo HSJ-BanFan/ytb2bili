@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'account'>('general');
   const [showBindQR, setShowBindQR] = useState(false);
-  const [biliStatus, setBiliStatus] = useState<{isLoggedIn: boolean; user?: {name: string; mid: string; avatar?: string}} | null>(null);
+  const [biliStatus, setBiliStatus] = useState<{ isLoggedIn: boolean; user?: { name: string; mid: string; avatar?: string } } | null>(null);
   const [autoUpload, setAutoUpload] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -142,23 +142,33 @@ export default function SettingsPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="container mx-auto px-4 py-16">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="container mx-auto px-4">
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-4xl font-bold text-gray-900 mb-3">
                 Bili-Up Web
               </h1>
-              <p className="text-gray-600">
+              <p className="text-gray-600 text-lg">
                 Bilibili 视频管理平台
               </p>
             </div>
-            
-            <div className="bg-white rounded-lg shadow-lg">
-              <QRLogin 
-                onLoginSuccess={handleLoginSuccess}
-                onRefreshStatus={handleRefreshStatus}
-              />
+
+            <div className="bg-white rounded-xl shadow-xl p-8">
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
+                  <Settings className="w-8 h-8 text-blue-600" />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-900">请先登录</h2>
+                <p className="text-gray-500 mt-2">登录后即可访问设置页面</p>
+              </div>
+
+              <a
+                href="/login"
+                className="w-full flex items-center justify-center px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium shadow-md hover:shadow-lg"
+              >
+                登录 / 注册
+              </a>
             </div>
           </div>
         </div>
@@ -175,33 +185,30 @@ export default function SettingsPage() {
             <nav className="flex -mb-px">
               <button
                 onClick={() => setActiveTab('general')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'general'
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'general'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                  }`}
               >
                 <Settings className="w-4 h-4 inline mr-2" />
                 通用设置
               </button>
               <button
                 onClick={() => setActiveTab('ai')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'ai'
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'ai'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                  }`}
               >
                 <Bot className="w-4 h-4 inline mr-2" />
                 AI 大模型
               </button>
               <button
                 onClick={() => setActiveTab('account')}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'account'
+                className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'account'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                  }`}
               >
                 <Link2 className="w-4 h-4 inline mr-2" />
                 账号绑定
@@ -237,7 +244,7 @@ export default function SettingsPage() {
                       onChange={(e) => setAutoUpload(e.target.checked)}
                       className="sr-only"
                     />
-                    <div 
+                    <div
                       onClick={() => setAutoUpload(!autoUpload)}
                       className={`w-10 h-6 rounded-full cursor-pointer transition-colors ${autoUpload ? 'bg-blue-600' : 'bg-gray-300'}`}
                     >
@@ -311,21 +318,20 @@ export default function SettingsPage() {
                     {accounts.map((account) => (
                       <div
                         key={account.id}
-                        className={`flex items-center justify-between p-4 rounded-lg border ${
-                          account.is_primary
+                        className={`flex items-center justify-between p-4 rounded-lg border ${account.is_primary
                             ? 'bg-blue-50 border-blue-200'
                             : account.is_expired
-                            ? 'bg-red-50 border-red-200'
-                            : account.is_enabled
-                            ? 'bg-green-50 border-green-200'
-                            : 'bg-gray-50 border-gray-200'
-                        }`}
+                              ? 'bg-red-50 border-red-200'
+                              : account.is_enabled
+                                ? 'bg-green-50 border-green-200'
+                                : 'bg-gray-50 border-gray-200'
+                          }`}
                       >
                         <div className="flex items-center gap-3">
                           {account.face ? (
-                            <img 
-                              src={account.face} 
-                              alt="" 
+                            <img
+                              src={account.face}
+                              alt=""
                               className="w-10 h-10 rounded-full bg-gray-200"
                               onError={(e) => {
                                 e.currentTarget.style.display = 'none';
@@ -374,11 +380,10 @@ export default function SettingsPage() {
                           {!account.is_primary && (
                             <button
                               onClick={() => handleToggleEnabled(account.mid, account.is_enabled)}
-                              className={`p-2 rounded-lg transition-colors ${
-                                account.is_enabled
+                              className={`p-2 rounded-lg transition-colors ${account.is_enabled
                                   ? 'text-green-600 hover:bg-green-100'
                                   : 'text-gray-400 hover:bg-gray-100'
-                              }`}
+                                }`}
                               title={account.is_enabled ? '禁用账号' : '启用账号'}
                             >
                               {account.is_enabled ? (
@@ -406,7 +411,7 @@ export default function SettingsPage() {
               {/* 添加账号 */}
               <div className="border-t pt-6">
                 <h3 className="text-sm font-medium text-gray-700 mb-3">添加新账号</h3>
-                
+
                 {!showBindQR ? (
                   <button
                     onClick={() => setShowBindQR(true)}
@@ -426,7 +431,7 @@ export default function SettingsPage() {
                         取消
                       </button>
                     </div>
-                    <QRLogin 
+                    <QRLogin
                       onLoginSuccess={handleBiliBindSuccess}
                       onRefreshStatus={checkBiliStatus}
                     />

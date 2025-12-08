@@ -60,6 +60,7 @@ func (c *FeatureChecker) CanUseFeature(ctx context.Context, userID, feature stri
 		"custom_template":       {config.Features.CustomTemplate, TierBasic, "自定义模板是付费功能"},
 		"data_export":           {config.Features.DataExport, TierPro, "数据导出是专业版功能"},
 		"team_collaboration":    {config.Features.TeamCollaboration, TierEnterprise, "团队协作是企业版功能"},
+		"multi_account_upload":  {config.Features.MultiAccountUpload, TierEnterprise, "多账号上传是企业版专属功能，请升级到企业版"},
 	}
 
 	if f, ok := featureMap[feature]; ok {

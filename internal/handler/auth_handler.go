@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image/color"
 	"image/png"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/core"
+	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/internal/storage"
 
 	"github.com/gin-gonic/gin"
@@ -25,11 +27,13 @@ func currentTime() time.Time {
 
 type AuthHandler struct {
 	BaseHandler
+	FeatureChecker *membership.FeatureChecker
 }
 
-func NewAuthHandler(app *core.AppServer) *AuthHandler {
+func NewAuthHandler(app *core.AppServer, featureChecker *membership.FeatureChecker) *AuthHandler {
 	return &AuthHandler{
-		BaseHandler: BaseHandler{App: app},
+		BaseHandler:    BaseHandler{App: app},
+		FeatureChecker: featureChecker,
 	}
 }
 
@@ -181,7 +185,38 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 
 	client := bilibili.NewClient()
 
-	loginInfo, err := client.PollQRCode(req.AuthCode)
+	// 使用带超时的 context，避免请求长时间阻塞
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 在 goroutine 中执行 PollQRCode，带超时控制
+	type pollResult struct {
+		loginInfo *bilibili.LoginInfo
+		err       error
+	}
+	resultChan := make(chan pollResult, 1)
+
+	go func() {
+		loginInfo, err := client.PollQRCode(req.AuthCode)
+		resultChan <- pollResult{loginInfo, err}
+	}()
+
+	var loginInfo *bilibili.LoginInfo
+	var err error
+
+	select {
+	case <-ctx.Done():
+		// 超时，返回等待状态
+		c.JSON(http.StatusOK, gin.H{
+			"code":    86101,
+			"message": "等待扫码中",
+		})
+		return
+	case result := <-resultChan:
+		loginInfo = result.loginInfo
+		err = result.err
+	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -214,6 +249,27 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 
 	// 保存到多账号存储
 	multiStore := storage.GetMultiAccountStore()
+
+	// 检查是否已有账号，如果有则需要多账号上传权限
+	existingAccounts, _ := multiStore.GetAllAccounts()
+	if len(existingAccounts) > 0 && h.FeatureChecker != nil {
+		// 从 context 获取用户 ID
+		userID := ""
+		if uid, exists := c.Get("user_id"); exists {
+			userID = fmt.Sprintf("%v", uid)
+		}
+		// 已有账号，检查多账号上传权限
+		result := h.FeatureChecker.CanUseFeature(context.Background(), userID, "multi_account_upload")
+		if !result.Allowed {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    403,
+				"message": result.Reason,
+				"upgrade": result.Upgrade,
+			})
+			return
+		}
+	}
+
 	account, err := multiStore.AddAccount(loginInfo, userBasicInfo)
 	if err != nil {
 		log.Printf("Warning: Failed to add account to multi-account store: %v", err)
@@ -542,6 +598,29 @@ func (h *AuthHandler) addAccount(c *gin.Context) {
 		return
 	}
 
+	// 获取多账号存储
+	multiStore := storage.GetMultiAccountStore()
+
+	// 检查是否已有账号，如果有则需要多账号上传权限
+	existingAccounts, _ := multiStore.GetAllAccounts()
+	if len(existingAccounts) > 0 && h.FeatureChecker != nil {
+		// 从 context 获取用户 ID
+		userID := ""
+		if uid, exists := c.Get("user_id"); exists {
+			userID = fmt.Sprintf("%v", uid)
+		}
+		// 已有账号，检查多账号上传权限
+		result := h.FeatureChecker.CanUseFeature(context.Background(), userID, "multi_account_upload")
+		if !result.Allowed {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    403,
+				"message": result.Reason,
+				"upgrade": result.Upgrade,
+			})
+			return
+		}
+	}
+
 	client := bilibili.NewClient()
 
 	loginInfo, err := client.PollQRCode(req.AuthCode)
@@ -571,7 +650,6 @@ func (h *AuthHandler) addAccount(c *gin.Context) {
 	}
 
 	// 添加到多账号存储
-	multiStore := storage.GetMultiAccountStore()
 	account, err := multiStore.AddAccount(loginInfo, userBasicInfo)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

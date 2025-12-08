@@ -137,6 +137,7 @@ func main() {
 		fx.Provide(services.NewVideoService),
 		fx.Provide(services.NewSavedVideoService),
 		fx.Provide(services.NewTaskStepService),
+		fx.Provide(services.NewBiliAccountService),
 
 		// 认证系统
 		fx.Provide(func() *auth.JWTService {
@@ -206,6 +207,7 @@ func main() {
 			membershipStore membership.MembershipStore,
 			authHandler *auth.AuthHandler,
 			authMiddleware *auth.AuthMiddleware,
+			biliAccountService *services.BiliAccountService,
 		) {
 			// 初始化服务器
 			server.Init(db)
@@ -217,7 +219,7 @@ func main() {
 			}
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -431,11 +433,13 @@ func registerHandlers(
 	membershipStore membership.MembershipStore,
 	authHandler *auth.AuthHandler,
 	authMiddleware *auth.AuthMiddleware,
+	biliAccountService *services.BiliAccountService,
 ) {
 	logger.Info("Registering handlers...")
 
 	// 旧的认证 Handler (B站扫码登录)
-	oldAuthHandler := handler.NewAuthHandler(server)
+	oldFeatureChecker := membership.NewFeatureChecker(membershipStore)
+	oldAuthHandler := handler.NewAuthHandler(server, oldFeatureChecker)
 	oldAuthHandler.RegisterRoutes(server)
 	logger.Info("✓ Bilibili Auth routes registered")
 
@@ -480,6 +484,12 @@ func registerHandlers(
 	membershipGroup.Use(authMiddleware.OptionalJWTAuth())
 	membershipHandler.RegisterRoutes(membershipGroup)
 	logger.Info("✓ Membership routes registered")
+
+	// B站账号管理 Handler
+	featureChecker := membership.NewFeatureChecker(membershipStore)
+	biliAccountHandler := handler.NewBiliAccountHandler(server, biliAccountService, featureChecker)
+	biliAccountHandler.RegisterRoutes(server, authMiddleware)
+	logger.Info("✓ Bili Account routes registered")
 
 	logger.Info("All handlers registered successfully")
 }

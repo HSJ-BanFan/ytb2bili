@@ -2,13 +2,12 @@
 
 import { useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
-import QRLogin from '@/components/auth/QRLogin';
 import { useAuth } from '@/hooks/useAuth';
-import { 
-  Download, 
-  ExternalLink, 
-  Chrome, 
-  CheckCircle, 
+import {
+  Download,
+  ExternalLink,
+  Chrome,
+  CheckCircle,
   AlertCircle,
   FileText,
   Settings,
@@ -24,7 +23,7 @@ export default function ExtensionPage() {
     try {
       const response = await fetch('https://api.github.com/repos/difyz9/bili-up-extension/releases/latest');
       const release = await response.json();
-      
+
       if (release.assets && release.assets.length > 0) {
         const zipAsset = release.assets.find((asset: any) => asset.name.endsWith('.zip'));
         if (zipAsset) {
@@ -61,23 +60,33 @@ export default function ExtensionPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="container mx-auto px-4 py-16">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="container mx-auto px-4">
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-4xl font-bold text-gray-900 mb-3">
                 Bili-Up Web
               </h1>
-              <p className="text-gray-600">
+              <p className="text-gray-600 text-lg">
                 Bilibili 视频管理平台
               </p>
             </div>
-            
-            <div className="bg-white rounded-lg shadow-lg">
-              <QRLogin 
-                onLoginSuccess={handleLoginSuccess}
-                onRefreshStatus={handleRefreshStatus}
-              />
+
+            <div className="bg-white rounded-xl shadow-xl p-8">
+              <div className="text-center mb-6">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4">
+                  <Puzzle className="w-8 h-8 text-purple-600" />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-900">请先登录</h2>
+                <p className="text-gray-500 mt-2">登录后即可下载浏览器插件</p>
+              </div>
+
+              <a
+                href="/login"
+                className="w-full flex items-center justify-center px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium shadow-md hover:shadow-lg"
+              >
+                登录 / 注册
+              </a>
             </div>
           </div>
         </div>
@@ -147,7 +156,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">在 B 站视频页面自动提取标题、描述、封面等信息</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-3">
                 <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
                 <div>
@@ -155,7 +164,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">一键将当前浏览的视频添加到上传队列</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-3">
                 <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
                 <div>
@@ -163,7 +172,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">支持批量导入收藏夹或播放列表中的视频</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-3">
                 <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
                 <div>
@@ -191,7 +200,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">点击上方的&ldquo;下载最新版本&rdquo;按钮，下载插件压缩包到本地</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
                   2
@@ -201,7 +210,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">将下载的 zip 文件解压到一个文件夹中</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
                   3
@@ -211,7 +220,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">在 Chrome 浏览器中访问 <code className="bg-gray-100 px-1 rounded">chrome://extensions/</code></p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
                   4
@@ -221,7 +230,7 @@ export default function ExtensionPage() {
                   <p className="text-sm text-gray-600">在扩展页面右上角打开&ldquo;开发者模式&rdquo;开关</p>
                 </div>
               </div>
-              
+
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0 w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
                   5

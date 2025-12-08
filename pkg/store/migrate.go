@@ -13,5 +13,6 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.TaskStep{},
 		&model.App{},
 		&model.UserToken{},
+		&model.UserBiliAccount{},
 	)
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/difyz9/ytb2bili/pkg/prompts"
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )
@@ -133,25 +134,15 @@ func (g *GeminiClient) GenerateMetadataFromVideo(ctx context.Context, videoFile 
 		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
 	}
 
-	prompt := `请作为一个专业的 Bilibili UP 主，分析这个视频并生成以下内容：
+	// 从提示词管理器获取提示词
+	promptManager := prompts.GetGlobalManager()
+	promptTemplate, err := promptManager.GetPrompt(prompts.PromptMetadataVideo)
+	if err != nil {
+		return nil, fmt.Errorf("获取提示词失败: %v", err)
+	}
 
-1. 一个吸引眼球的标题（严格控制在30个字以内，能够准确概括视频主题）
-2. 一个精炼的视频介绍（严格控制在100个字以内，提炼视频的核心内容和亮点）
-3. 3-5个相关的标签
-
-要求：
-- 必须使用中文
-- 标题要简洁有力，吸引观众点击
-- 介绍要精炼，突出重点，严格控制在100字以内
-- 标签要准确反映视频内容
-- 输出格式必须是JSON，格式如下：
-{
-  "title": "视频标题",
-  "description": "视频介绍（100字以内）",
-  "tags": ["标签1", "标签2", "标签3"]
-}
-
-请直接返回JSON格式的结果，不要包含任何其他说明文字。`
+	// 使用系统提示词作为主提示词（Gemini 不区分 system/user）
+	prompt := promptTemplate.System
 
 	resp, err := model.GenerateContent(ctx, genai.FileData{URI: videoFile.URI}, genai.Text(prompt))
 	if err != nil {
@@ -185,26 +176,105 @@ func (g *GeminiClient) GenerateMetadataFromText(ctx context.Context, subtitleTex
 		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
 	}
 
-	prompt := fmt.Sprintf(`请根据以下视频字幕内容，生成一个吸引人的视频标题、精炼介绍和3-5个相关标签。
+	// 从提示词管理器获取提示词
+	promptManager := prompts.GetGlobalManager()
+	promptTemplate, err := promptManager.GetPrompt(prompts.PromptMetadataText)
+	if err != nil {
+		return nil, fmt.Errorf("获取提示词失败: %v", err)
+	}
+
+	// 渲染用户提示词
+	userPrompt, err := promptManager.RenderUserPrompt(prompts.PromptMetadataText, &prompts.PromptParams{
+		SubtitleText: subtitleText,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("渲染提示词失败: %v", err)
+	}
+
+	// 组合系统提示词和用户提示词
+	prompt := promptTemplate.System + "\n\n" + userPrompt
+
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return nil, fmt.Errorf("生成内容失败: %v", err)
+	}
+
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("未生成任何内容")
+	}
+
+	// 提取文本内容
+	content := fmt.Sprintf("%v", resp.Candidates[0].Content.Parts[0])
+
+	return parseMetadataJSON(content)
+}
+
+// GenerateMetadataFromImage 从图片+文本生成元数据（用于超大视频的关键帧分析）
+func (g *GeminiClient) GenerateMetadataFromImage(ctx context.Context, imagePath string, subtitleText string) (*VideoMetadata, error) {
+	model := g.client.GenerativeModel(g.model)
+
+	// 设置生成参数
+	model.SetMaxOutputTokens(int32(g.maxTokens))
+	model.SetTemperature(0.7)
+
+	// 设置安全设置
+	model.SafetySettings = []*genai.SafetySetting{
+		{Category: genai.HarmCategoryHarassment, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryHateSpeech, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategorySexuallyExplicit, Threshold: genai.HarmBlockNone},
+		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
+	}
+
+	// 读取图片文件
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		return nil, fmt.Errorf("读取图片文件失败: %v", err)
+	}
+
+	// 构建提示词
+	var prompt string
+	if subtitleText != "" {
+		prompt = fmt.Sprintf(`请根据这张视频缩略图和以下字幕内容，生成一个吸引人的视频标题、详细描述和3-5个相关标签。
 
 字幕内容：
 %s
 
 要求：
 1. 标题要简洁有力，严格控制在30个字以内，能够准确概括视频主题
-2. 介绍要精炼，严格控制在100个字以内，提炼视频的核心内容和亮点
+2. 描述要详细但不要过长，控制在600-800字以内
 3. 标签要准确反映视频内容，3-5个即可
 4. 必须使用中文
-5. 输出格式必须是JSON，格式如下：
+5. 输出格式必须是JSON：
 {
   "title": "视频标题",
-  "description": "视频介绍（100字以内）",
+  "description": "视频描述",
   "tags": ["标签1", "标签2", "标签3"]
 }
 
-请直接返回JSON格式的结果，不要包含任何其他说明文字。`, subtitleText)
+请直接返回JSON格式的结果。`, subtitleText)
+	} else {
+		prompt = `请根据这张视频缩略图，推测视频内容并生成一个吸引人的视频标题、详细描述和3-5个相关标签。
 
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+要求：
+1. 标题要简洁有力，严格控制在30个字以内
+2. 描述要详细但不要过长，控制在600-800字以内
+3. 标签要准确反映视频内容，3-5个即可
+4. 必须使用中文
+5. 输出格式必须是JSON：
+{
+  "title": "视频标题",
+  "description": "视频描述",
+  "tags": ["标签1", "标签2", "标签3"]
+}
+
+请直接返回JSON格式的结果。`
+	}
+
+	// 调用 API
+	resp, err := model.GenerateContent(ctx,
+		genai.ImageData("image/jpeg", imageData),
+		genai.Text(prompt),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("生成内容失败: %v", err)
 	}

@@ -37,7 +37,7 @@ export function useAuth() {
           const res = await fetch(`${apiBaseUrl}/api/v1/user/me`, {
             headers: { 'Authorization': `Bearer ${jwtToken}` }
           });
-          
+
           if (res.ok) {
             const data = await res.json();
             if (data.code === 0 && data.data) {
@@ -65,41 +65,7 @@ export function useAuth() {
         localStorage.removeItem('jwt_user');
       }
 
-      // 2. 检查 B站 Session，尝试换取 JWT
-      const apiBaseUrl = getApiBaseUrl();
-      const biliRes = await fetch(`${apiBaseUrl}/api/v1/auth/status`);
-      const biliData = await biliRes.json();
-
-      if (biliData.code === 0 && biliData.is_logged_in && biliData.user) {
-        console.log('🔄 B站已登录，尝试换取 JWT Token...');
-        
-        // B站已登录，换取 JWT
-        const exchangeRes = await fetch(`${apiBaseUrl}/api/v1/user/exchange-token`);
-        const exchangeData = await exchangeRes.json();
-
-        if (exchangeData.code === 0 && exchangeData.data) {
-          // 保存 JWT Token
-          localStorage.setItem('jwt_token', exchangeData.data.token.access_token);
-          localStorage.setItem('jwt_refresh_token', exchangeData.data.token.refresh_token);
-          
-          const userData: UserInfo = {
-            id: String(exchangeData.data.user.id),
-            name: exchangeData.data.user.username,
-            username: exchangeData.data.user.username,
-            avatar: exchangeData.data.user.avatar,
-            tier: exchangeData.data.user.tier,
-            bili_mid: exchangeData.data.user.bili_mid,
-            mid: exchangeData.data.user.bili_mid,
-          };
-          localStorage.setItem('jwt_user', JSON.stringify(userData));
-          setUser(userData);
-          console.log('✅ B站Session换取JWT成功:', userData.name);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 3. 都没有登录
+      // 2. 未登录
       console.log('❌ 未登录');
       setUser(null);
     } catch (error) {
@@ -130,7 +96,7 @@ export function useAuth() {
   const handleLogout = async () => {
     try {
       const apiBaseUrl = getApiBaseUrl();
-      
+
       // 清除 JWT Token
       const jwtToken = localStorage.getItem('jwt_token');
       if (jwtToken) {
@@ -143,16 +109,16 @@ export function useAuth() {
           console.warn('JWT 登出失败:', e);
         }
       }
-      
+
       // 清除 B站 Session
       await fetch(`${apiBaseUrl}/api/v1/auth/logout`, { method: 'POST' });
-      
+
       // 清除所有本地存储
       localStorage.removeItem('jwt_token');
       localStorage.removeItem('jwt_refresh_token');
       localStorage.removeItem('jwt_user');
       localStorage.removeItem('bili_user');
-      
+
       setUser(null);
       console.log('✅ 登出成功');
     } catch (error) {

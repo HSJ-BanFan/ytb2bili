@@ -25,8 +25,9 @@ import (
 type ChainTaskHandler struct {
 	App *core.AppServer
 
-	SavedVideoService *services.SavedVideoService
-	TaskStepService   *services.TaskStepService
+	SavedVideoService  *services.SavedVideoService
+	TaskStepService    *services.TaskStepService
+	BiliAccountService *services.BiliAccountService
 
 	isRunning bool
 	Task      *cron.Cron
@@ -34,15 +35,16 @@ type ChainTaskHandler struct {
 	mutex     sync.Mutex
 }
 
-func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService) *ChainTaskHandler {
+func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService) *ChainTaskHandler {
 	return &ChainTaskHandler{
-		App:               app,
-		Task:              task,
-		Db:                db,
-		SavedVideoService: savedVideoService,
-		TaskStepService:   taskStepService,
-		mutex:             sync.Mutex{},
-		isRunning:         false,
+		App:                app,
+		Task:               task,
+		Db:                 db,
+		SavedVideoService:  savedVideoService,
+		TaskStepService:    taskStepService,
+		BiliAccountService: biliAccountService,
+		mutex:              sync.Mutex{},
+		isRunning:          false,
 	}
 }
 
@@ -178,7 +180,6 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 			h.App.Logger.Errorf("更新任务状态为失败时出错: %v", updateErr)
 		}
 		return
-
 	}
 
 	// 初始化任务步骤
@@ -187,62 +188,84 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	}
 
 	stateManager := manager.NewStateManager(video.Id, video.VideoId, currentDir, video.CreatedAt)
-	chain := manager.NewTaskChain()
 
-	//// 任务1: 下载视频
-	//downloadTask := handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient)
-	//chain.AddTask(h.wrapTaskWithStepTracking(downloadTask, video.VideoId))
+	// 创建任务链并设置日志和视频ID
+	chain := manager.NewTaskChain().
+		SetLogger(h.App.Logger).
+		SetVideoID(video.VideoId)
 
-	// 任务2: 生成字幕文件
+	// ═══════════════════════════════════════════════════════════════
+	// 任务流程（按依赖关系排序）:
+	// ┌────┬─────────────┬─────────────┬──────┬────────────┐
+	// │序号│   任务名    │    依赖     │ 必需 │  失败处理  │
+	// ├────┼─────────────┼─────────────┼──────┼────────────┤
+	// │ 1  │ 获取元数据  │     无      │  是  │  终止链    │
+	// │ 2  │ 下载视频    │     无      │  否  │  继续执行  │
+	// │ 3  │ 生成字幕    │  下载视频   │  否  │    跳过    │
+	// │ 4  │ 下载封面    │  获取元数据 │  是  │  终止链    │
+	// │ 5  │ 翻译字幕    │  生成字幕   │  否  │    跳过    │
+	// │ 6  │ 生成元数据  │  下载视频   │  否  │    跳过    │
+	// └────┴─────────────┴─────────────┴──────┴────────────┘
+	// 注意: 上传任务由 UploadScheduler 定时执行
+	// ═══════════════════════════════════════════════════════════════
+
+	// 任务1: 获取元数据（无依赖，必需）
+	fetchMetadataTask := handlers.NewFetchMetadata("获取元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(fetchMetadataTask, video.VideoId))
+
+	// 任务2: 下载视频（无依赖，非必需）
+	downloadTask := handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(downloadTask, video.VideoId))
+
+	// 任务3: 生成字幕（依赖: 下载视频，非必需）
 	subtitleTask := handlers.NewGenerateSubtitles("生成字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(subtitleTask, video.VideoId))
 
-	chain.AddTask(handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient))
-	// 任务3: 翻译字幕（动态检查配置）
+	// 任务4: 下载封面（依赖: 获取元数据，必需）
+	coverTask := handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
+	chain.AddTask(h.wrapTaskWithStepTracking(coverTask, video.VideoId))
+
+	// 任务5: 翻译字幕（依赖: 生成字幕，非必需）
 	translateTask := handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
 	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
 
-	// 任务4: 生成视频标题和描述（动态检查配置）
+	// 任务6: 生成元数据（依赖: 下载视频，非必需）
 	metadataTask := handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(metadataTask, video.VideoId))
 
-	// 注意: 上传任务已移至 UploadScheduler 定时执行
-	// - 视频上传: 每小时上传一个视频
-	// - 字幕上传: 视频上传后1小时再上传字幕
-
-	h.App.Logger.Info("开始执行任务链（准备阶段）")
-	startTime := time.Now()
-
 	// 执行任务链
+	startTime := time.Now()
 	result := chain.Run(true)
-
 	duration := time.Since(startTime)
-	h.App.Logger.Infof("任务链执行完成, 耗时: %v", duration)
 
-	// 检查任务链是否成功执行（如果context中有错误信息，则认为失败）
-	success := true
-	if errorMsg, exists := result["error"]; exists && errorMsg != nil {
-		success = false
-		h.App.Logger.Errorf("任务链执行过程中发生错误: %v", errorMsg)
-	}
+	// 检查任务链是否成功执行
+	// 只有必需任务失败才认为整体失败
+	success := len(chain.FailedTasks) == 0 || !h.hasRequiredTaskFailed(chain)
 
 	// 根据执行结果更新任务状态
 	if success {
-		// 任务成功完成，更新状态为完成
 		if err := h.updateSavedVideoStatus(video.Id, "200"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为完成时出错: %v", err)
-		} else {
-			h.App.Logger.Infof("任务 %s 执行成功，状态已更新为完成", video.VideoId)
 		}
 	} else {
-		// 任务失败，更新状态为失败
 		if err := h.updateSavedVideoStatus(video.Id, "999"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为失败时出错: %v", err)
-		} else {
-			h.App.Logger.Errorf("任务 %s 执行失败，状态已更新为失败", video.VideoId)
 		}
 	}
 
+	// 记录最终结果
+	_ = result
+	_ = duration
+}
+
+// hasRequiredTaskFailed 检查是否有必需任务失败
+func (h *ChainTaskHandler) hasRequiredTaskFailed(chain *manager.TaskChain) bool {
+	for taskName := range chain.FailedTasks {
+		if config, exists := manager.TaskConfigs[taskName]; exists && config.Required {
+			return true
+		}
+	}
+	return false
 }
 
 // RunSingleTaskStep 执行单个任务步骤
@@ -286,26 +309,27 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	}
 
 	// 创建单个任务的链
-	chain := manager.NewTaskChain()
+	chain := manager.NewTaskChain().
+		SetLogger(h.App.Logger).
+		SetVideoID(videoID)
 	var task types.Task
 
 	// 根据步骤名称创建对应的任务
 	switch stepName {
+	case "获取元数据":
+		task = handlers.NewFetchMetadata("获取元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "下载视频":
 		task = handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "生成字幕":
 		task = handlers.NewGenerateSubtitles("生成字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	case "下载封面":
+		task = handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
 	case "翻译字幕":
-		// 不再在这里检查配置，让任务运行时动态检查最新配置
 		task = handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
 	case "生成元数据":
-		// 不再在这里检查配置，让任务运行时动态检查最新配置
 		task = handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	case "上传到Bilibili":
-		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
-	case "上传字幕到Bilibili":
-		fmt.Printf("注意: '上传字幕到Bilibili' 任务步骤已被注释掉，如需启用请取消注释相关代码。\n")
-		//task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
 	default:
 		return fmt.Errorf("未知的任务步骤: %s", stepName)
 	}

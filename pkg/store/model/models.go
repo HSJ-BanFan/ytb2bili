@@ -144,3 +144,26 @@ type UserToken struct {
 func (UserToken) TableName() string {
 	return "cw_user_tokens"
 }
+
+// UserBiliAccount 用户绑定的B站账号
+type UserBiliAccount struct {
+	BaseModel
+	UserID       uint       `gorm:"index;not null" json:"user_id"`   // 系统用户ID
+	BiliMid      int64      `gorm:"index;not null" json:"bili_mid"`  // B站用户MID
+	BiliName     string     `gorm:"size:100" json:"bili_name"`       // B站用户名
+	BiliFace     string     `gorm:"size:500" json:"bili_face"`       // B站头像URL
+	IsEnabled    bool       `gorm:"default:true" json:"is_enabled"`  // 是否启用
+	IsPrimary    bool       `gorm:"default:false" json:"is_primary"` // 是否为主账号（用于上传）
+	Cookies      string     `gorm:"type:text" json:"-"`              // 登录凭证（加密存储）
+	AccessToken  string     `gorm:"type:text" json:"-"`              // Access Token
+	RefreshToken string     `gorm:"type:text" json:"-"`              // Refresh Token
+	ExpiresAt    *time.Time `json:"expires_at"`                      // 凭证过期时间
+	LastUsedAt   *time.Time `json:"last_used_at"`                    // 最后使用时间
+
+	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"` // 关联用户
+}
+
+// TableName 指定表名
+func (UserBiliAccount) TableName() string {
+	return "cw_user_bili_accounts"
+}

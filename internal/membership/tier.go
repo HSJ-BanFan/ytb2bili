@@ -34,6 +34,7 @@ type Features struct {
 	CustomTemplate      bool `json:"custom_template"`       // 自定义模板
 	DataExport          bool `json:"data_export"`           // 数据导出
 	TeamCollaboration   bool `json:"team_collaboration"`    // 团队协作
+	MultiAccountUpload  bool `json:"multi_account_upload"`  // 多账号上传
 }
 
 // TierConfig 等级配置
@@ -111,6 +112,7 @@ var DefaultTierConfigs = map[Tier]TierConfig{
 			CustomTemplate:      true,
 			DataExport:          true,
 			TeamCollaboration:   true,
+			MultiAccountUpload:  true,
 		},
 		Priority: 3,
 	},
