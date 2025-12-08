@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
@@ -116,17 +117,7 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Info("开始上传视频到 Bilibili")
 	t.App.Logger.Info("========================================")
 
-	// 1. 获取登录信息（支持多用户）
-	loginInfo, err := t.getLoginInfo(context)
-	if err != nil {
-		t.App.Logger.Errorf("❌ 获取登录信息失败: %v", err)
-		context["error"] = fmt.Sprintf("获取登录信息失败: %v", err)
-		return false
-	}
-
-	t.App.Logger.Infof("✓ 已加载登录信息，用户 MID: %d", loginInfo.TokenInfo.Mid)
-
-	// 2. 查找下载的视频文件
+	// 1. 查找下载的视频文件
 	videoFiles := t.findVideoFiles()
 	if len(videoFiles) == 0 {
 		errMsg := "未找到视频文件"
@@ -135,96 +126,245 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 		return false
 	}
 
-	videoPath := videoFiles[0] // 使用第一个视频文件
+	videoPath := videoFiles[0]
 	t.App.Logger.Infof("📹 找到视频文件: %s", filepath.Base(videoPath))
 
-	// 3. 创建上传客户端
-	uploadClient := bilibili.NewUploadClient(loginInfo)
-
-	// 4. 上传视频文件到 Bilibili
-	t.App.Logger.Info("⏫ 开始上传视频到 Bilibili...")
-	video, err := uploadClient.UploadVideo(videoPath)
-	if err != nil {
-		userFriendlyError := t.getUserFriendlyError(err, "上传视频")
-		t.App.Logger.Errorf("❌ 上传视频失败: %v", err)
-		context["error"] = userFriendlyError
+	// 2. 获取所有启用的账号（企业版多账号上传）
+	accounts := t.getAllEnabledAccounts()
+	if len(accounts) == 0 {
+		t.App.Logger.Error("❌ 没有可用的B站账号")
+		context["error"] = "没有可用的B站账号"
 		return false
 	}
 
-	t.App.Logger.Infof("✓ 视频上传成功！")
-	t.App.Logger.Infof("  Filename: %s", video.Filename)
-	t.App.Logger.Infof("  Title: %s", video.Title)
-
-	// 5. 准备投稿信息
-	studio := t.buildStudioInfo(video, context)
-
-	// 6. 提交视频到 Bilibili
-	t.App.Logger.Info("📝 提交视频投稿信息...")
-	result, err := uploadClient.SubmitVideo(studio)
-	if err != nil {
-		userFriendlyError := t.getUserFriendlyError(err, "提交视频")
-		t.App.Logger.Errorf("❌ 提交视频失败: %v", err)
-		context["error"] = userFriendlyError
-		return false
+	t.App.Logger.Infof("📋 找到 %d 个启用的B站账号，开始多账号上传...", len(accounts))
+	for i, acc := range accounts {
+		t.App.Logger.Infof("   [%d] %s (MID: %d)", i+1, acc.Name, acc.Mid)
 	}
 
-	// 7. 检查提交结果
-	if result.Code != 0 {
-		errMsg := fmt.Sprintf("提交失败: code=%d, message=%s", result.Code, result.Message)
-		t.App.Logger.Error("❌ " + errMsg)
-		context["error"] = errMsg
-		return false
+	// 3. 并行上传到所有账号
+	type uploadResult struct {
+		AccountName string
+		Mid         int64
+		Success     bool
+		BVID        string
+		AID         int64
+		Error       string
 	}
 
-	// 9. 保存上传结果到数据库
-	context["bili_video"] = video
-	context["bili_result"] = result
+	results := make([]uploadResult, len(accounts))
+	var wg sync.WaitGroup
 
-	// 10. 保存结果信息到数据库和context
-	t.App.Logger.Info("💾 保存上传结果到数据库...")
-	savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
-	if err != nil {
-		t.App.Logger.Errorf("❌ 获取视频记录失败: %v", err)
-	} else {
-		// 尝试从 result.Data 中解析 BVID 和 AID
-		if result.Data != nil {
-			if dataMap, ok := result.Data.(map[string]interface{}); ok {
-				if bvid, exists := dataMap["bvid"]; exists {
-					if bvidStr, ok := bvid.(string); ok {
-						savedVideo.BiliBVID = bvidStr
-						// 保存BVID到context供后续字幕上传使用
-						context["bili_bvid"] = bvidStr
-						t.App.Logger.Infof("📺 BVID: %s", bvidStr)
-					}
-				}
-				if aid, exists := dataMap["aid"]; exists {
-					if aidFloat, ok := aid.(float64); ok {
-						savedVideo.BiliAID = int64(aidFloat)
-						// 保存AID到context
-						context["bili_aid"] = int64(aidFloat)
-						t.App.Logger.Infof("🆔 AID: %d", int64(aidFloat))
-					}
-				}
+	for i, acc := range accounts {
+		wg.Add(1)
+		go func(idx int, account *storage.BiliAccount) {
+			defer wg.Done()
+
+			result := uploadResult{
+				AccountName: account.Name,
+				Mid:         account.Mid,
+			}
+
+			t.App.Logger.Infof("⏫ [%s] 开始上传视频...", account.Name)
+
+			// 上传到该账号
+			bvid, aid, err := t.uploadToAccount(account, videoPath, context)
+			if err != nil {
+				result.Success = false
+				result.Error = err.Error()
+				t.App.Logger.Errorf("❌ [%s] 上传失败: %v", account.Name, err)
+			} else {
+				result.Success = true
+				result.BVID = bvid
+				result.AID = aid
+				t.App.Logger.Infof("✅ [%s] 上传成功! BVID: %s", account.Name, bvid)
+			}
+
+			results[idx] = result
+		}(i, acc)
+	}
+
+	wg.Wait()
+
+	// 4. 统计上传结果
+	successCount := 0
+	var firstBVID string
+	var firstAID int64
+	var allBVIDs []string
+
+	// 构建前端可用的上传结果
+	type AccountUploadResult struct {
+		AccountName string `json:"account_name"`
+		Mid         int64  `json:"mid"`
+		Success     bool   `json:"success"`
+		BVID        string `json:"bvid,omitempty"`
+		AID         int64  `json:"aid,omitempty"`
+		Error       string `json:"error,omitempty"`
+		VideoURL    string `json:"video_url,omitempty"`
+	}
+	uploadResults := make([]AccountUploadResult, 0, len(results))
+
+	t.App.Logger.Info("")
+	t.App.Logger.Info("╔══════════════════════════════════════════════════════════════╗")
+	t.App.Logger.Info("║                    📊 多账号上传结果                          ║")
+	t.App.Logger.Info("╠══════════════════════════════════════════════════════════════╣")
+
+	for _, r := range results {
+		result := AccountUploadResult{
+			AccountName: r.AccountName,
+			Mid:         r.Mid,
+			Success:     r.Success,
+			BVID:        r.BVID,
+			AID:         r.AID,
+			Error:       r.Error,
+		}
+		if r.Success {
+			successCount++
+			if firstBVID == "" {
+				firstBVID = r.BVID
+				firstAID = r.AID
+			}
+			allBVIDs = append(allBVIDs, r.BVID)
+			result.VideoURL = fmt.Sprintf("https://www.bilibili.com/video/%s", r.BVID)
+			t.App.Logger.Infof("║  ✅ %s (MID: %d) - BVID: %s", r.AccountName, r.Mid, r.BVID)
+		} else {
+			t.App.Logger.Infof("║  ❌ %s (MID: %d) - 错误: %s", r.AccountName, r.Mid, r.Error)
+		}
+		uploadResults = append(uploadResults, result)
+	}
+
+	t.App.Logger.Infof("╠══════════════════════════════════════════════════════════════╣")
+	t.App.Logger.Infof("║  成功: %d/%d 个账号", successCount, len(accounts))
+	t.App.Logger.Info("╚══════════════════════════════════════════════════════════════╝")
+
+	// 5. 保存结果到数据库和context
+	// 构建完整的上传结果JSON
+	uploadResultsJSON, _ := json.Marshal(map[string]interface{}{
+		"total_accounts":  len(accounts),
+		"success_count":   successCount,
+		"primary_bvid":    firstBVID,
+		"primary_aid":     firstAID,
+		"account_results": uploadResults,
+	})
+
+	if successCount > 0 {
+		savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
+		if err == nil {
+			savedVideo.BiliBVID = firstBVID
+			savedVideo.BiliAID = firstAID
+			// 保存所有BVID到扩展字段（JSON格式）
+			if len(allBVIDs) > 1 {
+				bvidsJSON, _ := json.Marshal(allBVIDs)
+				savedVideo.BiliMultiBVIDs = string(bvidsJSON)
+			}
+			if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
+				t.App.Logger.Errorf("❌ 保存上传结果到数据库失败: %v", err)
+			} else {
+				t.App.Logger.Info("✅ 上传结果已保存到数据库")
 			}
 		}
 
-		if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
-			t.App.Logger.Errorf("❌ 保存上传结果到数据库失败: %v", err)
-		} else {
-			t.App.Logger.Info("✅ 上传结果已保存到数据库")
+		context["bili_bvid"] = firstBVID
+		context["bili_aid"] = firstAID
+		context["bili_all_bvids"] = allBVIDs
+	}
+
+	// 保存上传结果到context，供任务步骤记录使用
+	context["upload_results"] = string(uploadResultsJSON)
+	context["result_data"] = string(uploadResultsJSON)
+
+	// 至少有一个账号上传成功就算成功
+	return successCount > 0
+}
+
+// uploadToAccount 上传视频到指定账号
+func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPath string, context map[string]interface{}) (string, int64, error) {
+	if account.LoginInfo == nil {
+		return "", 0, fmt.Errorf("账号 %s 没有登录信息", account.Name)
+	}
+
+	// 创建上传客户端
+	uploadClient := bilibili.NewUploadClient(account.LoginInfo)
+
+	// 上传视频文件
+	video, err := uploadClient.UploadVideo(videoPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("上传视频失败: %v", err)
+	}
+
+	// 准备投稿信息
+	studio := t.buildStudioInfo(video, context)
+
+	// 提交视频
+	result, err := uploadClient.SubmitVideo(studio)
+	if err != nil {
+		return "", 0, fmt.Errorf("提交视频失败: %v", err)
+	}
+
+	if result.Code != 0 {
+		return "", 0, fmt.Errorf("提交失败: code=%d, message=%s", result.Code, result.Message)
+	}
+
+	// 解析BVID和AID
+	var bvid string
+	var aid int64
+	if result.Data != nil {
+		if dataMap, ok := result.Data.(map[string]interface{}); ok {
+			if bvidVal, exists := dataMap["bvid"]; exists {
+				if bvidStr, ok := bvidVal.(string); ok {
+					bvid = bvidStr
+				}
+			}
+			if aidVal, exists := dataMap["aid"]; exists {
+				if aidFloat, ok := aidVal.(float64); ok {
+					aid = int64(aidFloat)
+				}
+			}
 		}
 	}
 
-	// 10. 输出成功信息
-	t.App.Logger.Info("========================================")
-	t.App.Logger.Infof("✓ 视频投稿成功！")
-	if savedVideo != nil && savedVideo.BiliBVID != "" {
-		t.App.Logger.Infof("  BVID: %s", savedVideo.BiliBVID)
-		t.App.Logger.Infof("  访问链接: https://www.bilibili.com/video/%s", savedVideo.BiliBVID)
-	}
-	t.App.Logger.Info("========================================")
+	return bvid, aid, nil
+}
 
-	return true
+// getAllEnabledAccounts 获取所有启用的B站账号
+func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
+	var accounts []*storage.BiliAccount
+
+	// 1. 从多账号存储获取所有启用的账号
+	multiStore := storage.GetMultiAccountStore()
+	if multiStore != nil {
+		enabledAccounts, err := multiStore.GetEnabledAccounts()
+		if err == nil && len(enabledAccounts) > 0 {
+			t.App.Logger.Infof("📦 从多账号存储获取到 %d 个启用账号", len(enabledAccounts))
+			accounts = append(accounts, enabledAccounts...)
+		}
+	}
+
+	// 2. 如果没有多账号，尝试从旧存储获取单账号
+	if len(accounts) == 0 {
+		legacyStore := storage.GetDefaultStore()
+		if legacyStore.IsValid() {
+			loginInfo, userInfo, err := legacyStore.LoadWithUserInfo()
+			if err == nil && loginInfo != nil {
+				account := &storage.BiliAccount{
+					ID:        fmt.Sprintf("%d", loginInfo.TokenInfo.Mid),
+					Mid:       loginInfo.TokenInfo.Mid,
+					Name:      loginInfo.TokenInfo.Uname,
+					IsEnabled: true,
+					IsPrimary: true,
+					LoginInfo: loginInfo,
+					UserInfo:  userInfo,
+				}
+				if userInfo != nil {
+					account.Name = userInfo.Name
+				}
+				accounts = append(accounts, account)
+				t.App.Logger.Info("📦 从旧存储获取到 1 个账号")
+			}
+		}
+	}
+
+	return accounts
 }
 
 // getLoginInfo 获取登录信息（支持多用户）

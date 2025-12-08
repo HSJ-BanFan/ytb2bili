@@ -95,14 +95,15 @@ type VideoInfo struct {
 
 // TaskStepInfo 任务步骤信息
 type TaskStepInfo struct {
-	StepName  string `json:"step_name"`
-	StepOrder int    `json:"step_order"`
-	Status    string `json:"status"`
-	StartTime string `json:"start_time"`
-	EndTime   string `json:"end_time"`
-	Duration  int64  `json:"duration"`
-	ErrorMsg  string `json:"error_msg"`
-	CanRetry  bool   `json:"can_retry"`
+	StepName   string      `json:"step_name"`
+	StepOrder  int         `json:"step_order"`
+	Status     string      `json:"status"`
+	StartTime  string      `json:"start_time"`
+	EndTime    string      `json:"end_time"`
+	Duration   int64       `json:"duration"`
+	ErrorMsg   string      `json:"error_msg"`
+	CanRetry   bool        `json:"can_retry"`
+	ResultData interface{} `json:"result_data,omitempty"` // 任务执行结果（如多账号上传结果）
 }
 
 // getVideoList 获取视频列表
@@ -214,6 +215,14 @@ func (h *VideoHandler) getVideoDetail(c *gin.Context) {
 		}
 		if step.EndTime != nil {
 			stepInfo.EndTime = step.EndTime.Format("2006-01-02 15:04:05")
+		}
+
+		// 解析任务执行结果（如多账号上传结果）
+		if step.ResultData != "" {
+			var resultData interface{}
+			if err := json.Unmarshal([]byte(step.ResultData), &resultData); err == nil {
+				stepInfo.ResultData = resultData
+			}
 		}
 
 		taskStepInfos = append(taskStepInfos, stepInfo)

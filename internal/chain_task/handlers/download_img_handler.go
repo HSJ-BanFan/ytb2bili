@@ -1,15 +1,15 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/models"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/utils"
-	"fmt"
 	"gorm.io/gorm"
-	"time"
 )
 
 type DownloadImgHandler struct {
@@ -31,6 +31,9 @@ func NewDownloadImgHandler(name string, app *core.AppServer, stateManager *manag
 }
 
 func (t *DownloadImgHandler) Execute(context map[string]interface{}) bool {
+	t.App.Logger.Info("========================================")
+	t.App.Logger.Info("📷 开始下载视频封面")
+	t.App.Logger.Info("========================================")
 
 	opt := utils.DownloadOptions{
 		SavePath:         t.StateManager.CurrentDir,
@@ -42,37 +45,53 @@ func (t *DownloadImgHandler) Execute(context map[string]interface{}) bool {
 		Overwrite:        false,
 	}
 
-	//utils.QualityMax,
 	qualities := []utils.ImageQuality{utils.QualityMax, utils.QualityStandard}
-	results := utils.DownloadYouTubeThumbnail(t.StateManager.VideoID, qualities, opt, "").(map[string]utils.DownloadResult)
+	t.App.Logger.Infof("📥 下载封面质量: %v", qualities)
+	t.App.Logger.Infof("📂 保存目录: %s", t.StateManager.CurrentDir)
+
+	resultsInterface := utils.DownloadYouTubeThumbnail(t.StateManager.VideoID, qualities, opt, "")
+	results, ok := resultsInterface.(map[string]utils.DownloadResult)
+	if !ok {
+		t.App.Logger.Error("❌ 下载封面返回结果类型错误")
+		context["error"] = "下载封面返回结果类型错误"
+		return false
+	}
 
 	var maxQualityCoverPath string
+	var anySuccess bool
 
 	for k, v := range results {
 		if v.Success {
-			fmt.Printf("下载成功: %s - %s (%d bytes)\n", k, v.FilePath, v.FileSize)
-			cosKeyName, _ := t.Client.UploadImageToCOS(v.FilePath, "")
+			anySuccess = true
+			t.App.Logger.Infof("✓ 下载成功: %s - %s (%d bytes)", k, v.FilePath, v.FileSize)
+
+			// 尝试上传到 COS（可选，失败不影响任务）
+			if t.Client != nil {
+				cosKeyName, err := t.Client.UploadImageToCOS(v.FilePath, "")
+				if err != nil {
+					t.App.Logger.Warnf("⚠️ 上传封面到 COS 失败: %v", err)
+				} else if cosKeyName != "" {
+					// 更新数据库记录
+					tbVideo := &models.TbVideo{
+						Id:      t.StateManager.Id,
+						VideoId: t.StateManager.VideoID,
+						ImgURL:  cosKeyName,
+						Status:  "img",
+					}
+					if err := t.StateManager.UpdateTBVideo(tbVideo); err != nil {
+						t.App.Logger.Warnf("⚠️ 更新数据库记录失败: %v", err)
+					}
+				}
+			}
 
 			// 如果是最高质量的封面，保存到context中供后续上传使用
 			if k == string(utils.QualityMax) {
 				maxQualityCoverPath = v.FilePath
 				context["cover_image_path"] = v.FilePath
-				t.App.Logger.Infof("✓ 最高质量封面已下载: %s", v.FilePath)
-			}
-
-			// 更新数据库记录
-			tbVideo := &models.TbVideo{
-				Id:      t.StateManager.Id,
-				VideoId: t.StateManager.VideoID,
-				ImgURL:  cosKeyName,
-				Status:  "img",
-			}
-			err := t.StateManager.UpdateTBVideo(tbVideo)
-			if err != nil {
-
+				t.App.Logger.Infof("✓ 最高质量封面已设置: %s", v.FilePath)
 			}
 		} else {
-			fmt.Printf("下载失败: %s - %s\n", k, v.ErrorMessage)
+			t.App.Logger.Warnf("⚠️ 下载失败: %s - %s", k, v.ErrorMessage)
 		}
 	}
 
@@ -86,6 +105,16 @@ func (t *DownloadImgHandler) Execute(context map[string]interface{}) bool {
 			}
 		}
 	}
+
+	if !anySuccess {
+		t.App.Logger.Error("❌ 所有封面下载都失败了")
+		context["error"] = "所有封面下载都失败了"
+		return false
+	}
+
+	t.App.Logger.Info("========================================")
+	t.App.Logger.Info("✅ 封面下载完成")
+	t.App.Logger.Info("========================================")
 
 	return true
 }

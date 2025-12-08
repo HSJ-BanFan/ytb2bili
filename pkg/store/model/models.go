@@ -53,7 +53,7 @@ type User struct {
 	Avatar      string     `gorm:"size:255" json:"avatar"`
 	Status      int        `gorm:"default:1" json:"status"` // 1:正常 0:禁用
 	LastLoginAt *time.Time `json:"last_login_at"`
-	BiliMid     string     `gorm:"uniqueIndex;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号
+	BiliMid     string     `gorm:"index;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号（允许为空）
 
 	// 会员系统字段
 	MembershipTier   string     `gorm:"size:20;default:free" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
@@ -93,8 +93,9 @@ type SavedVideo struct {
 	GeneratedTitle string `gorm:"type:varchar(500)" json:"generated_title"`               // AI生成的标题
 	GeneratedDesc  string `gorm:"type:text" json:"generated_desc"`                        // AI生成的描述
 	GeneratedTags  string `gorm:"type:varchar(1000)" json:"generated_tags"`               // AI生成的标签（逗号分隔）
-	BiliBVID       string `gorm:"type:varchar(50)" json:"bili_bvid"`                      // Bilibili BVID
-	BiliAID        int64  `gorm:"type:bigint" json:"bili_aid"`                            // Bilibili AID
+	BiliBVID       string `gorm:"type:varchar(50)" json:"bili_bvid"`                      // Bilibili BVID (主账号)
+	BiliAID        int64  `gorm:"type:bigint" json:"bili_aid"`                            // Bilibili AID (主账号)
+	BiliMultiBVIDs string `gorm:"type:text" json:"bili_multi_bvids"`                      // 多账号上传的所有BVID (JSON数组)
 	OperationType  string `gorm:"type:varchar(50)" json:"operation_type"`                 // 操作类型 (download/upload等)
 	Subtitles      string `gorm:"type:longtext" json:"subtitles"`                         // 字幕JSON字符串
 	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"`             // 播放列表ID
