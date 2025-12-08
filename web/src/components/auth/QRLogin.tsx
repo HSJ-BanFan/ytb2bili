@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { QrCode, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 
 interface QRLoginProps {
@@ -14,6 +14,21 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
   const [status, setStatus] = useState<'idle' | 'loading' | 'scanning' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<string>('');
   const [polling, setPolling] = useState<boolean>(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 清理轮询
+  const clearPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    setPolling(false);
+  }, []);
 
   // 获取API基础URL
   const getApiBaseUrl = () => {
@@ -69,33 +84,59 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
 
   // 轮询检查登录状态
   const startPolling = (code: string) => {
-    if (polling) return;
+    // 先清理之前的轮询
+    clearPolling();
     
     setPolling(true);
-    const pollInterval = setInterval(async () => {
+    pollIntervalRef.current = setInterval(async () => {
       try {
         const apiBaseUrl = getApiBaseUrl();
+        // 获取 JWT token 用于用户隔离
+        const jwtToken = localStorage.getItem('jwt_token');
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (jwtToken) {
+          headers['Authorization'] = `Bearer ${jwtToken}`;
+        }
+        
         const response = await fetch(`${apiBaseUrl}/api/v1/auth/poll`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: JSON.stringify({ auth_code: code }),
         });
         
         const data = await response.json();
         
         if (data.code === 0 && data.login_info) {
-          // 登录成功
+          // 登录成功，调用 addAccount API 保存到数据库
           setStatus('success');
-          setMessage('登录成功！正在跳转...');
-          setPolling(false);
-          clearInterval(pollInterval);
+          setMessage('登录成功！正在保存账号...');
+          clearPolling();
           
-          // 延迟一下让用户看到成功消息，然后刷新主页面状态
+          // 调用 addAccount API 保存到数据库（发送完整的 login_info）
+          try {
+            const addAccountResponse = await fetch(`${apiBaseUrl}/api/v1/auth/accounts`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ login_info: data.login_info }),
+            });
+            const addAccountData = await addAccountResponse.json();
+            if (addAccountData.code === 0) {
+              setMessage('账号绑定成功！');
+              console.log('Account saved to database:', addAccountData);
+            } else {
+              console.warn('Failed to save account:', addAccountData.message);
+              setMessage('登录成功，但保存账号失败: ' + addAccountData.message);
+            }
+          } catch (saveError) {
+            console.error('Failed to save account to database:', saveError);
+          }
+          
+          // 刷新主页面状态
           setTimeout(() => {
             if (onRefreshStatus) {
-              onRefreshStatus(); // 通知主页面刷新登录状态
+              onRefreshStatus();
             }
             
             if (onLoginSuccess) {
@@ -111,14 +152,12 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
           // 权限不足（多账号上传需要企业版）
           setStatus('error');
           setMessage(data.message || '多账号上传是企业版功能，请升级会员');
-          setPolling(false);
-          clearInterval(pollInterval);
+          clearPolling();
         } else if (response.status === 400 || response.status === 500) {
           // 二维码过期或无效
           setStatus('error');
           setMessage('二维码已过期，请重新生成');
-          setPolling(false);
-          clearInterval(pollInterval);
+          clearPolling();
         }
       } catch (error) {
         console.error('检查登录状态失败:', error);
@@ -126,10 +165,9 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
     }, 3000); // 每3秒检查一次
 
     // 5分钟后自动停止轮询
-    setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       if (polling) {
-        setPolling(false);
-        clearInterval(pollInterval);
+        clearPolling();
         if (status === 'scanning') {
           setStatus('error');
           setMessage('二维码已过期，请重新生成');
@@ -142,12 +180,12 @@ export default function QRLogin({ onLoginSuccess, onRefreshStatus }: QRLoginProp
     generateQRCode();
     
     return () => {
-      setPolling(false);
+      clearPolling();
     };
   }, []); // 移除依赖项，避免无限循环
 
   const handleRefresh = () => {
-    setPolling(false);
+    clearPolling();
     generateQRCode();
   };
 

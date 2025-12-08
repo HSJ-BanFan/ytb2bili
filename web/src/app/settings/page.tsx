@@ -95,6 +95,7 @@ export default function SettingsPage() {
 
   // 删除账号
   const handleRemoveAccount = async (mid: number) => {
+    console.log('[handleRemoveAccount] 被调用, mid =', mid);
     if (!confirm('确定要删除此账号吗？')) return;
     try {
       await authApi.removeAccount(String(mid));
@@ -186,8 +187,8 @@ export default function SettingsPage() {
               <button
                 onClick={() => setActiveTab('general')}
                 className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'general'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
                 <Settings className="w-4 h-4 inline mr-2" />
@@ -196,8 +197,8 @@ export default function SettingsPage() {
               <button
                 onClick={() => setActiveTab('ai')}
                 className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'ai'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
                 <Bot className="w-4 h-4 inline mr-2" />
@@ -206,8 +207,8 @@ export default function SettingsPage() {
               <button
                 onClick={() => setActiveTab('account')}
                 className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === 'account'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
               >
                 <Link2 className="w-4 h-4 inline mr-2" />
@@ -319,12 +320,12 @@ export default function SettingsPage() {
                       <div
                         key={account.id}
                         className={`flex items-center justify-between p-4 rounded-lg border ${account.is_primary
-                            ? 'bg-blue-50 border-blue-200'
-                            : account.is_expired
-                              ? 'bg-red-50 border-red-200'
-                              : account.is_enabled
-                                ? 'bg-green-50 border-green-200'
-                                : 'bg-gray-50 border-gray-200'
+                          ? 'bg-blue-50 border-blue-200'
+                          : account.is_expired
+                            ? 'bg-red-50 border-red-200'
+                            : account.is_enabled
+                              ? 'bg-green-50 border-green-200'
+                              : 'bg-gray-50 border-gray-200'
                           }`}
                       >
                         <div className="flex items-center gap-3">
@@ -381,8 +382,8 @@ export default function SettingsPage() {
                             <button
                               onClick={() => handleToggleEnabled(account.mid, account.is_enabled)}
                               className={`p-2 rounded-lg transition-colors ${account.is_enabled
-                                  ? 'text-green-600 hover:bg-green-100'
-                                  : 'text-gray-400 hover:bg-gray-100'
+                                ? 'text-green-600 hover:bg-green-100'
+                                : 'text-gray-400 hover:bg-gray-100'
                                 }`}
                               title={account.is_enabled ? '禁用账号' : '启用账号'}
                             >

@@ -298,3 +298,12 @@ func (s *TaskStepService) GetFailedOrSkippedSteps(videoID string) ([]model.TaskS
 		Find(&steps).Error
 	return steps, err
 }
+
+// GetCompletedStepNames 获取指定视频已完成的任务步骤名称列表
+func (s *TaskStepService) GetCompletedStepNames(videoID string) ([]string, error) {
+	var stepNames []string
+	err := s.DB.Model(&model.TaskStep{}).
+		Where("video_id = ? AND status = ?", videoID, model.TaskStepStatusCompleted).
+		Pluck("step_name", &stepNames).Error
+	return stepNames, err
+}

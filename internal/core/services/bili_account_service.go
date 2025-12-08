@@ -86,6 +86,13 @@ func (s *BiliAccountService) GetUserAccounts(userID uint) ([]model.UserBiliAccou
 	return accounts, err
 }
 
+// GetAllEnabledAccounts 获取所有启用的B站账号（用于多账号上传）
+func (s *BiliAccountService) GetAllEnabledAccounts() ([]model.UserBiliAccount, error) {
+	var accounts []model.UserBiliAccount
+	err := s.db.Where("is_enabled = ?", true).Order("is_primary DESC, created_at ASC").Find(&accounts).Error
+	return accounts, err
+}
+
 // GetPrimaryAccount 获取用户的主B站账号
 func (s *BiliAccountService) GetPrimaryAccount(userID uint) (*model.UserBiliAccount, error) {
 	var account model.UserBiliAccount
@@ -153,23 +160,57 @@ func (s *BiliAccountService) SetPrimaryAccount(userID uint, accountID uint) erro
 		Update("is_primary", true).Error
 }
 
-// EnableAccount 启用账号
-func (s *BiliAccountService) EnableAccount(accountID uint) error {
+// EnableAccount 启用账号（按用户隔离）
+func (s *BiliAccountService) EnableAccount(userID uint, accountID uint) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("id = ?", accountID).
+		Where("id = ? AND user_id = ?", accountID, userID).
 		Update("is_enabled", true).Error
 }
 
-// DisableAccount 禁用账号
-func (s *BiliAccountService) DisableAccount(accountID uint) error {
+// DisableAccount 禁用账号（按用户隔离）
+func (s *BiliAccountService) DisableAccount(userID uint, accountID uint) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("id = ?", accountID).
+		Where("id = ? AND user_id = ?", accountID, userID).
 		Update("is_enabled", false).Error
 }
 
-// UnbindAccount 解绑账号
+// UnbindAccount 解绑账号（通过数据库ID）
 func (s *BiliAccountService) UnbindAccount(userID uint, accountID uint) error {
 	return s.db.Where("id = ? AND user_id = ?", accountID, userID).Delete(&model.UserBiliAccount{}).Error
+}
+
+// UnbindAccountByMid 解绑账号（通过B站MID）
+func (s *BiliAccountService) UnbindAccountByMid(userID uint, biliMid int64) error {
+	return s.db.Where("bili_mid = ? AND user_id = ?", biliMid, userID).Delete(&model.UserBiliAccount{}).Error
+}
+
+// EnableAccountByMid 启用账号（通过B站MID）
+func (s *BiliAccountService) EnableAccountByMid(userID uint, biliMid int64) error {
+	return s.db.Model(&model.UserBiliAccount{}).
+		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Update("is_enabled", true).Error
+}
+
+// DisableAccountByMid 禁用账号（通过B站MID）
+func (s *BiliAccountService) DisableAccountByMid(userID uint, biliMid int64) error {
+	return s.db.Model(&model.UserBiliAccount{}).
+		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Update("is_enabled", false).Error
+}
+
+// SetPrimaryAccountByMid 设置主账号（通过B站MID）
+func (s *BiliAccountService) SetPrimaryAccountByMid(userID uint, biliMid int64) error {
+	// 先取消所有主账号
+	if err := s.db.Model(&model.UserBiliAccount{}).
+		Where("user_id = ? AND is_primary = ?", userID, true).
+		Update("is_primary", false).Error; err != nil {
+		return err
+	}
+
+	// 设置新的主账号
+	return s.db.Model(&model.UserBiliAccount{}).
+		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Update("is_primary", true).Error
 }
 
 // UpdateLastUsed 更新最后使用时间

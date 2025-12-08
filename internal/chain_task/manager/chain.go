@@ -72,6 +72,14 @@ func (c *TaskChain) SetVideoID(videoID string) *TaskChain {
 	return c
 }
 
+// SetCompletedTasks 设置已完成的任务（用于单任务执行时预填充依赖状态）
+func (c *TaskChain) SetCompletedTasks(completedTasks []string) *TaskChain {
+	for _, taskName := range completedTasks {
+		c.CompletedTasks[taskName] = true
+	}
+	return c
+}
+
 // AddTask 添加任务到链中
 func (c *TaskChain) AddTask(task types.Task) *TaskChain {
 	if err := task.InsertTask(); err != nil {

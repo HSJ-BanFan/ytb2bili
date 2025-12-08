@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -104,21 +102,7 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 		return
 	}
 
-	// 检查是否已有账号，如果有则需要多账号上传权限
-	existingAccounts, _ := h.BiliAccountService.GetUserAccounts(userID)
-	if len(existingAccounts) > 0 {
-		// 已有账号，检查多账号上传权限
-		result := h.FeatureChecker.CanUseFeature(context.Background(), fmt.Sprintf("%d", userID), "multi_account_upload")
-		if !result.Allowed {
-			c.JSON(http.StatusForbidden, gin.H{
-				"code":    403,
-				"message": result.Reason,
-				"upgrade": result.Upgrade,
-			})
-			return
-		}
-	}
-
+	// 所有用户都可以绑定多个账号，多账号上传限制在上传环节检查
 	account, err := h.BiliAccountService.BindAccount(userID, req.LoginInfo, req.IsPrimary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "绑定失败: " + err.Error()})
@@ -203,7 +187,7 @@ func (h *BiliAccountHandler) enableAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.EnableAccount(uint(accountID)); err != nil {
+	if err := h.BiliAccountService.EnableAccount(userID, uint(accountID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "启用失败"})
 		return
 	}
@@ -232,7 +216,7 @@ func (h *BiliAccountHandler) disableAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.DisableAccount(uint(accountID)); err != nil {
+	if err := h.BiliAccountService.DisableAccount(userID, uint(accountID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "禁用失败"})
 		return
 	}

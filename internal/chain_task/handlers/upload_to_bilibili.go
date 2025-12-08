@@ -330,7 +330,42 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 	var accounts []*storage.BiliAccount
 
-	// 1. 从多账号存储获取所有启用的账号
+	// 1. 优先从数据库获取所有启用的账号
+	if t.BiliAccountService != nil {
+		dbAccounts, err := t.BiliAccountService.GetAllEnabledAccounts()
+		if err == nil && len(dbAccounts) > 0 {
+			t.App.Logger.Infof("📦 从数据库获取到 %d 个启用账号", len(dbAccounts))
+			for _, dbAccount := range dbAccounts {
+				// 解析 cookies 中的 LoginInfo
+				var loginInfo *bilibili.LoginInfo
+				if dbAccount.Cookies != "" {
+					if err := json.Unmarshal([]byte(dbAccount.Cookies), &loginInfo); err != nil {
+						t.App.Logger.Warnf("解析账号 %s 的登录信息失败: %v", dbAccount.BiliName, err)
+						continue
+					}
+				}
+				if loginInfo == nil {
+					t.App.Logger.Warnf("账号 %s 没有有效的登录信息", dbAccount.BiliName)
+					continue
+				}
+				account := &storage.BiliAccount{
+					ID:        fmt.Sprintf("%d", dbAccount.BiliMid),
+					Mid:       dbAccount.BiliMid,
+					Name:      dbAccount.BiliName,
+					Face:      dbAccount.BiliFace,
+					IsEnabled: dbAccount.IsEnabled,
+					IsPrimary: dbAccount.IsPrimary,
+					LoginInfo: loginInfo,
+				}
+				accounts = append(accounts, account)
+			}
+			if len(accounts) > 0 {
+				return accounts
+			}
+		}
+	}
+
+	// 2. 回退：从多账号本地存储获取所有启用的账号
 	multiStore := storage.GetMultiAccountStore()
 	if multiStore != nil {
 		enabledAccounts, err := multiStore.GetEnabledAccounts()
@@ -340,7 +375,7 @@ func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 		}
 	}
 
-	// 2. 如果没有多账号，尝试从旧存储获取单账号
+	// 3. 如果没有多账号，尝试从旧存储获取单账号
 	if len(accounts) == 0 {
 		legacyStore := storage.GetDefaultStore()
 		if legacyStore.IsValid() {

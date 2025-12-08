@@ -92,7 +92,9 @@ yt_dlp_path = ""
   # {original_desc}
   # """
 [DownloadConfig]
-use_aria2c = true           # 是否使用 aria2c（无代理时）
-concurrent_fragments = 8    # yt-dlp 并发分片数
+use_aria2c = true           # 是否使用 aria2c 多线程下载
+aria2c_path = ""            # aria2c 可执行文件路径（留空自动查找）
+concurrent_fragments = 8    # yt-dlp 并发分片数（不使用 aria2c 时生效）
 aria2c_connections = 16     # aria2c 连接数
 http_chunk_size = "10M"     # HTTP 分块大小
+aria2c_with_proxy = false   # 使用代理时是否仍尝试 aria2c（可能遇到403，建议先测试）

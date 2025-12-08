@@ -439,8 +439,8 @@ func registerHandlers(
 
 	// 旧的认证 Handler (B站扫码登录)
 	oldFeatureChecker := membership.NewFeatureChecker(membershipStore)
-	oldAuthHandler := handler.NewAuthHandler(server, oldFeatureChecker)
-	oldAuthHandler.RegisterRoutes(server)
+	oldAuthHandler := handler.NewAuthHandler(server, oldFeatureChecker, biliAccountService)
+	oldAuthHandler.RegisterRoutes(server, authMiddleware)
 	logger.Info("✓ Bilibili Auth routes registered")
 
 	// 新的认证 Handler (JWT + App 认证)

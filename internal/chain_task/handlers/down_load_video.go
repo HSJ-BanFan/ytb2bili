@@ -188,6 +188,12 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		"-P", t.StateManager.CurrentDir,
 		"-o", "%(id)s.%(ext)s",
 		"--merge-output-format", "mp4",
+		// 网络优化参数
+		"--retries", "10", // 重试次数
+		"--fragment-retries", "10", // 分片重试次数
+		"--socket-timeout", "30", // Socket 超时（秒）
+		"--file-access-retries", "5", // 文件访问重试
+		"--extractor-retries", "5", // 提取器重试
 	}
 
 	// 获取下载配置
@@ -207,19 +213,32 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 	}
 
 	// 检查是否有 aria2c 可用，用于多线程下载加速
-	// 注意：当使用代理时，aria2c 可能会遇到 403 错误，因此使用代理时优先使用 yt-dlp 内置下载器
+	// 注意：当使用代理时，aria2c 可能会遇到 403 错误，可通过配置 aria2c_with_proxy 强制启用
 	aria2cPath := t.findAria2c()
-	if useAria2c && aria2cPath != "" && proxyHost == "" {
-		// 不使用代理时，aria2c 可以正常工作
+	aria2cWithProxy := false
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
+		aria2cWithProxy = t.App.Config.DownloadConfig.Aria2cWithProxy
+	}
+
+	// 判断是否使用 aria2c：启用 && 已安装 && (无代理 || 配置允许代理时使用)
+	canUseAria2c := useAria2c && aria2cPath != "" && (proxyHost == "" || aria2cWithProxy)
+
+	if canUseAria2c {
 		t.App.Logger.Infof("🚀 检测到 aria2c，启用多线程下载加速 (连接数: %d)", aria2cConnections)
 		aria2cArgs := fmt.Sprintf("aria2c:-x %d -s %d -k 1M --file-allocation=none --async-dns=false --check-certificate=false", aria2cConnections, aria2cConnections)
+		// 如果使用代理，为 aria2c 添加代理参数
+		if proxyHost != "" {
+			aria2cArgs += fmt.Sprintf(" --all-proxy=%s", proxyHost)
+			t.App.Logger.Infof("📡 aria2c 使用代理: %s", proxyHost)
+		}
 		command = append(command,
 			"--downloader", "aria2c",
 			"--downloader-args", aria2cArgs,
 		)
 	} else {
-		if proxyHost != "" {
+		if proxyHost != "" && !aria2cWithProxy {
 			t.App.Logger.Info("ℹ️ 使用代理时，采用 yt-dlp 内置并发下载器（避免 aria2c 403 错误）")
+			t.App.Logger.Info("💡 如需使用 aria2c，可在配置中设置 aria2c_with_proxy = true")
 		} else if !useAria2c {
 			t.App.Logger.Info("ℹ️ aria2c 已在配置中禁用，使用 yt-dlp 内置下载器")
 		} else {

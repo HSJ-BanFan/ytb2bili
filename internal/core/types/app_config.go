@@ -233,6 +233,7 @@ type DownloadConfig struct {
 	Aria2cConnections   int    `toml:"aria2c_connections"`   // aria2c 连接数（默认16）
 	HttpChunkSize       string `toml:"http_chunk_size"`      // HTTP 分块大小（默认10M）
 	PreferFormat        string `toml:"prefer_format"`        // 首选格式: best, 1080p, 720p, 480p
+	Aria2cWithProxy     bool   `toml:"aria2c_with_proxy"`    // 使用代理时是否仍尝试 aria2c（可能遇到403）
 }
 
 // AnalyticsConfig 数据分析配置

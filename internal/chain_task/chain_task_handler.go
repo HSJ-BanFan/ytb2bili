@@ -308,10 +308,18 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		h.App.Logger.Errorf("更新任务步骤状态失败: %v", err)
 	}
 
-	// 创建单个任务的链
+	// 获取已完成的任务步骤（用于依赖检查）
+	completedSteps, err := h.TaskStepService.GetCompletedStepNames(videoID)
+	if err != nil {
+		h.App.Logger.Warnf("获取已完成步骤失败: %v", err)
+		completedSteps = []string{}
+	}
+
+	// 创建单个任务的链，并预填充已完成的任务
 	chain := manager.NewTaskChain().
 		SetLogger(h.App.Logger).
-		SetVideoID(videoID)
+		SetVideoID(videoID).
+		SetCompletedTasks(completedSteps)
 	var task types.Task
 
 	// 根据步骤名称创建对应的任务
