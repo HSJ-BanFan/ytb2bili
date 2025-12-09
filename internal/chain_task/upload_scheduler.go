@@ -2,6 +2,7 @@ package chain_task
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -233,8 +234,23 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 
 	s.logger.Infof("开始执行上传任务: %s (VideoID: %s)", taskName, videoID)
 
-	// 执行任务
-	result := chain.Run(false)
+	// 创建带有封面路径的 context
+	initialContext := make(map[string]interface{})
+
+	// 查找封面文件并设置到 context
+	if taskName == "上传到Bilibili" {
+		s.logger.Infof("📂 封面查找目录: %s", stateManager.CurrentDir)
+		coverPath := s.findCoverImage(stateManager.CurrentDir)
+		if coverPath != "" {
+			initialContext["cover_image_path"] = coverPath
+			s.logger.Infof("📸 找到封面文件: %s (完整路径: %s)", filepath.Base(coverPath), coverPath)
+		} else {
+			s.logger.Warnf("⚠️ 未找到封面文件，目录: %s", stateManager.CurrentDir)
+		}
+	}
+
+	// 执行任务（传入初始 context）
+	result := chain.RunWithContext(initialContext)
 
 	// 检查执行结果
 	success := true
@@ -278,4 +294,43 @@ func (s *UploadScheduler) ExecuteManualUpload(videoID, taskType string) error {
 	}
 
 	return s.executeUploadTask(videoID, taskName)
+}
+
+// findCoverImage 在指定目录中查找封面图片
+// 优先查找 maxresdefault.jpg，其次 sddefault.jpg，最后查找任意 jpg 文件
+func (s *UploadScheduler) findCoverImage(dir string) string {
+	// 优先级列表
+	priorityFiles := []string{
+		"maxresdefault.jpg",
+		"sddefault.jpg",
+		"hqdefault.jpg",
+		"mqdefault.jpg",
+		"default.jpg",
+	}
+
+	// 按优先级查找
+	for _, filename := range priorityFiles {
+		coverPath := filepath.Join(dir, filename)
+		if _, err := os.Stat(coverPath); err == nil {
+			return coverPath
+		}
+	}
+
+	// 如果都没找到，查找任意 jpg 文件
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) == ".jpg" || filepath.Ext(name) == ".jpeg" || filepath.Ext(name) == ".png" {
+			return filepath.Join(dir, name)
+		}
+	}
+
+	return ""
 }

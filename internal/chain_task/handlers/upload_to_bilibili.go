@@ -292,8 +292,8 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 		return "", 0, fmt.Errorf("上传视频失败: %v", err)
 	}
 
-	// 准备投稿信息
-	studio := t.buildStudioInfo(video, context)
+	// 准备投稿信息（传入当前账号用于封面上传）
+	studio := t.buildStudioInfo(video, context, account)
 
 	// 提交视频
 	result, err := uploadClient.SubmitVideo(studio)
@@ -513,7 +513,8 @@ func (t *UploadToBilibili) findVideoFiles() []string {
 }
 
 // buildStudioInfo 构建投稿信息
-func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[string]interface{}) *bilibili.Studio {
+// account 参数用于上传封面时使用正确的账号登录信息
+func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[string]interface{}, account *storage.BiliAccount) *bilibili.Studio {
 	// 默认值
 	title := t.StateManager.VideoID
 	desc := "自动上传的视频"
@@ -718,13 +719,33 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 	}
 
 	// 从 context 获取下载的封面图片并上传作为封面
+	t.App.Logger.Infof("📸 检查 context 中的封面路径...")
+	t.App.Logger.Infof("📸 context keys: %v", func() []string {
+		keys := make([]string, 0, len(context))
+		for k := range context {
+			keys = append(keys, k)
+		}
+		return keys
+	}())
 	if coverImagePath, ok := context["cover_image_path"].(string); ok && coverImagePath != "" {
-		t.App.Logger.Infof("📸 找到封面图片: %s", filepath.Base(coverImagePath))
+		t.App.Logger.Infof("📸 找到封面图片: %s (完整路径: %s)", filepath.Base(coverImagePath), coverImagePath)
 
-		// 创建上传客户端并上传封面
-		loginStore := storage.GetDefaultStore()
-		loginInfo, err := loginStore.Load()
-		if err == nil {
+		// 使用当前账号的登录信息上传封面
+		var loginInfo *bilibili.LoginInfo
+		if account != nil && account.LoginInfo != nil {
+			loginInfo = account.LoginInfo
+			t.App.Logger.Infof("📸 使用账号 %s 上传封面", account.Name)
+		} else {
+			// 回退到旧存储
+			loginStore := storage.GetDefaultStore()
+			var err error
+			loginInfo, err = loginStore.Load()
+			if err != nil {
+				t.App.Logger.Errorf("❌ 获取登录信息失败，无法上传封面: %v", err)
+			}
+		}
+
+		if loginInfo != nil {
 			uploadClient := bilibili.NewUploadClient(loginInfo)
 			uploadedCoverURL, err := uploadClient.UploadCover(coverImagePath)
 			if err != nil {
@@ -734,6 +755,8 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 				t.App.Logger.Infof("✓ 封面上传成功: %s", coverURL)
 			}
 		}
+	} else {
+		t.App.Logger.Warn("⚠️ context 中没有 cover_image_path，将不设置封面")
 	}
 
 	// 检查是否有中文字幕

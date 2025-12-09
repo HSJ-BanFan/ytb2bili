@@ -2,6 +2,7 @@ package chain_task
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -349,8 +350,23 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 
 	h.App.Logger.Infof("开始执行单个任务步骤: %s (VideoID: %s)", stepName, videoID)
 
-	// 执行任务
-	result := chain.Run(false)
+	// 创建带有封面路径的 context
+	initialContext := make(map[string]interface{})
+
+	// 如果是上传任务，查找封面文件并设置到 context
+	if stepName == "上传到Bilibili" {
+		h.App.Logger.Infof("📂 封面查找目录: %s", stateManager.CurrentDir)
+		coverPath := h.findCoverImage(stateManager.CurrentDir)
+		if coverPath != "" {
+			initialContext["cover_image_path"] = coverPath
+			h.App.Logger.Infof("📸 找到封面文件: %s", coverPath)
+		} else {
+			h.App.Logger.Warnf("⚠️ 未找到封面文件，目录: %s", stateManager.CurrentDir)
+		}
+	}
+
+	// 执行任务（传入初始 context）
+	result := chain.RunWithContext(initialContext)
 
 	// 检查执行结果
 	success := true
@@ -464,4 +480,43 @@ func (w *TaskStepWrapper) Execute(context map[string]interface{}) bool {
 // updateSavedVideoStatus 更新 SavedVideo 的状态
 func (h *ChainTaskHandler) updateSavedVideoStatus(id uint, status string) error {
 	return h.SavedVideoService.UpdateStatus(id, status)
+}
+
+// findCoverImage 在指定目录中查找封面图片
+// 优先查找 maxresdefault.jpg，其次 sddefault.jpg，最后查找任意 jpg 文件
+func (h *ChainTaskHandler) findCoverImage(dir string) string {
+	// 优先级列表
+	priorityFiles := []string{
+		"maxresdefault.jpg",
+		"sddefault.jpg",
+		"hqdefault.jpg",
+		"mqdefault.jpg",
+		"default.jpg",
+	}
+
+	// 按优先级查找
+	for _, filename := range priorityFiles {
+		coverPath := filepath.Join(dir, filename)
+		if _, err := os.Stat(coverPath); err == nil {
+			return coverPath
+		}
+	}
+
+	// 如果都没找到，查找任意 jpg 文件
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if filepath.Ext(name) == ".jpg" || filepath.Ext(name) == ".jpeg" || filepath.Ext(name) == ".png" {
+			return filepath.Join(dir, name)
+		}
+	}
+
+	return ""
 }

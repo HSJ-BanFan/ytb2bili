@@ -257,3 +257,12 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 
 	return c.Context
 }
+
+// RunWithContext 使用指定的初始 context 执行任务链
+func (c *TaskChain) RunWithContext(initialContext map[string]interface{}) map[string]interface{} {
+	// 合并初始 context 到任务链的 context
+	for k, v := range initialContext {
+		c.Context[k] = v
+	}
+	return c.Run(false)
+}
