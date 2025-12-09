@@ -194,6 +194,12 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		"--socket-timeout", "30", // Socket 超时（秒）
 		"--file-access-retries", "5", // 文件访问重试
 		"--extractor-retries", "5", // 提取器重试
+		// 字幕下载参数
+		"--write-subs",                  // 下载字幕
+		"--write-auto-subs",             // 下载自动生成的字幕
+		"--sub-langs", "en.*,zh.*,ja.*", // 下载英文、中文、日文字幕
+		"--sub-format", "srt/vtt/best", // 字幕格式优先级
+		"--convert-subs", "srt", // 转换为 SRT 格式
 	}
 
 	// 获取下载配置
@@ -276,7 +282,17 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		possiblePaths = append(possiblePaths, filepath.Join(cwd, "cookies.txt"))
 	}
 
-	// 4. 相对路径
+	// 4. 项目根目录（StateManager.CurrentDir 的上级目录）
+	if t.StateManager != nil && t.StateManager.CurrentDir != "" {
+		// 从 data/media/date/videoID 向上找到项目根目录
+		projectRoot := t.StateManager.CurrentDir
+		for i := 0; i < 4; i++ {
+			projectRoot = filepath.Dir(projectRoot)
+		}
+		possiblePaths = append(possiblePaths, filepath.Join(projectRoot, "cookies.txt"))
+	}
+
+	// 5. 相对路径
 	possiblePaths = append(possiblePaths, "cookies.txt")
 
 	// 查找第一个存在的 cookies 文件

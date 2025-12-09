@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
@@ -283,14 +284,36 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 		return "", 0, fmt.Errorf("账号 %s 没有登录信息", account.Name)
 	}
 
+	// 获取视频文件信息
+	fileInfo, err := os.Stat(videoPath)
+	if err != nil {
+		return "", 0, fmt.Errorf("获取视频文件信息失败: %v", err)
+	}
+	fileSizeMB := float64(fileInfo.Size()) / 1024 / 1024
+	t.App.Logger.Infof("📦 视频文件: %s (%.2f MB)", filepath.Base(videoPath), fileSizeMB)
+
+	// 预估上传时间（假设平均上传速度 2MB/s）
+	estimatedSeconds := int(fileSizeMB / 2)
+	if estimatedSeconds < 10 {
+		estimatedSeconds = 10
+	}
+	t.App.Logger.Infof("⏳ 预计上传时间: %d 秒 (取决于网络速度)", estimatedSeconds)
+
 	// 创建上传客户端
 	uploadClient := bilibili.NewUploadClient(account.LoginInfo)
 
 	// 上传视频文件
+	t.App.Logger.Info("🚀 开始上传视频到 B站...")
+	startTime := time.Now()
 	video, err := uploadClient.UploadVideo(videoPath)
+	uploadDuration := time.Since(startTime)
 	if err != nil {
 		return "", 0, fmt.Errorf("上传视频失败: %v", err)
 	}
+
+	// 计算实际上传速度
+	actualSpeedMBps := fileSizeMB / uploadDuration.Seconds()
+	t.App.Logger.Infof("✅ 视频上传完成! 耗时: %s, 平均速度: %.2f MB/s", uploadDuration.Round(time.Second), actualSpeedMBps)
 
 	// 准备投稿信息（传入当前账号用于封面上传）
 	studio := t.buildStudioInfo(video, context, account)
@@ -321,6 +344,11 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 				}
 			}
 		}
+	}
+
+	// 上传字幕（如果有中文字幕）
+	if bvid != "" {
+		t.uploadSubtitles(account, bvid)
 	}
 
 	return bvid, aid, nil
@@ -943,4 +971,48 @@ func (t *UploadToBilibili) getUserFriendlyError(err error, operation string) str
 
 	// 如果是未知错误，返回简化的错误信息
 	return fmt.Sprintf("%s失败：发生未知错误，请重试或联系技术支持", operation)
+}
+
+// uploadSubtitles 上传字幕到 B站
+// 支持上传中文字幕(zh.srt)和英文字幕(en.srt)
+func (t *UploadToBilibili) uploadSubtitles(account *storage.BiliAccount, bvid string) {
+	t.App.Logger.Info("📝 开始上传字幕...")
+
+	// 创建字幕上传器
+	client := bilibili.NewClient()
+	subtitleUploader := bilibili.NewSubtitleUploader(client, account.LoginInfo)
+
+	// 查找字幕文件
+	zhSRTPath := filepath.Join(t.StateManager.CurrentDir, "zh.srt")
+	enSRTPath := filepath.Join(t.StateManager.CurrentDir, "en.srt")
+
+	subtitlesUploaded := 0
+
+	// 上传中文字幕
+	if _, err := os.Stat(zhSRTPath); err == nil {
+		t.App.Logger.Infof("  │ 上传中文字幕: zh.srt")
+		if err := subtitleUploader.UploadSubtitle(bvid, zhSRTPath, "zh-Hans"); err != nil {
+			t.App.Logger.Warnf("  │ ⚠️ 中文字幕上传失败: %v", err)
+		} else {
+			t.App.Logger.Info("  │ ✓ 中文字幕上传成功")
+			subtitlesUploaded++
+		}
+	}
+
+	// 上传英文字幕
+	if _, err := os.Stat(enSRTPath); err == nil {
+		t.App.Logger.Infof("  │ 上传英文字幕: en.srt")
+		if err := subtitleUploader.UploadSubtitle(bvid, enSRTPath, "en"); err != nil {
+			t.App.Logger.Warnf("  │ ⚠️ 英文字幕上传失败: %v", err)
+		} else {
+			t.App.Logger.Info("  │ ✓ 英文字幕上传成功")
+			subtitlesUploaded++
+		}
+	}
+
+	if subtitlesUploaded > 0 {
+		t.App.Logger.Infof("📝 字幕上传完成: %d 个字幕已上传", subtitlesUploaded)
+	} else {
+		t.App.Logger.Info("📝 没有找到可上传的字幕文件")
+	}
 }

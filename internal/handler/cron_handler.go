@@ -3,7 +3,6 @@ package handler
 import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
-	"fmt"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 	"resty.dev/v3"
@@ -29,15 +28,15 @@ func NewCronHandler(app *core.AppServer, db *gorm.DB, task *cron.Cron) *CronHand
 }
 
 func (h *CronHandler) runTask() {
-	fmt.Println("定时任务执行中....")
-
+	// 空任务，不再打印日志避免刷屏
 }
+
 func (h *CronHandler) SetUp() {
-	_, err := h.Task.AddFunc("0/3 * * * * *", h.runTask)
+	// 定时任务改为每分钟执行一次，减少日志输出
+	_, err := h.Task.AddFunc("0 * * * * *", h.runTask)
 	if err != nil {
 		return
 	}
 
 	h.Task.Start() // 启动定时任务
-
 }

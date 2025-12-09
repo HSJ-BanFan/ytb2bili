@@ -25,9 +25,10 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 		},
 	}
 
-	// 设置日志级别
+	// 设置日志级别 - 只在出错时输出日志，避免控制台污染
+	// Debug 模式下使用 Warn 级别，生产环境使用 Silent
 	if config.Debug {
-		gormConfig.Logger = logger.Default.LogMode(logger.Info)
+		gormConfig.Logger = logger.Default.LogMode(logger.Warn)
 	} else {
 		gormConfig.Logger = logger.Default.LogMode(logger.Silent)
 	}

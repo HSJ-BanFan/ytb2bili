@@ -1,6 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
@@ -8,11 +14,6 @@ import (
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/utils"
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
 type GenerateSubtitles struct {
@@ -69,6 +70,12 @@ func (t *GenerateSubtitles) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Info("开始生成字幕文件")
 	t.App.Logger.Info("========================================")
 
+	// 0. 首先检查 yt-dlp 是否已经下载了字幕文件
+	if t.checkYtDlpSubtitles() {
+		t.App.Logger.Info("✅ 使用 yt-dlp 下载的字幕文件")
+		return true
+	}
+
 	// 1. 从数据库读取视频信息
 	savedVideo, err := t.SavedVideoService.GetVideoByID(t.StateManager.Id)
 	if err != nil {
@@ -85,7 +92,7 @@ func (t *GenerateSubtitles) Execute(context map[string]interface{}) bool {
 	}
 
 	// 2. 检查字幕数据是否存在
-	if savedVideo.Subtitles == "" || savedVideo.Subtitles == "null" {
+	if savedVideo.Subtitles == "" || savedVideo.Subtitles == "null" || savedVideo.Subtitles == "[]" {
 		t.App.Logger.Warn("⚠️  视频没有字幕数据，跳过字幕生成")
 		return true // 没有字幕不算错误，继续执行后续任务
 	}
@@ -174,4 +181,69 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// checkYtDlpSubtitles 检查 yt-dlp 是否已经下载了字幕文件
+// yt-dlp 下载的字幕文件命名格式: {video_id}.{lang}.srt
+// 例如: e1zJS31tr88.en.srt, e1zJS31tr88.zh-Hans.srt
+func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
+	videoID := t.StateManager.VideoID
+	currentDir := t.StateManager.CurrentDir
+
+	// 查找所有可能的字幕文件
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		return false
+	}
+
+	var foundSubtitles []string
+	var englishSubtitle string
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// 检查是否是 yt-dlp 下载的字幕文件
+		// 格式: {video_id}.{lang}.srt 或 {video_id}.{lang}.vtt
+		if strings.HasPrefix(name, videoID+".") && strings.HasSuffix(name, ".srt") {
+			foundSubtitles = append(foundSubtitles, name)
+			// 检查是否是英文字幕
+			if strings.Contains(name, ".en.") || strings.Contains(name, ".en-") {
+				englishSubtitle = name
+			}
+		}
+	}
+
+	if len(foundSubtitles) == 0 {
+		t.App.Logger.Info("📝 未找到 yt-dlp 下载的字幕文件")
+		return false
+	}
+
+	t.App.Logger.Infof("📝 找到 %d 个 yt-dlp 下载的字幕文件:", len(foundSubtitles))
+	for _, sub := range foundSubtitles {
+		t.App.Logger.Infof("   📄 %s", sub)
+	}
+
+	// 如果找到英文字幕，复制为 en.srt
+	if englishSubtitle != "" {
+		srcPath := filepath.Join(currentDir, englishSubtitle)
+		dstPath := filepath.Join(currentDir, "en.srt")
+		if err := utils.CopyFile(srcPath, dstPath); err != nil {
+			t.App.Logger.Errorf("❌ 复制英文字幕失败: %v", err)
+		} else {
+			t.App.Logger.Infof("✓ 已复制英文字幕: %s -> en.srt", englishSubtitle)
+		}
+	} else if len(foundSubtitles) > 0 {
+		// 如果没有英文字幕，使用第一个找到的字幕
+		srcPath := filepath.Join(currentDir, foundSubtitles[0])
+		dstPath := filepath.Join(currentDir, "en.srt")
+		if err := utils.CopyFile(srcPath, dstPath); err != nil {
+			t.App.Logger.Errorf("❌ 复制字幕失败: %v", err)
+		} else {
+			t.App.Logger.Infof("✓ 已复制字幕: %s -> en.srt", foundSubtitles[0])
+		}
+	}
+
+	return true
 }

@@ -83,26 +83,19 @@ type VideoMetadata struct {
 
 // checkUserPermission 检查用户是否有 AI 元数据生成权限
 func (g *GenerateMetadata) checkUserPermission() bool {
-	g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	g.App.Logger.Info("🔐 开始检查用户会员权限...")
-
 	// 获取视频信息，包含提交用户ID
 	savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID)
 	if err != nil {
-		g.App.Logger.Warnf("⚠️ 无法获取视频信息: %v，默认允许执行", err)
+		g.App.Logger.Debugf("无法获取视频信息: %v，默认允许执行", err)
 		return true // 获取失败时默认允许（向后兼容）
 	}
 
-	g.App.Logger.Infof("📹 视频ID: %s, 关联用户ID: %d", savedVideo.VideoID, savedVideo.UserID)
-
 	// 如果没有用户ID（旧数据），默认允许
 	if savedVideo.UserID == 0 {
-		g.App.Logger.Info("ℹ️ 视频没有关联用户ID（旧数据），默认允许执行")
 		return true
 	}
 
 	userID := strconv.FormatUint(uint64(savedVideo.UserID), 10)
-	g.App.Logger.Infof("📋 检查用户 %s 的 AI 功能权限...", userID)
 
 	// 创建会员存储和检查器
 	membershipStore := membership.NewDBMembershipStore(g.App.DB)
@@ -110,57 +103,34 @@ func (g *GenerateMetadata) checkUserPermission() bool {
 
 	// 获取用户会员信息用于日志
 	userMembership, err := checker.GetUserMembership(context.Background(), userID)
-	if err != nil {
-		g.App.Logger.Warnf("⚠️ 获取用户会员信息失败: %v", err)
-	} else {
-		g.App.Logger.Infof("👤 用户会员信息:")
-		g.App.Logger.Infof("   - 用户ID: %s", userMembership.UserID)
-		g.App.Logger.Infof("   - 会员等级: %s", userMembership.Tier)
-		g.App.Logger.Infof("   - 过期时间: %s", userMembership.ExpiresAt.Format("2006-01-02 15:04:05"))
-		g.App.Logger.Infof("   - 是否过期: %v", userMembership.IsExpired())
-		g.App.Logger.Infof("   - 有效等级: %s", userMembership.GetEffectiveTier())
-
-		// 获取等级配置
-		config := userMembership.GetConfig()
-		g.App.Logger.Infof("   - 等级名称: %s", config.Name)
-		g.App.Logger.Infof("   - Gemini视频分析权限: %v", config.Features.GeminiVideoAnalysis)
+	if err == nil {
+		g.App.Logger.Infof("  │ 用户 %s (%s) - Gemini权限: %v",
+			userID, userMembership.GetEffectiveTier(), userMembership.GetConfig().Features.GeminiVideoAnalysis)
 	}
 
 	// 检查 Gemini 视频分析权限
 	result := checker.CanUseFeature(context.Background(), userID, "gemini_video_analysis")
-	g.App.Logger.Infof("🔍 权限检查结果: Allowed=%v, Reason=%s, Code=%s", result.Allowed, result.Reason, result.Code)
-
 	if !result.Allowed {
-		g.App.Logger.Warnf("❌ 用户 %s 没有 Gemini 视频分析权限: %s", userID, result.Reason)
-		g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		g.App.Logger.Warnf("  │ 用户 %s 无 Gemini 权限: %s", userID, result.Reason)
 		return false
 	}
 
-	g.App.Logger.Infof("✅ 用户 %s 有 AI 元数据生成权限", userID)
-	g.App.Logger.Info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	return true
 }
 
 func (g *GenerateMetadata) Execute(ctx map[string]interface{}) bool {
-	g.App.Logger.Info("========================================")
-	g.App.Logger.Infof("开始生成视频标题和描述: VideoID=%s", g.StateManager.VideoID)
-	g.App.Logger.Infof("📁 工作目录: %s", g.StateManager.CurrentDir)
-	g.App.Logger.Info("========================================")
+	startTime := time.Now()
 
 	// 0. 检查用户会员权限
 	if !g.checkUserPermission() {
-		g.App.Logger.Warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		g.App.Logger.Warn("⚠️ 用户没有 AI 元数据生成权限，跳过此步骤")
-		g.App.Logger.Warn("💡 升级到 Pro 会员可解锁 Gemini 视频分析功能")
-		g.App.Logger.Warn("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		// 设置跳过标记，让 TaskStepWrapper 设置正确的状态
-		ctx["skipped"] = "需要 Pro 会员才能使用 AI 生成元数据功能，请升级会员"
-		// 返回 true 表示步骤完成（跳过），不阻塞后续任务
+		g.App.Logger.Warn("  │ ⚠️ 无 AI 权限，跳过 (升级 Pro 可解锁)")
+		ctx["skipped"] = "需要 Pro 会员才能使用 AI 生成元数据功能"
 		return true
 	}
 
-	// 列出工作目录中的文件，帮助调试
+	// 列出工作目录中的文件
 	g.logDirectoryContents()
+	_ = startTime // 用于后续计时
 
 	// 1. 刷新AI服务管理器配置
 	g.AIManager.RefreshConfig(g.App.Config)
@@ -170,42 +140,29 @@ func (g *GenerateMetadata) Execute(ctx map[string]interface{}) bool {
 	geminiConfigured := g.App.Config.GeminiConfig != nil && g.App.Config.GeminiConfig.Enabled &&
 		(g.App.Config.GeminiConfig.ApiKey != "" || len(g.App.Config.GeminiConfig.ApiKeys) > 0)
 	if !geminiConfigured {
-		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		g.App.Logger.Error("❌ 元数据生成需要配置 Gemini 服务！")
-		g.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		g.App.Logger.Warn("💡 Gemini 具有多模态视频分析能力，是生成高质量元数据的最佳选择")
-		g.App.Logger.Warn("💡 请在设置页面配置 Gemini API Key 并启用")
-		g.App.Logger.Warn("💡 配置路径: 设置 → AI 大模型 → Gemini 原生多模态")
-
-		// 尝试使用备选方案（用户首选AI或DeepSeek）生成基础元数据
-		g.App.Logger.Info("🔄 尝试使用备选AI服务生成基础元数据...")
+		g.App.Logger.Warn("  │ Gemini 未配置，使用备选 AI...")
 		return g.executeWithFallbackAI(ctx)
 	}
 
-	// 1. 首选：使用 Gemini 多模态服务生成元数据
-	g.App.Logger.Info("🤖 使用 Gemini 多模态服务生成元数据")
-	g.App.Logger.Infof("📋 Gemini 配置: Model=%s, Timeout=%ds, AnalyzeVideo=%v",
-		g.App.Config.GeminiConfig.Model,
-		g.App.Config.GeminiConfig.Timeout,
-		g.App.Config.GeminiConfig.AnalyzeVideo)
+	// 使用 Gemini 多模态服务
+	g.App.Logger.Infof("  │ 🤖 Gemini: %s (视频分析: %v)",
+		g.App.Config.GeminiConfig.Model, g.App.Config.GeminiConfig.AnalyzeVideo)
 
 	// 如果配置了视频分析，尝试使用视频文件
 	if g.App.Config.GeminiConfig.AnalyzeVideo {
-		g.App.Logger.Info("🎬 尝试 Gemini 视频分析模式...")
 		if success := g.executeWithGeminiVideo(ctx); success {
 			return true
 		}
-		g.App.Logger.Warn("⚠️ Gemini 视频分析失败，回退到文本模式")
+		g.App.Logger.Warn("  │ 视频分析失败，回退到文本模式")
 	}
 
 	// 使用 Gemini 处理字幕文本
-	g.App.Logger.Info("📝 尝试 Gemini 文本分析模式...")
 	if success := g.executeWithGeminiText(ctx); success {
 		return true
 	}
 
-	// 2. Gemini 失败时，使用备选AI服务
-	g.App.Logger.Warn("⚠️ Gemini 分析失败，尝试备选AI服务...")
+	// Gemini 失败时，使用备选AI服务
+	g.App.Logger.Warn("  │ Gemini 失败，尝试备选 AI...")
 	return g.executeWithFallbackAI(ctx)
 }
 
@@ -644,11 +601,11 @@ func (g *GenerateMetadata) truncateString(s string, maxLen int) string {
 
 // 视频大小阈值常量
 const (
-	SmallVideoThresholdMB     = 50   // 小视频阈值 (MB)
-	MediumVideoThresholdMB    = 200  // 中等视频阈值 (MB)
-	LargeVideoThresholdMB     = 500  // 大视频阈值 (MB)
-	MaxGeminiUploadSizeMB     = 2000 // Gemini 最大上传大小 (MB)，实际限制约 2GB
-	MaxGeminiRetries          = 2    // 最大重试次数
+	SmallVideoThresholdMB  = 50   // 小视频阈值 (MB)
+	MediumVideoThresholdMB = 200  // 中等视频阈值 (MB)
+	LargeVideoThresholdMB  = 500  // 大视频阈值 (MB)
+	MaxGeminiUploadSizeMB  = 2000 // Gemini 最大上传大小 (MB)，实际限制约 2GB
+	MaxGeminiRetries       = 2    // 最大重试次数
 )
 
 // executeWithGeminiVideo 使用 Gemini 分析视频文件生成元数据
@@ -1177,30 +1134,36 @@ func (g *GenerateMetadata) findVideoFiles() []string {
 	return videoFiles
 }
 
-// logDirectoryContents 记录目录内容，帮助调试
+// logDirectoryContents 记录目录内容（简洁版）
 func (g *GenerateMetadata) logDirectoryContents() {
 	files, err := os.ReadDir(g.StateManager.CurrentDir)
 	if err != nil {
-		g.App.Logger.Errorf("❌ 无法读取工作目录: %v", err)
 		return
 	}
 
-	g.App.Logger.Infof("📂 工作目录文件列表 (%d 个):", len(files))
+	// 统计文件类型
+	var videoFile, subtitleFiles, imageFiles int
+	var videoSize int64
 	for _, file := range files {
 		if file.IsDir() {
-			g.App.Logger.Infof("   📁 [目录] %s", file.Name())
-		} else {
-			if info, err := file.Info(); err == nil {
-				sizeMB := float64(info.Size()) / 1024 / 1024
-				if sizeMB >= 1 {
-					g.App.Logger.Infof("   📄 %s (%.2f MB)", file.Name(), sizeMB)
-				} else {
-					sizeKB := float64(info.Size()) / 1024
-					g.App.Logger.Infof("   📄 %s (%.2f KB)", file.Name(), sizeKB)
-				}
-			} else {
-				g.App.Logger.Infof("   📄 %s", file.Name())
+			continue
+		}
+		name := file.Name()
+		info, _ := file.Info()
+		if strings.HasSuffix(name, ".mp4") || strings.HasSuffix(name, ".webm") {
+			videoFile++
+			if info != nil {
+				videoSize = info.Size()
 			}
+		} else if strings.HasSuffix(name, ".srt") || strings.HasSuffix(name, ".vtt") {
+			subtitleFiles++
+		} else if strings.HasSuffix(name, ".jpg") || strings.HasSuffix(name, ".png") {
+			imageFiles++
 		}
 	}
+
+	// 一行输出摘要
+	videoSizeMB := float64(videoSize) / 1024 / 1024
+	g.App.Logger.Infof("  │ 📂 文件: 视频 %d (%.0fMB), 字幕 %d, 图片 %d",
+		videoFile, videoSizeMB, subtitleFiles, imageFiles)
 }

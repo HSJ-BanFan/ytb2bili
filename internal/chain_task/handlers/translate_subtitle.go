@@ -105,11 +105,13 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Infof("🤖 使用AI服务: %s (模型: %s)", status.Name, status.Model)
 
 	// 1. 检查英文字幕文件是否存在（由 GenerateSubtitles 任务生成）
-	enSRTPath := filepath.Join(t.StateManager.CurrentDir, fmt.Sprintf("%s.srt", t.StateManager.VideoID))
-	if _, err := os.Stat(enSRTPath); os.IsNotExist(err) {
+	// 优先查找 en.srt（yt-dlp 下载后复制的），然后是 {videoID}.srt
+	enSRTPath := t.findEnglishSubtitle()
+	if enSRTPath == "" {
 		t.App.Logger.Warn("⚠️  英文字幕文件不存在，跳过翻译")
 		return true // 没有字幕文件不算失败
 	}
+	t.App.Logger.Infof("  │ 📄 使用字幕: %s", filepath.Base(enSRTPath))
 
 	// 2. 读取并解析英文字幕文件
 	srtContent, err := os.ReadFile(enSRTPath)
@@ -662,4 +664,55 @@ func (t *TranslateSubtitle) validateAndOptimizeSubtitles(originalPath, translate
 
 	// 没有问题或无法修复，返回空路径
 	return "", result, nil
+}
+
+// findEnglishSubtitle 查找英文字幕文件
+// 按优先级查找: en.srt -> {videoID}.srt -> {videoID}.en.srt -> {videoID}.en-*.srt
+func (t *TranslateSubtitle) findEnglishSubtitle() string {
+	currentDir := t.StateManager.CurrentDir
+	videoID := t.StateManager.VideoID
+
+	t.App.Logger.Debugf("🔍 查找字幕目录: %s, VideoID: %s", currentDir, videoID)
+
+	// 优先级1: en.srt（由 GenerateSubtitles 任务复制）
+	enPath := filepath.Join(currentDir, "en.srt")
+	if _, err := os.Stat(enPath); err == nil {
+		t.App.Logger.Debugf("✓ 找到 en.srt: %s", enPath)
+		return enPath
+	}
+	t.App.Logger.Debugf("✗ en.srt 不存在: %s", enPath)
+
+	// 优先级2: {videoID}.srt（数据库字幕生成）
+	videoIDPath := filepath.Join(currentDir, fmt.Sprintf("%s.srt", videoID))
+	if _, err := os.Stat(videoIDPath); err == nil {
+		return videoIDPath
+	}
+
+	// 优先级3: 查找 yt-dlp 下载的英文字幕
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// 查找 {videoID}.en.srt 或 {videoID}.en-*.srt
+		if strings.HasPrefix(name, videoID+".") && strings.HasSuffix(name, ".srt") {
+			if strings.Contains(name, ".en.") || strings.Contains(name, ".en-") {
+				return filepath.Join(currentDir, name)
+			}
+		}
+	}
+
+	// 优先级4: 任意 srt 文件
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".srt") {
+			return filepath.Join(currentDir, entry.Name())
+		}
+	}
+
+	return ""
 }

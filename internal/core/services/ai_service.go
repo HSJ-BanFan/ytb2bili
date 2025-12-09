@@ -528,8 +528,29 @@ func (c *openAICompatibleClientWrapper) ChatCompletion(systemPrompt, userPrompt 
 
 		var response Response
 		if err := json.Unmarshal(body, &response); err != nil {
-			lastErr = fmt.Errorf("解析响应失败: %v", err)
-			continue
+			// 尝试解析数组格式的响应（某些代理返回数组）
+			var arrayResponse []Response
+			if arrErr := json.Unmarshal(body, &arrayResponse); arrErr == nil && len(arrayResponse) > 0 {
+				response = arrayResponse[0]
+			} else {
+				// 尝试解析 Gemini 原生格式
+				var geminiResp struct {
+					Candidates []struct {
+						Content struct {
+							Parts []struct {
+								Text string `json:"text"`
+							} `json:"parts"`
+						} `json:"content"`
+					} `json:"candidates"`
+				}
+				if gemErr := json.Unmarshal(body, &geminiResp); gemErr == nil && len(geminiResp.Candidates) > 0 {
+					if len(geminiResp.Candidates[0].Content.Parts) > 0 {
+						return geminiResp.Candidates[0].Content.Parts[0].Text, nil
+					}
+				}
+				lastErr = fmt.Errorf("解析响应失败: %v", err)
+				continue
+			}
 		}
 
 		if response.Error != nil {
