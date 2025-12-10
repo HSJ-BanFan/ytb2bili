@@ -258,10 +258,22 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 				bvidsJSON, _ := json.Marshal(allBVIDs)
 				savedVideo.BiliMultiBVIDs = string(bvidsJSON)
 			}
+
+			// 设置字幕计划上传时间（根据视频大小智能计算延迟）
+			videoSizeMB := t.getVideoSizeMB()
+			savedVideo.VideoSizeMB = videoSizeMB
+			subtitleDelay := t.calculateSubtitleDelay(videoSizeMB)
+			scheduledTime := time.Now().Add(subtitleDelay)
+			savedVideo.SubtitleScheduledAt = &scheduledTime
+			savedVideo.SubtitleUploadRetries = 0
+			savedVideo.SubtitleUploadError = ""
+
 			if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
 				t.App.Logger.Errorf("❌ 保存上传结果到数据库失败: %v", err)
 			} else {
 				t.App.Logger.Info("✅ 上传结果已保存到数据库")
+				t.App.Logger.Infof("🕒 字幕将在 %s 后上传 (计划时间: %s)",
+					subtitleDelay.Round(time.Minute), scheduledTime.Format("15:04:05"))
 			}
 		}
 
@@ -346,10 +358,9 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 		}
 	}
 
-	// 上传字幕（如果有中文字幕）
-	if bvid != "" {
-		t.uploadSubtitles(account, bvid)
-	}
+	// 注意：字幕上传已改为延迟上传机制
+	// 视频上传成功后会设置 SubtitleScheduledAt，由调度器在审核通过后自动上传
+	// 不再在此处立即上传字幕，避免权限不足错误
 
 	return bvid, aid, nil
 }
@@ -1015,4 +1026,66 @@ func (t *UploadToBilibili) uploadSubtitles(account *storage.BiliAccount, bvid st
 	} else {
 		t.App.Logger.Info("📝 没有找到可上传的字幕文件")
 	}
+}
+
+// getVideoSizeMB 获取当前视频文件大小（MB）
+func (t *UploadToBilibili) getVideoSizeMB() float64 {
+	videoPath := t.findVideoFile()
+	if videoPath == "" {
+		return 0
+	}
+
+	fileInfo, err := os.Stat(videoPath)
+	if err != nil {
+		return 0
+	}
+
+	return float64(fileInfo.Size()) / 1024 / 1024
+}
+
+// calculateSubtitleDelay 根据视频大小计算字幕上传延迟时间
+// B站视频审核时间与视频大小正相关
+func (t *UploadToBilibili) calculateSubtitleDelay(videoSizeMB float64) time.Duration {
+	// 根据视频大小设置延迟时间
+	// 小视频 (<100MB): 10分钟
+	// 中等视频 (100-300MB): 15分钟
+	// 大视频 (300-500MB): 20分钟
+	// 超大视频 (>500MB): 25分钟
+	switch {
+	case videoSizeMB <= 0:
+		// 未获取到视频大小，使用默认值
+		return 15 * time.Minute
+	case videoSizeMB < 100:
+		return 10 * time.Minute
+	case videoSizeMB < 300:
+		return 15 * time.Minute
+	case videoSizeMB < 500:
+		return 20 * time.Minute
+	default:
+		return 25 * time.Minute
+	}
+}
+
+// findVideoFile 查找视频文件
+func (t *UploadToBilibili) findVideoFile() string {
+	videoExtensions := []string{".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm"}
+
+	entries, err := os.ReadDir(t.StateManager.CurrentDir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		for _, videoExt := range videoExtensions {
+			if ext == videoExt {
+				return filepath.Join(t.StateManager.CurrentDir, entry.Name())
+			}
+		}
+	}
+
+	return ""
 }

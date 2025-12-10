@@ -90,7 +90,30 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Infof("开始翻译字幕: VideoID=%s", t.StateManager.VideoID)
 	t.App.Logger.Info("========================================")
 
-	// 0. 刷新AI服务管理器配置并获取首选AI服务
+	// 0. 优先检查是否已存在 YouTube 官方翻译的中文字幕
+	if existingZhSrt := t.findExistingChineseSubtitle(); existingZhSrt != "" {
+		t.App.Logger.Infof("✅ 发现 YouTube 官方中文字幕: %s", filepath.Base(existingZhSrt))
+		t.App.Logger.Info("✅ 跳过 AI 翻译，直接使用官方字幕")
+
+		// 复制为 zh.srt 供后续任务使用
+		zhSRTPath := filepath.Join(t.StateManager.CurrentDir, "zh.srt")
+		if err := t.copyFile(existingZhSrt, zhSRTPath); err != nil {
+			t.App.Logger.Warnf("⚠️ 复制字幕文件失败: %v，将继续使用原文件", err)
+			zhSRTPath = existingZhSrt
+		} else {
+			t.App.Logger.Infof("✓ 已复制为: %s", filepath.Base(zhSRTPath))
+		}
+
+		// 清理冗余字幕文件
+		t.cleanupRedundantSubtitles(existingZhSrt)
+
+		context["zh_srt_path"] = zhSRTPath
+		context["subtitle_source"] = "youtube_official"
+		t.App.Logger.Info("========================================")
+		return true
+	}
+
+	// 1. 刷新AI服务管理器配置并获取首选AI服务
 	t.AIManager.RefreshConfig(t.App.Config)
 	provider, err := t.getCurrentAIProvider()
 	if err != nil {
@@ -715,4 +738,101 @@ func (t *TranslateSubtitle) findEnglishSubtitle() string {
 	}
 
 	return ""
+}
+
+// findExistingChineseSubtitle 查找已存在的 YouTube 官方中文字幕
+// 按优先级查找: {videoID}.zh-Hans.srt -> {videoID}.zh-CN.srt -> {videoID}.zh.srt
+func (t *TranslateSubtitle) findExistingChineseSubtitle() string {
+	currentDir := t.StateManager.CurrentDir
+	videoID := t.StateManager.VideoID
+
+	// 优先级列表：简体中文 > 繁体中文
+	priorities := []string{
+		fmt.Sprintf("%s.zh-Hans.srt", videoID), // 简体中文
+		fmt.Sprintf("%s.zh-CN.srt", videoID),   // 简体中文（另一种格式）
+		fmt.Sprintf("%s.zh.srt", videoID),      // 中文（通用）
+	}
+
+	for _, filename := range priorities {
+		fullPath := filepath.Join(currentDir, filename)
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			// 检查文件大小，确保不是空文件
+			if info.Size() > 100 {
+				return fullPath
+			}
+		}
+	}
+
+	return ""
+}
+
+// copyFile 复制文件
+func (t *TranslateSubtitle) copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = destFile.ReadFrom(sourceFile)
+	return err
+}
+
+// cleanupRedundantSubtitles 清理冗余的字幕文件
+// 保留: zh.srt, en.srt, {videoID}.zh-Hans.srt, {videoID}.en.srt
+func (t *TranslateSubtitle) cleanupRedundantSubtitles(keepZhSrt string) {
+	currentDir := t.StateManager.CurrentDir
+	videoID := t.StateManager.VideoID
+
+	entries, err := os.ReadDir(currentDir)
+	if err != nil {
+		t.App.Logger.Warnf("⚠️ 读取目录失败，跳过清理: %v", err)
+		return
+	}
+
+	// 需要保留的文件
+	keepFiles := map[string]bool{
+		"zh.srt":                               true,
+		"en.srt":                               true,
+		filepath.Base(keepZhSrt):               true,
+		fmt.Sprintf("%s.en.srt", videoID):      true,
+		fmt.Sprintf("%s.zh-Hans.srt", videoID): true,
+	}
+
+	var deletedCount int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+
+		// 只处理字幕文件
+		if !strings.HasSuffix(name, ".srt") && !strings.HasSuffix(name, ".vtt") {
+			continue
+		}
+
+		// 检查是否需要保留
+		if keepFiles[name] {
+			continue
+		}
+
+		// 删除冗余字幕文件
+		fullPath := filepath.Join(currentDir, name)
+		if err := os.Remove(fullPath); err != nil {
+			t.App.Logger.Warnf("⚠️ 删除冗余字幕失败: %s - %v", name, err)
+		} else {
+			deletedCount++
+			t.App.Logger.Debugf("🗑️ 已删除冗余字幕: %s", name)
+		}
+	}
+
+	if deletedCount > 0 {
+		t.App.Logger.Infof("🧹 已清理 %d 个冗余字幕文件", deletedCount)
+	}
 }

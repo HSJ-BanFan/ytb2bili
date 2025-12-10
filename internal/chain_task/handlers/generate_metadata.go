@@ -17,6 +17,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/prompts"
+	"github.com/google/generative-ai-go/genai"
 	"gorm.io/gorm"
 )
 
@@ -599,149 +600,209 @@ func (g *GenerateMetadata) truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-// 视频大小阈值常量
+// 视频分析策略常量
 const (
-	SmallVideoThresholdMB  = 50   // 小视频阈值 (MB)
-	MediumVideoThresholdMB = 200  // 中等视频阈值 (MB)
-	LargeVideoThresholdMB  = 500  // 大视频阈值 (MB)
-	MaxGeminiUploadSizeMB  = 2000 // Gemini 最大上传大小 (MB)，实际限制约 2GB
-	MaxGeminiRetries       = 2    // 最大重试次数
+	// 视频大小阈值 (MB)
+	SmallVideoThresholdMB     = 50   // 小视频：完整分析，快速处理
+	MediumVideoThresholdMB    = 150  // 中等视频：完整分析，适度超时
+	LargeVideoThresholdMB     = 300  // 大视频：推荐关键帧分析
+	KeyframeAnalysisThreshold = 300  // 超过此大小自动使用关键帧分析
+	MaxGeminiUploadSizeMB     = 2000 // Gemini 最大上传大小 (MB)
+	MaxGeminiRetries          = 1    // 最大重试次数（减少无效等待）
+
+	// 视频时长阈值 (分钟) - 用于智能策略选择
+	ShortVideoDurationMin  = 10 // 短视频
+	MediumVideoDurationMin = 30 // 中等视频
+	LongVideoDurationMin   = 60 // 长视频
+
+	// 处理时间预估系数
+	GeminiProcessingRatioSmall  = 0.5 // 小视频：处理时间约为视频时长的 0.5 倍
+	GeminiProcessingRatioMedium = 1.0 // 中等视频：处理时间约为视频时长
+	GeminiProcessingRatioLarge  = 2.0 // 大视频：处理时间约为视频时长的 2 倍
 )
+
+// VideoAnalysisStrategy 视频分析策略
+type VideoAnalysisStrategy struct {
+	Mode           string  // 分析模式: "full", "keyframe", "text"
+	SizeCategory   string  // 大小分类
+	TimeoutSeconds int     // 超时时间
+	EstimatedTime  float64 // 预估处理时间(秒)
+	Recommendation string  // 推荐说明
+}
+
+// selectAnalysisStrategy 智能选择分析策略
+func (g *GenerateMetadata) selectAnalysisStrategy(fileSizeMB float64) VideoAnalysisStrategy {
+	baseTimeout := g.App.Config.GeminiConfig.Timeout
+	if baseTimeout <= 0 {
+		baseTimeout = 300
+	}
+
+	// 预估视频时长（假设平均码率 5Mbps = 0.625 MB/s）
+	estimatedDurationMin := fileSizeMB / (0.625 * 60)
+
+	var strategy VideoAnalysisStrategy
+
+	switch {
+	case fileSizeMB <= SmallVideoThresholdMB:
+		// 小视频：完整分析，快速处理
+		strategy = VideoAnalysisStrategy{
+			Mode:           "full",
+			SizeCategory:   "小视频",
+			TimeoutSeconds: baseTimeout,
+			EstimatedTime:  estimatedDurationMin * 60 * GeminiProcessingRatioSmall,
+			Recommendation: "完整视频分析（快速模式）",
+		}
+
+	case fileSizeMB <= MediumVideoThresholdMB:
+		// 中等视频：完整分析，适度超时
+		strategy = VideoAnalysisStrategy{
+			Mode:           "full",
+			SizeCategory:   "中等视频",
+			TimeoutSeconds: int(float64(baseTimeout) * 1.5),
+			EstimatedTime:  estimatedDurationMin * 60 * GeminiProcessingRatioMedium,
+			Recommendation: "完整视频分析（标准模式）",
+		}
+
+	case fileSizeMB <= KeyframeAnalysisThreshold:
+		// 大视频但未超阈值：给用户选择，默认关键帧
+		estimatedFullTime := estimatedDurationMin * 60 * GeminiProcessingRatioLarge
+		if estimatedFullTime > float64(baseTimeout*2) {
+			// 预估时间过长，推荐关键帧分析
+			strategy = VideoAnalysisStrategy{
+				Mode:           "keyframe",
+				SizeCategory:   "大视频",
+				TimeoutSeconds: baseTimeout,
+				EstimatedTime:  30, // 关键帧分析通常很快
+				Recommendation: "关键帧分析（推荐，避免超时）",
+			}
+		} else {
+			strategy = VideoAnalysisStrategy{
+				Mode:           "full",
+				SizeCategory:   "大视频",
+				TimeoutSeconds: int(float64(baseTimeout) * 2),
+				EstimatedTime:  estimatedFullTime,
+				Recommendation: "完整视频分析（增强超时）",
+			}
+		}
+
+	case fileSizeMB <= MaxGeminiUploadSizeMB:
+		// 超大视频：强制关键帧分析
+		strategy = VideoAnalysisStrategy{
+			Mode:           "keyframe",
+			SizeCategory:   "超大视频",
+			TimeoutSeconds: baseTimeout,
+			EstimatedTime:  30,
+			Recommendation: "关键帧分析（视频过大，避免处理超时）",
+		}
+
+	default:
+		// 巨型视频：只能用关键帧
+		strategy = VideoAnalysisStrategy{
+			Mode:           "keyframe",
+			SizeCategory:   "巨型视频",
+			TimeoutSeconds: baseTimeout,
+			EstimatedTime:  30,
+			Recommendation: "关键帧分析（超出上传限制）",
+		}
+	}
+
+	// 限制最大超时时间
+	if strategy.TimeoutSeconds > 900 { // 最大15分钟
+		strategy.TimeoutSeconds = 900
+	}
+
+	return strategy
+}
 
 // executeWithGeminiVideo 使用 Gemini 分析视频文件生成元数据
 func (g *GenerateMetadata) executeWithGeminiVideo(taskContext map[string]interface{}) bool {
 	totalStartTime := time.Now()
 
 	// ═══════════════════════════════════════════════════════════════
+	g.App.Logger.Info("")
 	g.App.Logger.Info("╔══════════════════════════════════════════════════════════════╗")
-	g.App.Logger.Info("║           🎬 Gemini 视频分析流程开始                         ║")
+	g.App.Logger.Info("║           🎬 Gemini 视频分析                                 ║")
 	g.App.Logger.Info("╚══════════════════════════════════════════════════════════════╝")
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段1: 查找视频文件                                        │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段1: 查找视频文件
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ � 阶段1: 查找视频文件                                      │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	g.App.Logger.Infof("   目录: %s", g.StateManager.CurrentDir)
+	g.App.Logger.Info("📁 [1/6] 查找视频文件")
 
 	videoFiles := g.findVideoFiles()
 	if len(videoFiles) == 0 {
 		g.App.Logger.Error("   ✗ 未找到视频文件")
-		g.App.Logger.Warn("   支持的格式: .mp4, .flv, .mkv, .webm, .avi, .mov")
 		return false
 	}
 	videoPath := videoFiles[0]
 
-	// 获取视频文件大小
 	fileInfo, err := os.Stat(videoPath)
 	if err != nil {
 		g.App.Logger.Errorf("   ✗ 无法获取文件信息: %v", err)
 		return false
 	}
 	fileSizeMB := float64(fileInfo.Size()) / 1024 / 1024
-	g.App.Logger.Infof("   ✓ 找到视频: %s", filepath.Base(videoPath))
-	g.App.Logger.Infof("   ✓ 文件大小: %.2f MB", fileSizeMB)
+	g.App.Logger.Infof("   ✓ %s (%.1f MB)", filepath.Base(videoPath), fileSizeMB)
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段2: 分析策略选择                                        │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段2: 智能策略选择
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ 🎯 阶段2: 分析策略选择                                      │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
+	g.App.Logger.Info("🎯 [2/6] 分析策略选择")
 
-	// 判断视频大小类别
-	var sizeCategory string
-	var strategy string
-	var timeoutMultiplier float64 = 1.0
+	strategy := g.selectAnalysisStrategy(fileSizeMB)
 
-	switch {
-	case fileSizeMB <= SmallVideoThresholdMB:
-		sizeCategory = "小视频"
-		strategy = "完整视频分析"
-		timeoutMultiplier = 1.0
-	case fileSizeMB <= MediumVideoThresholdMB:
-		sizeCategory = "中等视频"
-		strategy = "完整视频分析（增强超时）"
-		timeoutMultiplier = 2.0
-	case fileSizeMB <= LargeVideoThresholdMB:
-		sizeCategory = "大视频"
-		strategy = "完整视频分析（长超时）"
-		timeoutMultiplier = 3.0
-	case fileSizeMB <= MaxGeminiUploadSizeMB:
-		sizeCategory = "超大视频"
-		strategy = "完整视频分析（最大超时）"
-		timeoutMultiplier = 5.0
-	default:
-		sizeCategory = "巨型视频"
-		strategy = "⚠️ 视频过大，自动降级到关键帧分析"
-		g.App.Logger.Infof("   视频分类: %s (%.2f MB)", sizeCategory, fileSizeMB)
-		g.App.Logger.Infof("   选择策略: %s", strategy)
-		g.App.Logger.Warnf("   ⚠️ 视频超过 Gemini 上传限制 (%d MB)，将使用关键帧分析", MaxGeminiUploadSizeMB)
+	g.App.Logger.Infof("   分类: %s", strategy.SizeCategory)
+	g.App.Logger.Infof("   策略: %s", strategy.Recommendation)
+	g.App.Logger.Infof("   预估: %.0f秒 | 超时: %d秒", strategy.EstimatedTime, strategy.TimeoutSeconds)
+
+	// 根据策略执行不同的分析模式
+	if strategy.Mode == "keyframe" {
+		g.App.Logger.Info("   → 使用关键帧分析模式（更快更稳定）")
 		return g.executeWithKeyframeAnalysis(taskContext, videoPath, fileSizeMB)
 	}
 
-	g.App.Logger.Infof("   视频分类: %s (阈值: 小≤%dMB, 中≤%dMB, 大≤%dMB)",
-		sizeCategory, SmallVideoThresholdMB, MediumVideoThresholdMB, LargeVideoThresholdMB)
-	g.App.Logger.Infof("   选择策略: 【%s】", strategy)
-
-	// 计算超时时间
-	baseTimeout := g.App.Config.GeminiConfig.Timeout
-	adjustedTimeout := int(float64(baseTimeout) * timeoutMultiplier)
-	if adjustedTimeout > 1800 { // 最大30分钟
-		adjustedTimeout = 1800
-	}
-	g.App.Logger.Infof("   超时设置: %d秒 (基础%d秒 × %.1f倍率)", adjustedTimeout, baseTimeout, timeoutMultiplier)
-	g.App.Logger.Infof("   最大重试: %d次", MaxGeminiRetries)
+	// 完整视频分析
+	g.App.Logger.Info("   → 使用完整视频分析模式")
 
 	// 执行视频分析（带重试）
 	for retry := 0; retry <= MaxGeminiRetries; retry++ {
 		if retry > 0 {
 			g.App.Logger.Info("")
-			g.App.Logger.Warnf("🔄 第 %d 次重试...", retry)
+			g.App.Logger.Warnf("🔄 重试 %d/%d...", retry, MaxGeminiRetries)
 			// 重试时轮换 API Key
 			if g.App.Config.GeminiConfig.GetApiKeysCount() > 1 {
 				g.App.Config.GeminiConfig.RotateApiKey()
-				g.App.Logger.Info("   已轮换到下一个 API Key")
+				g.App.Logger.Info("   已轮换 API Key")
 			}
-			// 重试时增加超时
-			adjustedTimeout = int(float64(adjustedTimeout) * 1.5)
-			if adjustedTimeout > 1800 {
-				adjustedTimeout = 1800
-			}
-			g.App.Logger.Infof("   调整超时: %d秒", adjustedTimeout)
+			// 重试时切换到关键帧模式（避免再次超时）
+			g.App.Logger.Info("   → 切换到关键帧分析模式")
+			return g.executeWithKeyframeAnalysis(taskContext, videoPath, fileSizeMB)
 		}
 
-		success := g.executeGeminiVideoAnalysis(taskContext, videoPath, fileSizeMB, adjustedTimeout, retry)
+		success := g.executeGeminiVideoAnalysis(taskContext, videoPath, fileSizeMB, strategy.TimeoutSeconds, retry)
 		if success {
 			totalDuration := time.Since(totalStartTime)
 			g.App.Logger.Info("")
-			g.App.Logger.Info("╔══════════════════════════════════════════════════════════════╗")
-			g.App.Logger.Infof("║ ✅ Gemini 视频分析完成！总耗时: %.1f秒                      ║", totalDuration.Seconds())
-			g.App.Logger.Info("╚══════════════════════════════════════════════════════════════╝")
+			g.App.Logger.Infof("✅ 视频分析完成！总耗时: %.1f秒", totalDuration.Seconds())
 			return true
 		}
 	}
 
 	// 所有重试都失败，尝试关键帧分析作为后备
 	g.App.Logger.Warn("")
-	g.App.Logger.Warn("⚠️ 视频分析失败，尝试关键帧分析作为后备方案...")
+	g.App.Logger.Warn("⚠️ 完整分析失败，切换到关键帧分析...")
 	return g.executeWithKeyframeAnalysis(taskContext, videoPath, fileSizeMB)
 }
 
 // executeGeminiVideoAnalysis 执行单次 Gemini 视频分析
 func (g *GenerateMetadata) executeGeminiVideoAnalysis(taskContext map[string]interface{}, videoPath string, fileSizeMB float64, timeoutSeconds int, retryCount int) bool {
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段3: 创建 Gemini 客户端                                   │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段3: 创建 Gemini 客户端
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	if retryCount == 0 {
-		g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-		g.App.Logger.Info("│ � 阶段3: 创建 Gemini 客户端                                │")
-		g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	}
+	g.App.Logger.Info("🔧 [3/6] 创建 Gemini 客户端")
 
 	apiKey := g.App.Config.GeminiConfig.GetCurrentApiKey()
 	keyCount := g.App.Config.GeminiConfig.GetApiKeysCount()
@@ -752,9 +813,8 @@ func (g *GenerateMetadata) executeGeminiVideoAnalysis(taskContext map[string]int
 	if len(apiKey) > 10 {
 		maskedKey = apiKey[:4] + "****" + apiKey[len(apiKey)-4:]
 	}
-	g.App.Logger.Infof("   API Key: %s (%d/%d)", maskedKey, keyIndex, keyCount)
-	g.App.Logger.Infof("   模型: %s", g.App.Config.GeminiConfig.Model)
-	g.App.Logger.Infof("   超时: %d秒", timeoutSeconds)
+	g.App.Logger.Infof("   Key: %s (%d/%d) | 模型: %s | 超时: %ds",
+		maskedKey, keyIndex, keyCount, g.App.Config.GeminiConfig.Model, timeoutSeconds)
 
 	client, err := NewGeminiClient(
 		apiKey,
@@ -763,119 +823,109 @@ func (g *GenerateMetadata) executeGeminiVideoAnalysis(taskContext map[string]int
 		g.App.Config.GeminiConfig.MaxTokens,
 	)
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 创建客户端失败: %v", err)
+		g.App.Logger.Errorf("   ✗ 创建失败: %v", err)
 		return false
 	}
 	defer client.Close()
-	g.App.Logger.Info("   ✓ 客户端创建成功")
+	g.App.Logger.Info("   ✓ 客户端就绪")
 
 	// 创建带超时的 context
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段4: 上传视频到 Gemini                                    │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段4: 上传视频到 Gemini
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ ⏫ 阶段4: 上传视频到 Gemini                                  │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	g.App.Logger.Infof("   文件: %s (%.2f MB)", filepath.Base(videoPath), fileSizeMB)
-
-	// 估算上传时间
-	estimatedUploadTime := fileSizeMB / 5.0 // 假设 5MB/s 上传速度
-	g.App.Logger.Infof("   预估上传时间: %.0f秒 (按5MB/s估算)", estimatedUploadTime)
-	g.App.Logger.Info("   状态: 上传中...")
+	g.App.Logger.Info("⏫ [4/6] 上传视频到 Gemini")
+	estimatedUploadTime := fileSizeMB / 5.0
+	g.App.Logger.Infof("   文件: %.1f MB | 预估: %.0f秒", fileSizeMB, estimatedUploadTime)
 
 	uploadStartTime := time.Now()
 	uploadedFile, err := client.UploadFile(ctx, videoPath, filepath.Base(videoPath))
 	uploadDuration := time.Since(uploadStartTime)
 
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 上传失败 (耗时 %.1f秒): %v", uploadDuration.Seconds(), err)
+		g.App.Logger.Errorf("   ✗ 上传失败 (%.1fs): %v", uploadDuration.Seconds(), err)
 		if strings.Contains(err.Error(), "context deadline exceeded") {
-			g.App.Logger.Error("   原因: 上传超时")
-			g.App.Logger.Errorf("   建议: 增加 config.toml 中的 GeminiConfig.Timeout 值 (当前: %d秒)", timeoutSeconds)
+			g.App.Logger.Error("   原因: 上传超时，建议使用关键帧分析模式")
 		}
 		return false
 	}
 
 	actualSpeed := fileSizeMB / uploadDuration.Seconds()
-	g.App.Logger.Infof("   ✓ 上传成功 (耗时 %.1f秒, 速度 %.1fMB/s)", uploadDuration.Seconds(), actualSpeed)
-	g.App.Logger.Infof("   文件ID: %s", uploadedFile.Name)
+	g.App.Logger.Infof("   ✓ 上传完成 (%.1fs, %.1fMB/s)", uploadDuration.Seconds(), actualSpeed)
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段5: 等待 Gemini 处理视频                                 │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段5: 等待 Gemini 处理视频 (带进度显示)
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ ⏳ 阶段5: 等待 Gemini 处理视频                               │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	g.App.Logger.Info("   状态: 处理中（视频越长处理时间越久）...")
+	g.App.Logger.Info("⏳ [5/6] 等待 Gemini 处理视频")
 
 	processStartTime := time.Now()
-	err = client.WaitForFileProcessing(ctx, uploadedFile)
+	err = g.waitForFileProcessingWithProgress(ctx, client, uploadedFile, timeoutSeconds)
 	processDuration := time.Since(processStartTime)
 
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 处理失败 (耗时 %.1f秒): %v", processDuration.Seconds(), err)
+		g.App.Logger.Errorf("   ✗ 处理失败 (%.1fs): %v", processDuration.Seconds(), err)
 		if strings.Contains(err.Error(), "context deadline exceeded") {
-			g.App.Logger.Error("   原因: 处理超时")
-			g.App.Logger.Errorf("   建议: 视频较长，建议增加超时时间或使用关键帧分析模式")
+			g.App.Logger.Error("   原因: 处理超时，建议使用关键帧分析模式")
 		}
 		return false
 	}
-	g.App.Logger.Infof("   ✓ 处理完成 (耗时 %.1f秒)", processDuration.Seconds())
+	g.App.Logger.Infof("   ✓ 处理完成 (%.1fs)", processDuration.Seconds())
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 阶段6: 调用 AI 生成元数据                                   │
-	// └─────────────────────────────────────────────────────────────┘
+	// ───────────────────────────────────────────────────────────────
+	// 阶段6: 调用 AI 生成元数据
+	// ───────────────────────────────────────────────────────────────
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ 🤖 阶段6: 调用 AI 生成元数据                                 │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	g.App.Logger.Info("   状态: AI 正在分析视频内容...")
+	g.App.Logger.Info("🤖 [6/6] AI 生成元数据")
 
 	generateStartTime := time.Now()
 	metadata, err := client.GenerateMetadataFromVideo(ctx, uploadedFile)
 	generateDuration := time.Since(generateStartTime)
 
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 生成失败 (耗时 %.1f秒): %v", generateDuration.Seconds(), err)
-		if strings.Contains(err.Error(), "context deadline exceeded") {
-			g.App.Logger.Error("   原因: 生成超时")
-		}
+		g.App.Logger.Errorf("   ✗ 生成失败 (%.1fs): %v", generateDuration.Seconds(), err)
 		return false
 	}
-	g.App.Logger.Infof("   ✓ 生成完成 (耗时 %.1f秒)", generateDuration.Seconds())
+	g.App.Logger.Infof("   ✓ 生成完成 (%.1fs)", generateDuration.Seconds())
 
-	// ┌─────────────────────────────────────────────────────────────┐
-	// │ 生成结果预览                                                │
-	// └─────────────────────────────────────────────────────────────┘
+	// 结果预览
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ 📋 生成结果预览                                              │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
+	g.App.Logger.Info("📋 生成结果:")
 	g.App.Logger.Infof("   标题: %s", metadata.Title)
-	if len(metadata.Description) > 80 {
-		g.App.Logger.Infof("   描述: %s...", metadata.Description[:80])
-	} else {
-		g.App.Logger.Infof("   描述: %s", metadata.Description)
-	}
 	g.App.Logger.Infof("   标签: %v", metadata.Tags)
 
-	// 保存结果
 	return g.saveMetadataResults(metadata, taskContext)
 }
 
-// executeWithKeyframeAnalysis 使用关键帧分析（适用于超大视频）
+// waitForFileProcessingWithProgress 带进度显示的文件处理等待
+func (g *GenerateMetadata) waitForFileProcessingWithProgress(ctx context.Context, client *GeminiClient, file *genai.File, timeoutSeconds int) error {
+	lastLogTime := time.Now()
+
+	callback := func(elapsed time.Duration, state string) {
+		// 每10秒输出一次进度
+		if time.Since(lastLogTime) >= 10*time.Second {
+			remaining := timeoutSeconds - int(elapsed.Seconds())
+			if remaining < 0 {
+				remaining = 0
+			}
+			g.App.Logger.Infof("   … 处理中: %.0fs/剩余%ds", elapsed.Seconds(), remaining)
+			lastLogTime = time.Now()
+		}
+	}
+
+	return client.WaitForFileProcessingWithCallback(ctx, file, callback)
+}
+
+// executeWithKeyframeAnalysis 使用关键帧分析（适用于大视频，更快更稳定）
 func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]interface{}, videoPath string, fileSizeMB float64) bool {
+	startTime := time.Now()
+
 	g.App.Logger.Info("")
-	g.App.Logger.Info("┌─────────────────────────────────────────────────────────────┐")
-	g.App.Logger.Info("│ 🖼️  关键帧分析模式（适用于超大视频）                         │")
-	g.App.Logger.Info("└─────────────────────────────────────────────────────────────┘")
-	g.App.Logger.Infof("   视频大小: %.2f MB (超过 %d MB 限制)", fileSizeMB, MaxGeminiUploadSizeMB)
-	g.App.Logger.Info("   策略: 使用视频缩略图 + 字幕文本进行分析")
+	g.App.Logger.Info("🖼️  关键帧分析模式（快速稳定）")
+	g.App.Logger.Infof("   视频: %.1f MB | 策略: 缩略图 + 字幕文本", fileSizeMB)
 
 	// 1. 查找缩略图
 	thumbnailPath := g.findBestThumbnail()
@@ -883,19 +933,19 @@ func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]in
 		g.App.Logger.Warn("   ⚠️ 未找到缩略图，回退到纯文本分析")
 		return g.executeWithGeminiText(taskContext)
 	}
-	g.App.Logger.Infof("   ✓ 找到缩略图: %s", filepath.Base(thumbnailPath))
+	g.App.Logger.Infof("   ✓ 缩略图: %s", filepath.Base(thumbnailPath))
 
 	// 2. 读取字幕文本（如果有）
 	var subtitleText string
 	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
 	if content, err := os.ReadFile(zhSRTPath); err == nil {
 		subtitleText = g.extractTextFromSRT(string(content))
-		if len(subtitleText) > 2000 {
-			subtitleText = subtitleText[:2000] + "..."
+		if len(subtitleText) > 3000 {
+			subtitleText = subtitleText[:3000] + "..."
 		}
-		g.App.Logger.Infof("   ✓ 找到字幕文本: %d 字符", len(subtitleText))
+		g.App.Logger.Infof("   ✓ 字幕: %d 字符", len(subtitleText))
 	} else {
-		g.App.Logger.Info("   ℹ️ 无字幕文本，仅使用图片分析")
+		g.App.Logger.Info("   ℹ️ 无字幕，仅用图片分析")
 	}
 
 	// 3. 创建 Gemini 客户端
@@ -907,7 +957,7 @@ func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]in
 		g.App.Config.GeminiConfig.MaxTokens,
 	)
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 创建 Gemini 客户端失败: %v", err)
+		g.App.Logger.Errorf("   ✗ 创建客户端失败: %v", err)
 		return false
 	}
 	defer client.Close()
@@ -916,20 +966,22 @@ func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]in
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.App.Config.GeminiConfig.Timeout)*time.Second)
 	defer cancel()
 
-	g.App.Logger.Info("   状态: 分析缩略图和字幕...")
+	g.App.Logger.Info("   … AI 分析中...")
 	metadata, err := client.GenerateMetadataFromImage(ctx, thumbnailPath, subtitleText)
 	if err != nil {
-		g.App.Logger.Errorf("   ✗ 关键帧分析失败: %v", err)
+		g.App.Logger.Errorf("   ✗ 分析失败: %v", err)
 		// 最后回退到纯文本分析
 		if subtitleText != "" {
-			g.App.Logger.Info("   🔄 回退到纯文本分析...")
+			g.App.Logger.Info("   → 回退到纯文本分析")
 			return g.executeWithGeminiText(taskContext)
 		}
 		return false
 	}
 
-	g.App.Logger.Info("   ✓ 关键帧分析完成")
+	duration := time.Since(startTime)
+	g.App.Logger.Infof("   ✓ 完成 (%.1fs)", duration.Seconds())
 	g.App.Logger.Infof("   标题: %s", metadata.Title)
+	g.App.Logger.Infof("   标签: %v", metadata.Tags)
 
 	return g.saveMetadataResults(metadata, taskContext)
 }
