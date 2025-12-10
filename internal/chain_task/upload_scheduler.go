@@ -74,16 +74,15 @@ func (s *UploadScheduler) SetUp() {
 			}
 		}
 
-		// 2. 检查是否需要上传字幕（视频上传1小时后）
-		if now.Sub(s.lastSubtitleUploadTime) >= time.Hour {
-			s.logger.Info("🔍 检查待上传字幕的视频...")
-			if err := s.uploadNextSubtitle(); err != nil {
-				s.logger.Errorf("上传字幕失败: %v", err)
-			} else {
-				s.lastSubtitleUploadTime = now
-			}
+		// 2. 检查是否需要上传字幕（每5分钟检查一次，根据计划时间决定是否上传）
+		s.logger.Debug("🔍 检查待上传字幕的视频...")
+		if err := s.uploadNextSubtitle(); err != nil {
+			s.logger.Errorf("上传字幕失败: %v", err)
 		}
 	})
+
+	// 启动时显示待上传字幕的视频数量
+	s.showPendingSubtitleInfo()
 
 	s.logger.Info("✓ Upload scheduler started, checking every 5 minutes")
 }
@@ -140,23 +139,31 @@ func (s *UploadScheduler) uploadNextVideo() error {
 }
 
 // uploadNextSubtitle 上传下一个待上传字幕的视频
+// 使用智能延迟策略：根据视频大小计算延迟时间
 func (s *UploadScheduler) uploadNextSubtitle() error {
-	// 查询状态为 '300' (视频已上传，待上传字幕) 且上传时间超过1小时的视频
+	// 查询状态为 '300' (视频已上传，待上传字幕) 且已到达计划上传时间的视频
 	var videos []struct {
-		ID        uint
-		VideoID   string
-		Title     string
-		UpdatedAt time.Time
-		CreatedAt time.Time
+		ID                    uint
+		VideoID               string
+		Title                 string
+		VideoSizeMB           float64
+		SubtitleScheduledAt   *time.Time
+		SubtitleUploadRetries int
+		UpdatedAt             time.Time
+		CreatedAt             time.Time
 	}
 
-	oneHourAgo := time.Now().Add(-time.Hour)
+	now := time.Now()
 
+	// 查询已到达计划上传时间的视频，或者没有设置计划时间但已过去1小时的视频
 	err := s.Db.Table("cw_saved_videos").
-		Select("id, video_id, title, updated_at, created_at").
-		Where("status = ? AND updated_at <= ?", "300", oneHourAgo).
+		Select("id, video_id, title, video_size_mb, subtitle_scheduled_at, subtitle_upload_retries, updated_at, created_at").
+		Where("status = ?", "300").
 		Where("deleted_at IS NULL").
-		Order("updated_at ASC").
+		Where("subtitle_upload_retries < ?", 3). // 最多重试3次
+		Where("(subtitle_scheduled_at IS NOT NULL AND subtitle_scheduled_at <= ?) OR (subtitle_scheduled_at IS NULL AND updated_at <= ?)",
+			now, now.Add(-time.Hour)).
+		Order("COALESCE(subtitle_scheduled_at, updated_at) ASC").
 		Limit(1).
 		Find(&videos).Error
 
@@ -170,7 +177,15 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 	}
 
 	video := videos[0]
-	s.logger.Infof("📝 开始上传字幕: %s (VideoID: %s)", video.Title, video.VideoID)
+
+	// 显示调度信息
+	if video.SubtitleScheduledAt != nil {
+		s.logger.Infof("📝 开始上传字幕: %s (VideoID: %s, 计划时间: %s, 重试: %d/3)",
+			video.Title, video.VideoID, video.SubtitleScheduledAt.Format("15:04:05"), video.SubtitleUploadRetries)
+	} else {
+		s.logger.Infof("📝 开始上传字幕: %s (VideoID: %s, 重试: %d/3)",
+			video.Title, video.VideoID, video.SubtitleUploadRetries)
+	}
 
 	// 更新状态为 '301' (上传字幕中)
 	if err := s.SavedVideoService.UpdateStatus(video.ID, "301"); err != nil {
@@ -179,8 +194,25 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 
 	// 执行上传字幕任务
 	if err := s.executeUploadTask(video.VideoID, "上传字幕到Bilibili"); err != nil {
-		// 上传失败，更新状态为 '399' (字幕上传失败)
-		s.SavedVideoService.UpdateStatus(video.ID, "399")
+		// 上传失败，增加重试次数并设置下次重试时间
+		retryCount := video.SubtitleUploadRetries + 1
+		nextRetryTime := s.calculateNextRetryTime(retryCount)
+
+		s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
+			"status":                  "300", // 保持待上传状态
+			"subtitle_upload_retries": retryCount,
+			"subtitle_scheduled_at":   nextRetryTime,
+			"subtitle_upload_error":   err.Error(),
+		})
+
+		if retryCount >= 3 {
+			// 超过最大重试次数，标记为失败
+			s.SavedVideoService.UpdateStatus(video.ID, "399")
+			s.logger.Errorf("✗ 字幕上传失败 (已达最大重试次数): %s", video.VideoID)
+		} else {
+			s.logger.Warnf("⚠️ 字幕上传失败，将在 %s 重试 (%d/3): %v",
+				nextRetryTime.Format("15:04:05"), retryCount, err)
+		}
 		return fmt.Errorf("上传字幕失败: %v", err)
 	}
 
@@ -189,8 +221,99 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 		return fmt.Errorf("更新视频状态失败: %v", err)
 	}
 
+	// 清除错误信息
+	s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
+		"subtitle_upload_error": "",
+	})
+
 	s.logger.Infof("✅ 字幕上传成功: %s", video.VideoID)
 	return nil
+}
+
+// calculateSubtitleDelay 根据视频大小计算字幕上传延迟时间
+// B站视频审核时间与视频大小正相关
+func (s *UploadScheduler) calculateSubtitleDelay(videoSizeMB float64) time.Duration {
+	// 根据视频大小设置延迟时间
+	// 小视频 (<100MB): 10分钟
+	// 中等视频 (100-300MB): 15分钟
+	// 大视频 (300-500MB): 20分钟
+	// 超大视频 (>500MB): 25分钟
+	var delay time.Duration
+
+	switch {
+	case videoSizeMB <= 0:
+		// 未记录视频大小，使用默认值
+		delay = 15 * time.Minute
+	case videoSizeMB < 100:
+		delay = 10 * time.Minute
+	case videoSizeMB < 300:
+		delay = 15 * time.Minute
+	case videoSizeMB < 500:
+		delay = 20 * time.Minute
+	default:
+		delay = 25 * time.Minute
+	}
+
+	s.logger.Infof("🕒 字幕上传延迟计算: 视频%.1fMB -> 延迟%d分钟", videoSizeMB, int(delay.Minutes()))
+	return delay
+}
+
+// calculateNextRetryTime 计算下次重试时间 (指数退避)
+func (s *UploadScheduler) calculateNextRetryTime(retryCount int) time.Time {
+	// 第1次重试: 10分钟后
+	// 第2次重试: 20分钟后
+	// 第3次重试: 40分钟后
+	delayMinutes := 10 * (1 << (retryCount - 1)) // 10, 20, 40
+	return time.Now().Add(time.Duration(delayMinutes) * time.Minute)
+}
+
+// showPendingSubtitleInfo 显示待上传字幕的视频信息
+func (s *UploadScheduler) showPendingSubtitleInfo() {
+	var count int64
+	now := time.Now()
+
+	// 统计待上传字幕的视频数量
+	s.Db.Table("cw_saved_videos").
+		Where("status = ?", "300").
+		Where("deleted_at IS NULL").
+		Where("subtitle_upload_retries < ?", 3).
+		Count(&count)
+
+	if count == 0 {
+		s.logger.Info("📝 当前没有待上传字幕的视频")
+		return
+	}
+
+	// 查询最近的一个待上传视频
+	var video struct {
+		VideoID             string
+		Title               string
+		VideoSizeMB         float64
+		SubtitleScheduledAt *time.Time
+	}
+
+	s.Db.Table("cw_saved_videos").
+		Select("video_id, title, video_size_mb, subtitle_scheduled_at").
+		Where("status = ?", "300").
+		Where("deleted_at IS NULL").
+		Where("subtitle_upload_retries < ?", 3).
+		Order("COALESCE(subtitle_scheduled_at, updated_at) ASC").
+		Limit(1).
+		Find(&video)
+
+	if video.SubtitleScheduledAt != nil {
+		remaining := video.SubtitleScheduledAt.Sub(now)
+		if remaining > 0 {
+			s.logger.Infof("📝 待上传字幕: %d 个视频, 下一个: %s (%.1fMB), 将在 %s 后上传",
+				count, video.Title, video.VideoSizeMB, remaining.Round(time.Minute))
+		} else {
+			s.logger.Infof("📝 待上传字幕: %d 个视频, 下一个: %s (%.1fMB), 已到达计划时间",
+				count, video.Title, video.VideoSizeMB)
+		}
+	} else {
+		s.logger.Infof("📝 待上传字幕: %d 个视频, 下一个: %s (%.1fMB)",
+			count, video.Title, video.VideoSizeMB)
+	}
 }
 
 // executeUploadTask 执行上传任务
@@ -224,7 +347,7 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	case "上传到Bilibili":
 		task = handlers.NewUploadToBilibili("上传到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService)
 	case "上传字幕到Bilibili":
-		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService)
+		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService)
 	default:
 		return fmt.Errorf("未知的任务类型: %s", taskName)
 	}

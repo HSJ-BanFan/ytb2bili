@@ -1,32 +1,36 @@
 package handlers
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/storage"
-	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/pkg/cos"
-	"os"
-	"path/filepath"
 )
 
 type UploadSubtitleToBilibili struct {
 	base.BaseTask
-	App               *core.AppServer
-	SavedVideoService *services.SavedVideoService
+	App                *core.AppServer
+	SavedVideoService  *services.SavedVideoService
+	BiliAccountService *services.BiliAccountService
 }
 
-func NewUploadSubtitleToBilibili(name string, app *core.AppServer, stateManager *manager.StateManager, client *cos.CosClient, savedVideoService *services.SavedVideoService) *UploadSubtitleToBilibili {
+func NewUploadSubtitleToBilibili(name string, app *core.AppServer, stateManager *manager.StateManager, client *cos.CosClient, savedVideoService *services.SavedVideoService, biliAccountService *services.BiliAccountService) *UploadSubtitleToBilibili {
 	return &UploadSubtitleToBilibili{
 		BaseTask: base.BaseTask{
 			Name:         name,
 			StateManager: stateManager,
 			Client:       client,
 		},
-		App:               app,
-		SavedVideoService: savedVideoService,
+		App:                app,
+		SavedVideoService:  savedVideoService,
+		BiliAccountService: biliAccountService,
 	}
 }
 
@@ -49,18 +53,11 @@ func (t *UploadSubtitleToBilibili) Execute(context map[string]interface{}) bool 
 
 	t.App.Logger.Infof("📺 视频BVID: %s", bvid)
 
-	// 2. 检查登录信息
-	loginStore := storage.GetDefaultStore()
-	if !loginStore.IsValid() {
-		t.App.Logger.Error("❌ 没有有效的 Bilibili 登录信息，无法上传字幕")
-		context["error"] = "未登录 Bilibili"
-		return false
-	}
-
-	loginInfo, err := loginStore.Load()
+	// 2. 获取登录信息（优先使用新的多账号系统）
+	loginInfo, err := t.getLoginInfo()
 	if err != nil {
-		t.App.Logger.Errorf("❌ 加载登录信息失败: %v", err)
-		context["error"] = "加载登录信息失败"
+		t.App.Logger.Errorf("❌ 没有有效的 Bilibili 登录信息，无法上传字幕: %v", err)
+		context["error"] = "未登录 Bilibili"
 		return false
 	}
 
@@ -117,17 +114,14 @@ type SubtitleFileInfo struct {
 func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 	var subtitleFiles []SubtitleFileInfo
 
-	// 检查常见的字幕文件
+	// 1. 检查标准命名的字幕文件
 	subtitleFilesToCheck := []struct {
 		filename string
 		language string
 	}{
-		{"zh_optimized.srt", "zh-Hans"}, // 中文简体
+		{"zh.srt", "zh-Hans"},           // 中文简体 (标准)
+		{"zh_optimized.srt", "zh-Hans"}, // 中文简体 (备用)
 		{"en.srt", "en"},                // 英文
-		//{"zh-cn.srt", "zh-Hans"}, // 中文简体
-		//{"zh-tw.srt", "zh-Hant"}, // 中文繁体
-		//{"ja.srt", "ja"},         // 日文
-		//{"ko.srt", "ko"},         // 韩文
 	}
 
 	for _, item := range subtitleFilesToCheck {
@@ -141,5 +135,97 @@ func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 		}
 	}
 
+	// 2. 如果没找到标准命名，搜索 VideoID.语言.srt 格式的文件
+	if len(subtitleFiles) == 0 {
+		t.App.Logger.Info("📂 未找到标准命名字幕，搜索 VideoID.语言.srt 格式...")
+		subtitleFiles = t.findSubtitleFilesByPattern()
+	}
+
 	return subtitleFiles
+}
+
+// findSubtitleFilesByPattern 按模式搜索字幕文件 (VideoID.语言.srt)
+func (t *UploadSubtitleToBilibili) findSubtitleFilesByPattern() []SubtitleFileInfo {
+	var subtitleFiles []SubtitleFileInfo
+
+	// 语言映射表
+	languageMap := map[string]string{
+		"zh-Hans": "zh-Hans", // 中文简体
+		"zh-Hant": "zh-Hant", // 中文繁体
+		"zh":      "zh-Hans", // 中文默认简体
+		"en":      "en",      // 英文
+		"ja":      "ja",      // 日文
+		"ko":      "ko",      // 韩文
+	}
+
+	// 优先级顺序：中文 > 英文 > 其他
+	priorityOrder := []string{"zh-Hans", "zh-Hant", "zh", "en", "ja", "ko"}
+
+	entries, err := os.ReadDir(t.StateManager.CurrentDir)
+	if err != nil {
+		return subtitleFiles
+	}
+
+	// 收集所有字幕文件
+	foundFiles := make(map[string]string) // language -> path
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		// 匹配 VideoID.语言.srt 格式
+		if filepath.Ext(name) != ".srt" {
+			continue
+		}
+
+		// 检查是否包含语言标识
+		for langCode, biliLang := range languageMap {
+			pattern := "." + langCode + ".srt"
+			if len(name) > len(pattern) && name[len(name)-len(pattern):] == pattern {
+				fullPath := filepath.Join(t.StateManager.CurrentDir, name)
+				foundFiles[biliLang] = fullPath
+				t.App.Logger.Infof("🎯 找到字幕文件: %s (%s)", name, biliLang)
+				break
+			}
+		}
+	}
+
+	// 按优先级添加字幕文件
+	for _, lang := range priorityOrder {
+		if path, exists := foundFiles[lang]; exists {
+			subtitleFiles = append(subtitleFiles, SubtitleFileInfo{
+				Path:     path,
+				Language: lang,
+			})
+		}
+	}
+
+	return subtitleFiles
+}
+
+// getLoginInfo 获取 Bilibili 登录信息
+// 优先级：多账号系统 > 旧单账号存储
+func (t *UploadSubtitleToBilibili) getLoginInfo() (*bilibili.LoginInfo, error) {
+	// 1. 优先从多账号系统获取
+	if t.BiliAccountService != nil {
+		loginInfo, err := t.BiliAccountService.GetGlobalLoginInfo()
+		if err == nil && loginInfo != nil {
+			t.App.Logger.Info("✓ 使用多账号系统的登录信息")
+			return loginInfo, nil
+		}
+	}
+
+	// 2. 回退到旧的单账号存储
+	loginStore := storage.GetDefaultStore()
+	if loginStore.IsValid() {
+		loginInfo, err := loginStore.Load()
+		if err == nil {
+			t.App.Logger.Info("✓ 使用旧版单账号存储的登录信息")
+			return loginInfo, nil
+		}
+	}
+
+	return nil, fmt.Errorf("没有可用的登录信息")
 }

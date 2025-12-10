@@ -145,6 +145,15 @@ export const TASK_STEP_NAMES = {
   'generate_metadata': '生成元数据',
   'upload_to_bilibili': '上传到B站',
   'upload_subtitles': '上传字幕',
+  // 中文步骤名映射（后端使用中文名）
+  '获取元数据': '获取元数据',
+  '下载视频': '下载视频',
+  '生成字幕': '生成字幕',
+  '下载封面': '下载封面',
+  '翻译字幕': '翻译字幕',
+  '生成元数据': '生成元数据',
+  '上传到Bilibili': '上传到Bilibili',
+  '上传字幕到Bilibili': '上传字幕到Bilibili',
 } as const;
 
 // 导出会员类型

@@ -474,6 +474,13 @@ func registerHandlers(
 	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
 	logger.Info("✓ Video routes registered")
 
+	// 迁移：为所有视频添加"上传字幕到Bilibili"步骤
+	if count, err := taskStepService.MigrateAllVideosSubtitleStep(); err != nil {
+		logger.Warnf("迁移字幕上传步骤失败: %v", err)
+	} else if count > 0 {
+		logger.Infof("✓ 已为 %d 个视频添加字幕上传步骤", count)
+	}
+
 	// 配置 Handler
 	configHandler := handler.NewConfigHandler(server)
 	configHandler.RegisterRoutes(server)

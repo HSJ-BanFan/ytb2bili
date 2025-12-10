@@ -316,6 +316,24 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		completedSteps = []string{}
 	}
 
+	// 智能依赖检查：如果视频文件存在，自动将"下载视频"标记为完成
+	videoFilePath := filepath.Join(stateManager.CurrentDir, videoID+".mp4")
+	if _, err := os.Stat(videoFilePath); err == nil {
+		hasDownloadVideo := false
+		for _, s := range completedSteps {
+			if s == "下载视频" {
+				hasDownloadVideo = true
+				break
+			}
+		}
+		if !hasDownloadVideo {
+			completedSteps = append(completedSteps, "下载视频")
+			h.App.Logger.Infof("📁 检测到视频文件存在，自动标记'下载视频'为完成")
+			// 同时更新数据库状态
+			_ = h.TaskStepService.UpdateTaskStepStatus(videoID, "下载视频", "completed")
+		}
+	}
+
 	// 创建单个任务的链，并预填充已完成的任务
 	chain := manager.NewTaskChain().
 		SetLogger(h.App.Logger).
@@ -339,6 +357,8 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		task = handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	case "上传到Bilibili":
 		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
+	case "上传字幕到Bilibili":
+		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
 	default:
 		return fmt.Errorf("未知的任务步骤: %s", stepName)
 	}

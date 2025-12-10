@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -98,7 +99,24 @@ func (g *GeminiClient) UploadFile(ctx context.Context, filePath string, displayN
 
 // WaitForFileProcessing 等待文件处理完成
 func (g *GeminiClient) WaitForFileProcessing(ctx context.Context, file *genai.File) error {
+	return g.WaitForFileProcessingWithCallback(ctx, file, nil)
+}
+
+// ProgressCallback 进度回调函数类型
+type ProgressCallback func(elapsed time.Duration, state string)
+
+// WaitForFileProcessingWithCallback 带进度回调的文件处理等待
+func (g *GeminiClient) WaitForFileProcessingWithCallback(ctx context.Context, file *genai.File, callback ProgressCallback) error {
+	startTime := time.Now()
+	checkInterval := 3 * time.Second
+
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		fileInfo, err := g.client.GetFile(ctx, file.Name)
 		if err != nil {
 			return fmt.Errorf("获取文件状态失败: %v", err)
@@ -112,8 +130,13 @@ func (g *GeminiClient) WaitForFileProcessing(ctx context.Context, file *genai.Fi
 			return fmt.Errorf("文件处理失败")
 		}
 
-		// 等待一段时间后重试
-		time.Sleep(2 * time.Second)
+		// 调用进度回调
+		if callback != nil {
+			elapsed := time.Since(startTime)
+			callback(elapsed, string(fileInfo.State))
+		}
+
+		time.Sleep(checkInterval)
 	}
 }
 
@@ -231,6 +254,9 @@ func (g *GeminiClient) GenerateMetadataFromImage(ctx context.Context, imagePath 
 		return nil, fmt.Errorf("读取图片文件失败: %v", err)
 	}
 
+	// 根据文件扩展名确定 MIME 类型
+	mimeType := getMimeTypeFromPath(imagePath)
+
 	// 构建提示词
 	var prompt string
 	if subtitleText != "" {
@@ -272,7 +298,7 @@ func (g *GeminiClient) GenerateMetadataFromImage(ctx context.Context, imagePath 
 
 	// 调用 API
 	resp, err := model.GenerateContent(ctx,
-		genai.ImageData("image/jpeg", imageData),
+		genai.ImageData(mimeType, imageData),
 		genai.Text(prompt),
 	)
 	if err != nil {
@@ -315,4 +341,24 @@ func parseMetadataJSON(content string) (*VideoMetadata, error) {
 	}
 
 	return &metadata, nil
+}
+
+// getMimeTypeFromPath 根据文件路径获取 MIME 类型
+func getMimeTypeFromPath(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		// 默认使用 JPEG
+		return "image/jpeg"
+	}
 }

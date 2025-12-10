@@ -26,17 +26,18 @@ func NewTaskStepService(db *gorm.DB) *TaskStepService {
 // InitTaskSteps 初始化视频的任务步骤
 func (s *TaskStepService) InitTaskSteps(videoID string) error {
 	// 定义标准任务步骤（按执行顺序）
-	// ┌────┬─────────────┬─────────────┬──────┬────────────┐
-	// │序号│   任务名    │    依赖     │ 必需 │  失败处理  │
-	// ├────┼─────────────┼─────────────┼──────┼────────────┤
-	// │ 1  │ 获取元数据  │     无      │  是  │  终止链    │
-	// │ 2  │ 下载视频    │     无      │  否  │  继续执行  │
-	// │ 3  │ 生成字幕    │  下载视频   │  否  │    跳过    │
-	// │ 4  │ 下载封面    │  获取元数据 │  是  │  终止链    │
-	// │ 5  │ 翻译字幕    │  生成字幕   │  否  │    跳过    │
-	// │ 6  │ 生成元数据  │  下载视频   │  否  │    跳过    │
-	// │ 7  │ 上传到B站   │     无      │  否  │    -       │
-	// └────┴─────────────┴─────────────┴──────┴────────────┘
+	// ┌────┬─────────────────┬─────────────┬──────┬────────────┐
+	// │序号│     任务名      │    依赖     │ 必需 │  失败处理  │
+	// ├────┼─────────────────┼─────────────┼──────┼────────────┤
+	// │ 1  │ 获取元数据      │     无      │  是  │  终止链    │
+	// │ 2  │ 下载视频        │     无      │  否  │  继续执行  │
+	// │ 3  │ 生成字幕        │  下载视频   │  否  │    跳过    │
+	// │ 4  │ 下载封面        │  获取元数据 │  是  │  终止链    │
+	// │ 5  │ 翻译字幕        │  生成字幕   │  否  │    跳过    │
+	// │ 6  │ 生成元数据      │  下载视频   │  否  │    跳过    │
+	// │ 7  │ 上传到Bilibili  │     无      │  否  │    -       │
+	// │ 8  │ 上传字幕到B站   │ 上传到B站   │  否  │  延迟重试  │
+	// └────┴─────────────────┴─────────────┴──────┴────────────┘
 	steps := []struct {
 		Name     string
 		Order    int
@@ -49,20 +50,27 @@ func (s *TaskStepService) InitTaskSteps(videoID string) error {
 		{"翻译字幕", 5, true},
 		{"生成元数据", 6, true},
 		{"上传到Bilibili", 7, true},
+		{"上传字幕到Bilibili", 8, true},
 	}
 
 	// 检查是否已经初始化过
-	var count int64
-	if err := s.DB.Model(&model.TaskStep{}).Where("video_id = ?", videoID).Count(&count).Error; err != nil {
+	var existingSteps []model.TaskStep
+	if err := s.DB.Where("video_id = ?", videoID).Find(&existingSteps).Error; err != nil {
 		return err
 	}
 
-	if count > 0 {
-		return nil // 已经初始化过，跳过
+	// 创建已存在步骤的映射
+	existingStepNames := make(map[string]bool)
+	for _, step := range existingSteps {
+		existingStepNames[step.StepName] = true
 	}
 
-	// 创建任务步骤记录
+	// 创建任务步骤记录（只创建不存在的步骤）
 	for _, step := range steps {
+		if existingStepNames[step.Name] {
+			continue // 步骤已存在，跳过
+		}
+
 		taskStep := &model.TaskStep{
 			VideoID:   videoID,
 			StepName:  step.Name,
@@ -306,4 +314,59 @@ func (s *TaskStepService) GetCompletedStepNames(videoID string) ([]string, error
 		Where("video_id = ? AND status = ?", videoID, model.TaskStepStatusCompleted).
 		Pluck("step_name", &stepNames).Error
 	return stepNames, err
+}
+
+// EnsureSubtitleUploadStep 确保视频有"上传字幕到Bilibili"步骤
+// 用于为已存在的视频补充缺失的步骤
+func (s *TaskStepService) EnsureSubtitleUploadStep(videoID string) error {
+	// 检查步骤是否已存在
+	var count int64
+	if err := s.DB.Model(&model.TaskStep{}).
+		Where("video_id = ? AND step_name = ?", videoID, "上传字幕到Bilibili").
+		Count(&count).Error; err != nil {
+		return err
+	}
+
+	if count > 0 {
+		return nil // 步骤已存在
+	}
+
+	// 创建步骤
+	taskStep := &model.TaskStep{
+		VideoID:   videoID,
+		StepName:  "上传字幕到Bilibili",
+		StepOrder: 8,
+		Status:    model.TaskStepStatusPending,
+		CanRetry:  true,
+	}
+
+	return s.DB.Create(taskStep).Error
+}
+
+// MigrateAllVideosSubtitleStep 为所有视频添加"上传字幕到Bilibili"步骤
+func (s *TaskStepService) MigrateAllVideosSubtitleStep() (int, error) {
+	// 查询所有没有"上传字幕到Bilibili"步骤的视频
+	var videoIDs []string
+	err := s.DB.Model(&model.TaskStep{}).
+		Select("DISTINCT video_id").
+		Where("video_id NOT IN (?)",
+			s.DB.Model(&model.TaskStep{}).
+				Select("video_id").
+				Where("step_name = ?", "上传字幕到Bilibili")).
+		Pluck("video_id", &videoIDs).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	count := 0
+	for _, videoID := range videoIDs {
+		if err := s.EnsureSubtitleUploadStep(videoID); err != nil {
+			log.Printf("为视频 %s 添加字幕上传步骤失败: %v", videoID, err)
+			continue
+		}
+		count++
+	}
+
+	return count, nil
 }

@@ -102,6 +102,12 @@ type SavedVideo struct {
 	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`                      // 时间戳
 	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`                       // 保存时间
 	UserID         uint   `gorm:"index" json:"user_id"`                                   // 提交用户ID
+
+	// 字幕上传调度字段
+	VideoSizeMB           float64    `gorm:"type:decimal(10,2)" json:"video_size_mb"`                  // 视频大小(MB)
+	SubtitleScheduledAt   *time.Time `gorm:"index" json:"subtitle_scheduled_at"`                       // 字幕计划上传时间
+	SubtitleUploadRetries int        `gorm:"default:0" json:"subtitle_upload_retries"`                 // 字幕上传重试次数
+	SubtitleUploadError   string     `gorm:"type:varchar(500)" json:"subtitle_upload_error,omitempty"` // 字幕上传错误信息
 }
 
 // TableName 指定表名
