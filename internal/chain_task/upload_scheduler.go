@@ -57,8 +57,17 @@ func NewUploadScheduler(
 
 // SetUp 启动上传调度器
 func (s *UploadScheduler) SetUp() {
-	// 每10秒检查一次是否需要上传（更及时响应）
-	s.Task.AddFunc("*/10 * * * * *", func() {
+	// 获取检查间隔配置（默认10秒）
+	checkInterval := 10 // 默认值
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil && s.App.Config.DownloadConfig.UploadCheckInterval > 0 {
+		checkInterval = s.App.Config.DownloadConfig.UploadCheckInterval
+	}
+
+	// 构建 cron 表达式: 每N秒执行一次
+	// 格式: */N * * * * *
+	cronExpr := fmt.Sprintf("*/%d * * * * *", checkInterval)
+
+	s.Task.AddFunc(cronExpr, func() {
 		s.mutex.Lock()
 		defer s.mutex.Unlock()
 
@@ -84,7 +93,7 @@ func (s *UploadScheduler) SetUp() {
 	// 启动时显示待上传字幕的视频数量
 	s.showPendingSubtitleInfo()
 
-	s.logger.Info("✓ Upload scheduler started, checking every 10 seconds")
+	s.logger.Infof("✓ Upload scheduler started, checking every %d seconds", checkInterval)
 }
 
 // uploadNextVideo 上传下一个准备好的视频

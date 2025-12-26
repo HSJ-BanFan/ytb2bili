@@ -1059,10 +1059,17 @@ func (t *UploadToBilibili) getVideoSizeMB() float64 {
 	return float64(fileInfo.Size()) / 1024 / 1024
 }
 
-// calculateSubtitleDelay 根据视频大小计算字幕上传延迟时间
-// B站视频审核时间与视频大小正相关
+// calculateSubtitleDelay 根据配置或视频大小计算字幕上传延迟时间
+// 优先使用配置文件中的设置，未配置时根据视频大小智能计算
 func (t *UploadToBilibili) calculateSubtitleDelay(videoSizeMB float64) time.Duration {
-	// 根据视频大小设置延迟时间
+	// 1. 优先检查配置文件
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil && t.App.Config.DownloadConfig.SubtitleUploadDelay > 0 {
+		delay := time.Duration(t.App.Config.DownloadConfig.SubtitleUploadDelay) * time.Minute
+		t.App.Logger.Infof("🕒 使用配置文件的字幕上传延迟: %d 分钟", t.App.Config.DownloadConfig.SubtitleUploadDelay)
+		return delay
+	}
+
+	// 2. 如果未配置，根据视频大小设置延迟时间（B站审核时间与视频大小正相关）
 	// 小视频 (<100MB): 10分钟
 	// 中等视频 (100-300MB): 15分钟
 	// 大视频 (300-500MB): 20分钟

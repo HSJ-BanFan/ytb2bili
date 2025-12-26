@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
@@ -68,18 +69,22 @@ func (t *UploadSubtitleToBilibili) Execute(context map[string]interface{}) bool 
 		return true // 不算失败，只是跳过
 	}
 
-	// 4. 创建 Bilibili 客户端和字幕上传器
-	client := bilibili.NewClient()
-	uploader := bilibili.NewSubtitleUploader(client, loginInfo)
+	// 4. 创建自定义字幕上传器（包含 lan_doc 参数支持）
+	uploader := NewCustomSubtitleUploader(loginInfo)
 
 	// 5. 上传字幕文件
 	uploadedCount := 0
 	for _, subtitleFile := range subtitleFiles {
 		t.App.Logger.Infof("📝 正在上传字幕: %s", filepath.Base(subtitleFile.Path))
 
-		err := uploader.UploadSubtitle(bvid, subtitleFile.Path, subtitleFile.Language)
+		err := uploader.UploadSubtitleWithLanDoc(bvid, subtitleFile.Path, subtitleFile.Language)
 		if err != nil {
-			t.App.Logger.Errorf("❌ 上传字幕失败 %s: %v", subtitleFile.Path, err)
+			// 79001: 当前语言已上传生效的字幕文件 (视为已存在，不算失败)
+			if strings.Contains(err.Error(), "79001") || strings.Contains(err.Error(), "已上传生效") {
+				t.App.Logger.Infof("ℹ️ 字幕已存在: %s (%s)", filepath.Base(subtitleFile.Path), subtitleFile.Language)
+			} else {
+				t.App.Logger.Errorf("❌ 上传字幕失败 %s: %v", subtitleFile.Path, err)
+			}
 			// 继续上传其他字幕文件，不因为一个失败就停止
 			continue
 		}
@@ -119,7 +124,7 @@ func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 		filename string
 		language string
 	}{
-		{"zh.srt", "zh-Hans"},           // 中文简体 (标准)
+		{"zh.srt", "zh-Hans"},           // 中文简体
 		{"zh_optimized.srt", "zh-Hans"}, // 中文简体 (备用)
 		{"en.srt", "en"},                // 英文
 	}
@@ -148,18 +153,21 @@ func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 func (t *UploadSubtitleToBilibili) findSubtitleFilesByPattern() []SubtitleFileInfo {
 	var subtitleFiles []SubtitleFileInfo
 
-	// 语言映射表
+	// 语言映射表（映射到 B站 API 接受的语言代码）
+	// B站字幕 API 使用 zh-Hans 格式
 	languageMap := map[string]string{
 		"zh-Hans": "zh-Hans", // 中文简体
 		"zh-Hant": "zh-Hant", // 中文繁体
 		"zh":      "zh-Hans", // 中文默认简体
+		"zh-CN":   "zh-Hans", // 中文简体
+		"zh-TW":   "zh-Hant", // 中文繁体
 		"en":      "en",      // 英文
 		"ja":      "ja",      // 日文
 		"ko":      "ko",      // 韩文
 	}
 
 	// 优先级顺序：中文 > 英文 > 其他
-	priorityOrder := []string{"zh-Hans", "zh-Hant", "zh", "en", "ja", "ko"}
+	priorityOrder := []string{"zh-Hans", "zh-Hant", "zh", "zh-CN", "zh-TW", "en", "ja", "ko"}
 
 	entries, err := os.ReadDir(t.StateManager.CurrentDir)
 	if err != nil {
