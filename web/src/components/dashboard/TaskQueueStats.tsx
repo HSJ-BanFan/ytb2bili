@@ -13,6 +13,7 @@ interface Video {
   updated_at: string;
   task_steps?: TaskStep[];
   bili_bvid?: string;
+  subtitle_scheduled_at?: string;
 }
 
 interface TaskStep {
@@ -53,9 +54,9 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
       setRefreshing(true);
       const response = await fetch('/api/v1/videos?page=1&limit=1000');
       const data = await response.json();
-      
+
       console.log('视频数据响应:', data); // 调试日志
-      
+
       if ((data.code === 0 || data.code === 200) && data.data) {
         setVideos(data.data.videos || []);
         console.log('成功加载视频:', data.data.videos.length); // 调试日志
@@ -110,7 +111,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
 
   const handleResetAllFailed = async (videoId: number, resetAll: boolean = false) => {
     try {
-      const endpoint = resetAll 
+      const endpoint = resetAll
         ? `/api/v1/videos/${videoId}/steps/reset-all`
         : `/api/v1/videos/${videoId}/steps/reset-failed`;
       const response = await fetch(endpoint, {
@@ -138,7 +139,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
 
   const handleDeleteVideo = async (videoId: string, videoTitle: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止事件冒泡，避免触发详情展开
-    
+
     if (!confirm(`确定要删除视频 "${videoTitle || videoId}" 吗？\n\n此操作将删除：\n- 所有任务步骤\n- 视频文件和字幕文件\n- 数据库记录\n\n此操作无法恢复！`)) {
       return;
     }
@@ -162,7 +163,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
       alert('❌ 网络错误，删除失败');
     }
   };
-  
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
@@ -195,20 +196,40 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
   };
 
   // 获取当前阶段描述
-  const getStageDescription = (status: string) => {
+  const getStageDescription = (video: Video) => {
+    const status = video.status;
     const stageMap: { [key: string]: string } = {
       '001': '等待开始处理',
       '002': '正在执行准备任务链（下载视频→生成字幕→翻译字幕→生成元数据）',
-      '200': '准备阶段完成，等待视频上传（每小时上传1个）',
+      '200': '准备阶段完成，等待自动上传（根据配置模式）',
       '201': '正在上传视频到Bilibili',
       '299': '视频上传失败，需要重试',
-      '300': '视频已上传，等待1小时后上传字幕',
+      '300': '视频已上传，等待字幕上传',
       '301': '正在上传字幕到Bilibili',
       '399': '字幕上传失败，需要重试',
       '400': '所有任务已完成',
       '999': '准备阶段失败，需要检查任务步骤',
     };
-    return stageMap[status] || '未知状态';
+
+    let desc = stageMap[status] || '未知状态';
+
+    // 为状态 300 添加具体时间显示
+    if (status === '300') {
+      if (video.subtitle_scheduled_at) {
+        const scheduledTime = new Date(video.subtitle_scheduled_at).toLocaleString('zh-CN', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        desc += `（计划于 ${scheduledTime} 上传）`;
+      } else {
+        desc += '（根据配置延迟）';
+      }
+    }
+
+    return desc;
   };
 
   // 分类视频
@@ -283,17 +304,15 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key as TabType)}
-              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.key
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.key
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
             >
               {tab.label}
               {tab.count > 0 && (
-                <span className={`ml-2 text-xs px-2 py-0.5 rounded ${
-                  activeTab === tab.key ? 'bg-blue-100' : 'bg-gray-100'
-                }`}>
+                <span className={`ml-2 text-xs px-2 py-0.5 rounded ${activeTab === tab.key ? 'bg-blue-100' : 'bg-gray-100'
+                  }`}>
                   {tab.count}
                 </span>
               )}
@@ -319,7 +338,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                 const Icon = statusInfo.icon;
                 return (
                   <div key={video.id}>
-                    <div 
+                    <div
                       className="p-4 hover:bg-gray-50 transition-colors cursor-pointer"
                       onClick={() => handleToggleDetails(video.id)}
                     >
@@ -345,7 +364,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                             )}
                           </div>
                           <p className="text-sm text-gray-600 mb-3">
-                            {getStageDescription(video.status)}
+                            {getStageDescription(video)}
                           </p>
                           <div className="flex items-center space-x-6 text-xs text-gray-500">
                             <span>视频ID: {video.video_id}</span>
@@ -366,7 +385,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                           </div>
                         </div>
                         <div className="ml-4 flex items-center space-x-2">
-                          <button 
+                          <button
                             onClick={(e) => handleDeleteVideo(video.video_id, video.title, e)}
                             className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors flex items-center space-x-1"
                             title="删除视频"
@@ -374,7 +393,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                             <Trash2 className="w-4 h-4" />
                             <span>删除</span>
                           </button>
-                          <button 
+                          <button
                             className="px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded transition-colors"
                           >
                             {expandedVideoId === video.id ? '收起详情' : '查看详情'}
@@ -387,8 +406,8 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                         {isDetailLoading ? (
                           <div className="text-center text-gray-500">加载任务步骤...</div>
                         ) : detailedVideo && detailedVideo.task_steps ? (
-                          <TaskStepDetail 
-                            steps={detailedVideo.task_steps} 
+                          <TaskStepDetail
+                            steps={detailedVideo.task_steps}
                             onRetry={(stepName) => handleRetryStep(video.id, stepName)}
                             onResetAllFailed={(resetAll) => handleResetAllFailed(video.id, resetAll)}
                           />
@@ -455,7 +474,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
               <div className="flex-1">
                 <h4 className="font-medium text-gray-900 mb-1">视频上传调度</h4>
                 <p className="text-sm text-gray-600">
-                  每5分钟检查一次，每小时自动上传1个准备就绪的视频到Bilibili
+                  每分钟检查一次，根据配置模式（立即/延迟）自动上传视频到Bilibili
                 </p>
                 <div className="mt-2 text-xs text-gray-500">
                   准备就绪: {categories.ready.length} 个 | 上传中: {categories.uploading.length} 个
@@ -470,7 +489,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
               <div className="flex-1">
                 <h4 className="font-medium text-gray-900 mb-1">字幕上传调度</h4>
                 <p className="text-sm text-gray-600">
-                  视频上传完成1小时后，自动上传对应的字幕文件
+                  视频上传完成后，按配置的延迟时间自动上传对应的字幕文件
                 </p>
                 <div className="mt-2 text-xs text-gray-500">
                   等待上传字幕: {videos.filter(v => v.status === '300').length} 个
@@ -547,11 +566,10 @@ const TaskStepDetail = ({ steps, onRetry, onResetAllFailed }: { steps: TaskStep[
         {onResetAllFailed && (
           <button
             onClick={() => onResetAllFailed(!hasFailedSteps)}
-            className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-              hasFailedSteps 
-                ? 'text-orange-700 bg-orange-50 border border-orange-300 hover:bg-orange-100' 
-                : 'text-blue-700 bg-blue-50 border border-blue-300 hover:bg-blue-100'
-            }`}
+            className={`inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${hasFailedSteps
+              ? 'text-orange-700 bg-orange-50 border border-orange-300 hover:bg-orange-100'
+              : 'text-blue-700 bg-blue-50 border border-blue-300 hover:bg-blue-100'
+              }`}
           >
             <RotateCcw className="w-4 h-4 mr-1.5" />
             {hasFailedSteps ? '一键重置失败任务' : '重置任务'}

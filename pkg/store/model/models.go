@@ -108,6 +108,10 @@ type SavedVideo struct {
 	SubtitleScheduledAt   *time.Time `gorm:"index" json:"subtitle_scheduled_at"`                       // 字幕计划上传时间
 	SubtitleUploadRetries int        `gorm:"default:0" json:"subtitle_upload_retries"`                 // 字幕上传重试次数
 	SubtitleUploadError   string     `gorm:"type:varchar(500)" json:"subtitle_upload_error,omitempty"` // 字幕上传错误信息
+
+	// 自动上传调度字段
+	ProcessingCompletedAt *time.Time `gorm:"index" json:"processing_completed_at"` // 视频处理完成时间（用于视频上传调度）
+	VideoUploadedAt       *time.Time `gorm:"index" json:"video_uploaded_at"`       // 视频上传完成时间（用于字幕上传调度）
 }
 
 // TableName 指定表名

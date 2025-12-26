@@ -214,8 +214,8 @@ func (s *TaskStepService) ResetAllRunningTasks() error {
 
 	// 重置所有状态为 Running 的任务步骤为 Pending
 	result := tx.Model(&model.TaskStep{}).
-		Where("status = ?", "Running").
-		Update("status", "Pending")
+		Where("status = ?", model.TaskStepStatusRunning).
+		Update("status", model.TaskStepStatusPending)
 
 	if result.Error != nil {
 		tx.Rollback()

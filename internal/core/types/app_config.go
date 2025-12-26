@@ -227,13 +227,22 @@ type ProxyConfig struct {
 
 // DownloadConfig 下载配置
 type DownloadConfig struct {
-	UseAria2c           bool   `toml:"use_aria2c"`           // 是否使用 aria2c 多线程下载
-	Aria2cPath          string `toml:"aria2c_path"`          // aria2c 可执行文件路径
-	ConcurrentFragments int    `toml:"concurrent_fragments"` // 并发分片数（默认8）
-	Aria2cConnections   int    `toml:"aria2c_connections"`   // aria2c 连接数（默认16）
-	HttpChunkSize       string `toml:"http_chunk_size"`      // HTTP 分块大小（默认10M）
-	PreferFormat        string `toml:"prefer_format"`        // 首选格式: best, 1080p, 720p, 480p
-	Aria2cWithProxy     bool   `toml:"aria2c_with_proxy"`    // 使用代理时是否仍尝试 aria2c（可能遇到403）
+	UseAria2c              bool   `toml:"use_aria2c"`               // 是否使用 aria2c 多线程下载
+	Aria2cPath             string `toml:"aria2c_path"`              // aria2c 可执行文件路径
+	ConcurrentFragments    int    `toml:"concurrent_fragments"`     // 并发分片数（默认8）
+	Aria2cConnections      int    `toml:"aria2c_connections"`       // aria2c 连接数（默认16）
+	HttpChunkSize          string `toml:"http_chunk_size"`          // HTTP 分块大小（默认10M）
+	PreferFormat           string `toml:"prefer_format"`            // 首选格式: best, 1080p, 720p, 480p
+	Aria2cWithProxy        bool   `toml:"aria2c_with_proxy"`        // 使用代理时是否仍尝试 aria2c（可能遇到403）
+	CookiesFromBrowser     string `toml:"cookies_from_browser"`     // 从浏览器提取cookies: chrome/firefox/edge/brave/opera/safari，空字符串禁用
+	MaxConcurrentTasks     int    `toml:"max_concurrent_tasks"`     // 准备阶段最大并发任务数（默认10）
+	CookiesRefreshInterval int    `toml:"cookies_refresh_interval"` // Cookies 刷新间隔（分钟），默认30，0表示禁用
+
+	// 自动上传配置
+	AutoUploadEnabled   bool   `toml:"auto_upload_enabled"`   // 是否启用自动上传（默认true）
+	AutoUploadMode      string `toml:"auto_upload_mode"`      // 上传模式: immediate=立即, delayed=延迟（默认delayed）
+	VideoUploadDelay    int    `toml:"video_upload_delay"`    // 视频处理完成后延迟上传时间（分钟，默认10）
+	SubtitleUploadDelay int    `toml:"subtitle_upload_delay"` // 视频上传后字幕延迟上传时间（分钟，默认10）
 }
 
 // AnalyticsConfig 数据分析配置

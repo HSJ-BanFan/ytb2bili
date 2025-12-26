@@ -55,7 +55,113 @@ func (h *ConfigHandler) RegisterRoutes(server *core.AppServer) {
 		config.PUT("/gemini", h.updateGeminiConfig)
 		config.POST("/gemini/validate", h.validateGeminiApiKeys)
 		config.GET("/gemini/models", h.getGeminiModels)
+
+		// Download configuration
+		config.GET("/download", h.getDownloadConfig)
+		config.PUT("/download", h.updateDownloadConfig)
 	}
+}
+
+// DownloadConfigRequest 下载配置请求
+type DownloadConfigRequest struct {
+	AutoUploadEnabled   *bool   `json:"auto_upload_enabled,omitempty"`
+	AutoUploadMode      *string `json:"auto_upload_mode,omitempty"`
+	VideoUploadDelay    *int    `json:"video_upload_delay,omitempty"`
+	SubtitleUploadDelay *int    `json:"subtitle_upload_delay,omitempty"`
+}
+
+// DownloadConfigResponse 下载配置响应
+type DownloadConfigResponse struct {
+	AutoUploadEnabled   bool   `json:"auto_upload_enabled"`
+	AutoUploadMode      string `json:"auto_upload_mode"`
+	VideoUploadDelay    int    `json:"video_upload_delay"`
+	SubtitleUploadDelay int    `json:"subtitle_upload_delay"`
+}
+
+// getDownloadConfig 获取下载配置
+func (h *ConfigHandler) getDownloadConfig(c *gin.Context) {
+	config := h.App.Config.DownloadConfig
+	if config == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"code":    200,
+			"message": "success",
+			"data": DownloadConfigResponse{
+				AutoUploadEnabled:   false,
+				AutoUploadMode:      "delayed",
+				VideoUploadDelay:    10,
+				SubtitleUploadDelay: 10,
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "success",
+		"data": DownloadConfigResponse{
+			AutoUploadEnabled:   config.AutoUploadEnabled,
+			AutoUploadMode:      config.AutoUploadMode,
+			VideoUploadDelay:    config.VideoUploadDelay,
+			SubtitleUploadDelay: config.SubtitleUploadDelay,
+		},
+	})
+}
+
+// updateDownloadConfig 更新下载配置
+func (h *ConfigHandler) updateDownloadConfig(c *gin.Context) {
+	var req DownloadConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	if h.App.Config.DownloadConfig == nil {
+		h.App.Config.DownloadConfig = &types.DownloadConfig{}
+	}
+	config := h.App.Config.DownloadConfig
+
+	if req.AutoUploadEnabled != nil {
+		config.AutoUploadEnabled = *req.AutoUploadEnabled
+		h.App.Logger.Infof("Updated AutoUploadEnabled: %v", config.AutoUploadEnabled)
+	}
+	if req.AutoUploadMode != nil {
+		config.AutoUploadMode = *req.AutoUploadMode
+		h.App.Logger.Infof("Updated AutoUploadMode: %s", config.AutoUploadMode)
+	}
+	if req.VideoUploadDelay != nil {
+		config.VideoUploadDelay = *req.VideoUploadDelay
+		h.App.Logger.Infof("Updated VideoUploadDelay: %d", config.VideoUploadDelay)
+	}
+	if req.SubtitleUploadDelay != nil {
+		config.SubtitleUploadDelay = *req.SubtitleUploadDelay
+		h.App.Logger.Infof("Updated SubtitleUploadDelay: %d", config.SubtitleUploadDelay)
+	}
+
+	if err := types.SaveConfig(h.App.Config); err != nil {
+		h.App.Logger.Errorf("Failed to save config: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": "Failed to save configuration: " + err.Error(),
+		})
+		return
+	}
+
+	h.App.Config.DownloadConfig = config
+	h.App.Logger.Info("✅ Download configuration updated successfully")
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    200,
+		"message": "Configuration updated successfully",
+		"data": DownloadConfigResponse{
+			AutoUploadEnabled:   config.AutoUploadEnabled,
+			AutoUploadMode:      config.AutoUploadMode,
+			VideoUploadDelay:    config.VideoUploadDelay,
+			SubtitleUploadDelay: config.SubtitleUploadDelay,
+		},
+	})
 }
 
 // DeepSeekConfigRequest DeepSeek配置请求

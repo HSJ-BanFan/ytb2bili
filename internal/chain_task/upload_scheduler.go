@@ -57,25 +57,25 @@ func NewUploadScheduler(
 
 // SetUp 启动上传调度器
 func (s *UploadScheduler) SetUp() {
-	// 每5分钟检查一次是否需要上传
-	s.Task.AddFunc("*/5 * * * *", func() {
+	// 每10秒检查一次是否需要上传（更及时响应）
+	s.Task.AddFunc("*/10 * * * * *", func() {
 		s.mutex.Lock()
 		defer s.mutex.Unlock()
 
-		now := time.Now()
+		// 检查是否启用自动上传
+		autoUploadEnabled := true
+		if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
+			autoUploadEnabled = s.App.Config.DownloadConfig.AutoUploadEnabled
+		}
 
-		// 1. 检查是否需要上传视频（每小时一次）
-		if now.Sub(s.lastVideoUploadTime) >= time.Hour {
-			s.logger.Info("🔍 检查待上传的视频...")
+		if autoUploadEnabled {
+			// 1. 检查是否需要上传视频
 			if err := s.uploadNextVideo(); err != nil {
 				s.logger.Errorf("上传视频失败: %v", err)
-			} else {
-				s.lastVideoUploadTime = now
 			}
 		}
 
-		// 2. 检查是否需要上传字幕（每5分钟检查一次，根据计划时间决定是否上传）
-		s.logger.Debug("🔍 检查待上传字幕的视频...")
+		// 2. 检查是否需要上传字幕
 		if err := s.uploadNextSubtitle(); err != nil {
 			s.logger.Errorf("上传字幕失败: %v", err)
 		}
@@ -84,24 +84,59 @@ func (s *UploadScheduler) SetUp() {
 	// 启动时显示待上传字幕的视频数量
 	s.showPendingSubtitleInfo()
 
-	s.logger.Info("✓ Upload scheduler started, checking every 5 minutes")
+	s.logger.Info("✓ Upload scheduler started, checking every 10 seconds")
 }
 
 // uploadNextVideo 上传下一个准备好的视频
+// 根据配置的上传模式（immediate/delayed）决定是否立即上传
 func (s *UploadScheduler) uploadNextVideo() error {
-	// 查询状态为 '200' (准备就绪) 的视频
-	var videos []struct {
-		ID        uint
-		VideoID   string
-		Title     string
-		CreatedAt time.Time
+	now := time.Now()
+
+	// 获取配置
+	uploadMode := "delayed"
+	videoUploadDelay := 10 // 默认10分钟
+	subtitleUploadDelay := 10
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
+		if s.App.Config.DownloadConfig.AutoUploadMode != "" {
+			uploadMode = s.App.Config.DownloadConfig.AutoUploadMode
+		}
+		if s.App.Config.DownloadConfig.VideoUploadDelay > 0 {
+			videoUploadDelay = s.App.Config.DownloadConfig.VideoUploadDelay
+		}
+		if s.App.Config.DownloadConfig.SubtitleUploadDelay > 0 {
+			subtitleUploadDelay = s.App.Config.DownloadConfig.SubtitleUploadDelay
+		}
 	}
 
-	err := s.Db.Table("cw_saved_videos").
-		Select("id, video_id, title, created_at").
+	// 查询状态为 '200' (准备就绪) 的视频
+	var videos []struct {
+		ID                    uint
+		VideoID               string
+		Title                 string
+		ProcessingCompletedAt *time.Time
+		CreatedAt             time.Time
+	}
+
+	query := s.Db.Table("cw_saved_videos").
+		Select("id, video_id, title, processing_completed_at, created_at").
 		Where("status = ?", "200").
-		Where("deleted_at IS NULL").
-		Order("created_at ASC").
+		Where("deleted_at IS NULL")
+
+	// Query videos
+	// ... (existing query logic)
+
+	// 根据上传模式添加时间条件
+	if uploadMode == "delayed" {
+		// 延迟模式：只查询 processing_completed_at + delay <= now 的视频
+		delayDuration := time.Duration(videoUploadDelay) * time.Minute
+		query = query.Where("processing_completed_at IS NOT NULL AND processing_completed_at <= ?", now.Add(-delayDuration))
+	} else {
+		// Log for verification
+		// s.logger.Debugf("🔍 Check upload (Mode: %s) - No partial delay", uploadMode)
+	}
+	// immediate 模式：不添加时间条件，立即上传
+
+	err := query.Order("COALESCE(processing_completed_at, created_at) ASC").
 		Limit(1).
 		Find(&videos).Error
 
@@ -110,12 +145,21 @@ func (s *UploadScheduler) uploadNextVideo() error {
 	}
 
 	if len(videos) == 0 {
-		s.logger.Debug("没有待上传的视频")
+		if uploadMode != "delayed" {
+			s.logger.Debugf("未找到待上传视频 (模式: %s)", uploadMode)
+		}
 		return nil
 	}
 
 	video := videos[0]
-	s.logger.Infof("📤 开始上传视频: %s (VideoID: %s)", video.Title, video.VideoID)
+
+	// 显示调度信息
+	if video.ProcessingCompletedAt != nil {
+		s.logger.Infof("📤 开始上传视频: %s (VideoID: %s, 处理完成于: %s)",
+			video.Title, video.VideoID, video.ProcessingCompletedAt.Format("15:04:05"))
+	} else {
+		s.logger.Infof("📤 开始上传视频: %s (VideoID: %s)", video.Title, video.VideoID)
+	}
 
 	// 更新状态为 '201' (上传视频中)
 	if err := s.SavedVideoService.UpdateStatus(video.ID, "201"); err != nil {
@@ -129,12 +173,15 @@ func (s *UploadScheduler) uploadNextVideo() error {
 		return fmt.Errorf("上传视频失败: %v", err)
 	}
 
-	// 上传成功，更新状态为 '300' (视频已上传，待上传字幕)
-	if err := s.SavedVideoService.UpdateStatus(video.ID, "300"); err != nil {
-		return fmt.Errorf("更新视频状态失败: %v", err)
-	}
+	// 上传成功，更新状态为 '300' 并记录上传时间和计划字幕上传时间
+	subtitleScheduledAt := now.Add(time.Duration(subtitleUploadDelay) * time.Minute)
+	s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
+		"status":                "300",
+		"video_uploaded_at":     now,
+		"subtitle_scheduled_at": subtitleScheduledAt,
+	})
 
-	s.logger.Infof("✅ 视频上传成功: %s", video.VideoID)
+	s.logger.Infof("✅ 视频上传成功: %s, 字幕将在 %s 后上传", video.VideoID, subtitleScheduledAt.Format("15:04:05"))
 	return nil
 }
 

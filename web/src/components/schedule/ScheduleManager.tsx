@@ -47,7 +47,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
       setRefreshing(true);
       const response = await fetch('/api/v1/videos?page=1&limit=1000');
       const data = await response.json();
-      
+
       if ((data.code === 0 || data.code === 200) && data.data) {
         setVideos(data.data.videos || []);
       }
@@ -86,7 +86,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
   // 手动执行上传任务
   const handleManualUpload = async (videoId: number, taskType: 'video' | 'subtitle') => {
     const taskKey = `${videoId}-${taskType}`;
-    
+
     if (executingTasks.has(taskKey)) {
       return; // 防止重复执行
     }
@@ -174,8 +174,8 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
           <div className="flex-1">
             <h3 className="font-medium text-blue-900 mb-2">自动上传策略</h3>
             <div className="text-sm text-blue-800 space-y-1">
-              <p>• <strong>视频上传</strong>：每小时自动上传1个准备就绪的视频到Bilibili</p>
-              <p>• <strong>字幕上传</strong>：视频上传完成1小时后，自动上传对应的字幕文件</p>
+              <p>• <strong>视频上传</strong>：每分钟检查，根据配置模式自动上传准备就绪的视频到Bilibili</p>
+              <p>• <strong>字幕上传</strong>：视频上传完成后，按配置的延迟时间自动上传对应的字幕文件</p>
               <p>• <strong>手动触发</strong>：您可以随时点击下方的&quot;立即上传&quot;按钮手动触发上传任务</p>
             </div>
           </div>
@@ -204,7 +204,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
               {paginatedVideoTasks.map(task => {
                 const taskKey = `${task.id}-video`;
                 const isExecuting = executingTasks.has(taskKey);
-                
+
                 return (
                   <div key={task.id} className="p-4 hover:bg-gray-50 transition-colors">
                     <div className="flex items-center justify-between">
@@ -270,14 +270,14 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
             <div className="p-12 text-center text-gray-500">
               <Upload className="w-12 h-12 mx-auto mb-3 text-gray-300" />
               <p>暂无待上传的字幕</p>
-              <p className="text-sm mt-1">视频上传完成1小时后，字幕任务将显示在这里</p>
+              <p className="text-sm mt-1">视频上传完成后，根据配置的延迟自动上传字幕</p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
               {paginatedSubtitleTasks.map(task => {
                 const taskKey = `${task.id}-subtitle`;
                 const isExecuting = executingTasks.has(taskKey);
-                
+
                 return (
                   <div key={task.id} className="p-4 hover:bg-gray-50 transition-colors">
                     <div className="flex items-center justify-between">
@@ -383,7 +383,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
       <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
         <h4 className="font-medium text-gray-900 mb-3">使用说明</h4>
         <div className="text-sm text-gray-600 space-y-2">
-          <p>1. <strong>自动上传</strong>：系统每5分钟检查一次，按照策略自动执行上传任务</p>
+          <p>1. <strong>自动上传</strong>：系统每分钟检查一次，根据配置的模式(立即/延迟)自动执行上传任务</p>
           <p>2. <strong>手动上传</strong>：点击&quot;立即上传&quot;按钮可以立即触发上传，无需等待自动调度</p>
           <p>3. <strong>上传限制</strong>：为避免被限流，建议手动上传时注意频率控制</p>
           <p>4. <strong>任务状态</strong>：上传完成后，任务会自动从队列中移除</p>

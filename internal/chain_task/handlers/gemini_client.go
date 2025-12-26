@@ -15,6 +15,7 @@ import (
 )
 
 // GeminiClient Gemini API 客户端
+// 注意：sanitizeUTF8 函数在 generate_metadata.go 中定义
 type GeminiClient struct {
 	client    *genai.Client
 	model     string
@@ -67,7 +68,7 @@ func (g *GeminiClient) TestConnection(ctx context.Context) error {
 
 	testPrompt := "请回复：OK"
 
-	resp, err := model.GenerateContent(ctx, genai.Text(testPrompt))
+	resp, err := model.GenerateContent(ctx, genai.Text(sanitizeUTF8(testPrompt)))
 	if err != nil {
 		return fmt.Errorf("API 调用失败: %v", err)
 	}
@@ -167,7 +168,7 @@ func (g *GeminiClient) GenerateMetadataFromVideo(ctx context.Context, videoFile 
 	// 使用系统提示词作为主提示词（Gemini 不区分 system/user）
 	prompt := promptTemplate.System
 
-	resp, err := model.GenerateContent(ctx, genai.FileData{URI: videoFile.URI}, genai.Text(prompt))
+	resp, err := model.GenerateContent(ctx, genai.FileData{URI: videoFile.URI}, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return nil, fmt.Errorf("生成内容失败: %v", err)
 	}
@@ -217,7 +218,7 @@ func (g *GeminiClient) GenerateMetadataFromText(ctx context.Context, subtitleTex
 	// 组合系统提示词和用户提示词
 	prompt := promptTemplate.System + "\n\n" + userPrompt
 
-	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := model.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return nil, fmt.Errorf("生成内容失败: %v", err)
 	}
@@ -234,6 +235,14 @@ func (g *GeminiClient) GenerateMetadataFromText(ctx context.Context, subtitleTex
 
 // GenerateMetadataFromImage 从图片+文本生成元数据（用于超大视频的关键帧分析）
 func (g *GeminiClient) GenerateMetadataFromImage(ctx context.Context, imagePath string, subtitleText string) (*VideoMetadata, error) {
+	return g.GenerateMetadataFromImages(ctx, []string{imagePath}, subtitleText)
+}
+
+func (g *GeminiClient) GenerateMetadataFromImages(ctx context.Context, imagePaths []string, subtitleText string) (*VideoMetadata, error) {
+	if len(imagePaths) == 0 {
+		return nil, fmt.Errorf("未提供图片文件")
+	}
+
 	model := g.client.GenerativeModel(g.model)
 
 	// 设置生成参数
@@ -248,59 +257,58 @@ func (g *GeminiClient) GenerateMetadataFromImage(ctx context.Context, imagePath 
 		{Category: genai.HarmCategoryDangerousContent, Threshold: genai.HarmBlockNone},
 	}
 
-	// 读取图片文件
-	imageData, err := os.ReadFile(imagePath)
-	if err != nil {
-		return nil, fmt.Errorf("读取图片文件失败: %v", err)
-	}
-
-	// 根据文件扩展名确定 MIME 类型
-	mimeType := getMimeTypeFromPath(imagePath)
-
-	// 构建提示词
+	// 从提示词管理器获取提示词
+	promptManager := prompts.GetGlobalManager()
+	promptTemplate, err := promptManager.GetPrompt(prompts.PromptMetadataImage)
 	var prompt string
-	if subtitleText != "" {
-		prompt = fmt.Sprintf(`请根据这张视频缩略图和以下字幕内容，生成一个吸引人的视频标题、详细描述和3-5个相关标签。
-
-字幕内容：
-%s
-
-要求：
-1. 标题要简洁有力，严格控制在30个字以内，能够准确概括视频主题
-2. 描述要详细但不要过长，控制在600-800字以内
-3. 标签要准确反映视频内容，3-5个即可
-4. 必须使用中文
-5. 输出格式必须是JSON：
-{
-  "title": "视频标题",
-  "description": "视频描述",
-  "tags": ["标签1", "标签2", "标签3"]
-}
-
-请直接返回JSON格式的结果。`, subtitleText)
+	if err == nil && promptTemplate != nil && strings.TrimSpace(promptTemplate.System) != "" {
+		prompt = promptTemplate.System
 	} else {
-		prompt = `请根据这张视频缩略图，推测视频内容并生成一个吸引人的视频标题、详细描述和3-5个相关标签。
+		prompt = `这是一个视频的缩略图/关键帧。请根据图片内容推测视频主题，生成以下元数据：
 
-要求：
-1. 标题要简洁有力，严格控制在30个字以内
-2. 描述要详细但不要过长，控制在600-800字以内
-3. 标签要准确反映视频内容，3-5个即可
-4. 必须使用中文
-5. 输出格式必须是JSON：
+## 分析要求
+1. 仔细观察图片中的人物、场景、文字、物品等元素
+2. 根据视觉线索推测视频可能的主题和内容
+3. 生成合理且吸引人的元数据
+
+## 标题要求
+- 长度：15-30个中文字符
+- 基于图片内容合理推测，不要过度夸张
+
+## 描述要求
+- 长度：80-150字
+- 根据图片内容描述可能的视频主题
+
+## 标签要求
+- 数量：3-5个
+
+## 输出格式
+必须返回有效的 JSON 格式：
 {
   "title": "视频标题",
   "description": "视频描述",
   "tags": ["标签1", "标签2", "标签3"]
-}
-
-请直接返回JSON格式的结果。`
+}`
 	}
 
-	// 调用 API
-	resp, err := model.GenerateContent(ctx,
-		genai.ImageData(mimeType, imageData),
-		genai.Text(prompt),
-	)
+	if strings.TrimSpace(subtitleText) != "" {
+		prompt = prompt + "\n\n补充文本信息（可能来自字幕/原始标题/简介等）：\n" + subtitleText
+	}
+
+	parts := make([]genai.Part, 0, 1+len(imagePaths))
+	parts = append(parts, genai.Text(sanitizeUTF8(prompt)))
+	for _, imagePath := range imagePaths {
+		imageData, err := os.ReadFile(imagePath)
+		if err != nil {
+			return nil, fmt.Errorf("读取图片文件失败(%s): %v", imagePath, err)
+		}
+
+		mimeType := getMimeTypeFromPath(imagePath)
+		imageType := toImageDataType(mimeType)
+		parts = append(parts, genai.ImageData(imageType, imageData))
+	}
+
+	resp, err := model.GenerateContent(ctx, parts...)
 	if err != nil {
 		return nil, fmt.Errorf("生成内容失败: %v", err)
 	}
@@ -361,4 +369,16 @@ func getMimeTypeFromPath(filePath string) string {
 		// 默认使用 JPEG
 		return "image/jpeg"
 	}
+}
+
+func toImageDataType(mimeType string) string {
+	t := strings.ToLower(strings.TrimSpace(mimeType))
+	if t == "" {
+		return "jpeg"
+	}
+	t = strings.TrimPrefix(t, "image/")
+	if t == "jpg" {
+		return "jpeg"
+	}
+	return t
 }

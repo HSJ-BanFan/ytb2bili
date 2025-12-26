@@ -287,7 +287,23 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 	context["result_data"] = string(uploadResultsJSON)
 
 	// 至少有一个账号上传成功就算成功
-	return successCount > 0
+	if successCount > 0 {
+		return true
+	}
+
+	// 所有账号都失败，收集错误信息
+	var errors []string
+	for _, r := range results {
+		if !r.Success && r.Error != "" {
+			errors = append(errors, fmt.Sprintf("[%s] %s", r.AccountName, r.Error))
+		}
+	}
+	if len(errors) > 0 {
+		context["error"] = fmt.Sprintf("所有账号上传失败: %s", strings.Join(errors, "; "))
+	} else {
+		context["error"] = "所有账号上传失败"
+	}
+	return false
 }
 
 // uploadToAccount 上传视频到指定账号

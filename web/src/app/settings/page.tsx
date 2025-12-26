@@ -13,32 +13,83 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'account'>('general');
   const [showBindQR, setShowBindQR] = useState(false);
   const [biliStatus, setBiliStatus] = useState<{ isLoggedIn: boolean; user?: { name: string; mid: string; avatar?: string } } | null>(null);
-  const [autoUpload, setAutoUpload] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const v = localStorage.getItem('biliup:autoUpload');
-        return v === '1';
-      } catch {
-        return false;
-      }
-    }
-    return false;
+  const [downloadConfig, setDownloadConfig] = useState({
+    autoUploadMode: 'delayed',
+    videoUploadDelay: 10,
+    subtitleUploadDelay: 10
   });
+
+  const [autoUpload, setAutoUpload] = useState<boolean>(false);
 
   // 多账号状态
   const [accounts, setAccounts] = useState<BiliAccount[]>([]);
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('biliup:autoUpload', autoUpload ? '1' : '0');
-      } catch {
-        // ignore
+  // Fetch download config from backend
+  const fetchDownloadConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/config/download');
+      const data = await res.json();
+      if (data.code === 200) {
+        setAutoUpload(data.data.auto_upload_enabled);
+        setDownloadConfig({
+          autoUploadMode: data.data.auto_upload_mode || 'delayed',
+          videoUploadDelay: data.data.video_upload_delay || 10,
+          subtitleUploadDelay: data.data.subtitle_upload_delay || 10
+        });
       }
+    } catch (e) {
+      console.error('获取下载配置失败:', e);
     }
-  }, [autoUpload]);
+  }, []);
+
+  // Update download config
+  const updateDownloadConfig = async (key: string, value: any) => {
+    // Process value to ensure numbers for delay fields
+    let processedValue = value;
+    if (key === 'videoUploadDelay' || key === 'subtitleUploadDelay') {
+      processedValue = parseInt(value) || 0;
+    }
+
+    const newConfig = {
+      auto_upload_enabled: key === 'autoUploadEnabled' ? value : autoUpload,
+      auto_upload_mode: key === 'autoUploadMode' ? value : downloadConfig.autoUploadMode,
+      video_upload_delay: key === 'videoUploadDelay' ? processedValue : parseInt(String(downloadConfig.videoUploadDelay)),
+      subtitle_upload_delay: key === 'subtitleUploadDelay' ? processedValue : parseInt(String(downloadConfig.subtitleUploadDelay))
+    };
+
+    try {
+      const res = await fetch('/api/v1/config/download', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newConfig),
+      });
+      const data = await res.json();
+      if (data.code === 200) {
+        if (key === 'autoUploadEnabled') setAutoUpload(value);
+        else {
+          setDownloadConfig(prev => ({
+            ...prev,
+            [key]: processedValue
+          }));
+        }
+      } else {
+        alert('更新配置失败: ' + data.message);
+      }
+    } catch (e) {
+      console.error('更新配置失败:', e);
+      alert('更新配置失败');
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchDownloadConfig();
+    }
+  }, [user, fetchDownloadConfig]);
 
   // 加载账号列表
   const loadAccounts = useCallback(async () => {
@@ -242,17 +293,83 @@ export default function SettingsPage() {
                     <input
                       type="checkbox"
                       checked={autoUpload}
-                      onChange={(e) => setAutoUpload(e.target.checked)}
+                      onChange={(e) => updateDownloadConfig('autoUploadEnabled', e.target.checked)}
                       className="sr-only"
                     />
                     <div
-                      onClick={() => setAutoUpload(!autoUpload)}
                       className={`w-10 h-6 rounded-full cursor-pointer transition-colors ${autoUpload ? 'bg-blue-600' : 'bg-gray-300'}`}
                     >
                       <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${autoUpload ? 'translate-x-4' : ''}`} />
                     </div>
                   </div>
                 </label>
+
+                {/* 自动上传配置详情 */}
+                {autoUpload && (
+                  <div className="bg-gray-50 p-4 rounded-md space-y-4 border border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">上传策略配置</h3>
+
+                    {/* 上传模式 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          上传模式
+                        </label>
+                        <select
+                          value={downloadConfig.autoUploadMode}
+                          onChange={(e) => updateDownloadConfig('autoUploadMode', e.target.value)}
+                          className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
+                        >
+                          <option value="delayed">延迟上传 (推荐)</option>
+                          <option value="immediate">立即上传</option>
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {downloadConfig.autoUploadMode === 'delayed'
+                            ? '处理完成后等待一段时间再上传，也是为了防止被B站频繁请求拦截'
+                            : '处理完成后立即尝试上传视频'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 延迟时间设置 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          视频上传延迟 (分钟)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1440"
+                          value={downloadConfig.videoUploadDelay}
+                          onChange={(e) => updateDownloadConfig('videoUploadDelay', e.target.value)}
+                          disabled={downloadConfig.autoUploadMode !== 'delayed'}
+                          className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border disabled:bg-gray-100 disabled:text-gray-400"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          视频处理完成后，等待多久开始上传视频
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          字幕上传延迟 (分钟)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1440"
+                          value={downloadConfig.subtitleUploadDelay}
+                          onChange={(e) => updateDownloadConfig('subtitleUploadDelay', e.target.value)}
+                          className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">
+                          视频上传成功后，等待多久上传字幕
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-blue-50 p-4 rounded-md">
                   <div className="text-sm text-blue-800">

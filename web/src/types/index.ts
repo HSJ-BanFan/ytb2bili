@@ -16,6 +16,7 @@ export interface Video {
   updated_at: string;
   subtitles?: Subtitle[];
   upload_result?: UploadResult;
+  subtitle_scheduled_at?: string;
 }
 
 export interface TaskStep {
