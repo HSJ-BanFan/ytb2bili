@@ -30,13 +30,18 @@ type ChainTaskHandler struct {
 	TaskStepService    *services.TaskStepService
 	BiliAccountService *services.BiliAccountService
 
-	isRunning bool
-	Task      *cron.Cron
-	Db        *gorm.DB
-	mutex     sync.Mutex
+	// 并发控制
+	workerPool    chan struct{} // 准备阶段并发控制
+	inFlightTasks sync.Map      // 防止重复调度 map[videoID]bool
+	maxWorkers    int           // 最大并发数
+
+	Task  *cron.Cron
+	Db    *gorm.DB
+	mutex sync.Mutex
 }
 
 func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService) *ChainTaskHandler {
+	maxWorkers := 10 // 准备阶段最大并发数
 	return &ChainTaskHandler{
 		App:                app,
 		Task:               task,
@@ -44,8 +49,9 @@ func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, save
 		SavedVideoService:  savedVideoService,
 		TaskStepService:    taskStepService,
 		BiliAccountService: biliAccountService,
+		workerPool:         make(chan struct{}, maxWorkers),
+		maxWorkers:         maxWorkers,
 		mutex:              sync.Mutex{},
-		isRunning:          false,
 	}
 }
 
@@ -54,39 +60,54 @@ func (h *ChainTaskHandler) SetUp() {
 	// 应用启动时重置所有"运行中"的任务步骤
 	h.resetRunningTasksOnStartup()
 
-	// 添加定时任务
+	h.App.Logger.Infof("✓ 任务调度器启动，准备阶段最大并发: %d", h.maxWorkers)
+
+	// 添加定时任务（每5秒扫描一次）
 	h.Task.AddFunc("*/5 * * * * *", func() {
-
-		h.mutex.Lock()
-		defer h.mutex.Unlock()
-
-		if h.isRunning {
-			h.App.Logger.Debug("当前有任务正在执行，跳过本次请求")
-			return
-		}
-
-		// 1. 优先处理重试的任务步骤
+		// 1. 优先处理重试的任务步骤（排除上传步骤）
 		retrySteps, err := h.getRetrySteps()
 		if err != nil {
 			h.App.Logger.Errorf("查询重试步骤失败: %v", err)
 		} else if len(retrySteps) > 0 {
 			h.App.Logger.Infof("发现 %d 个待重试的步骤", len(retrySteps))
-			h.isRunning = true
 
-			// 执行重试步骤
 			for _, step := range retrySteps {
-				h.App.Logger.Infof("🔄 开始重试步骤: %s - %s", step.VideoID, step.StepName)
-				if err := h.RunSingleTaskStep(step.VideoID, step.StepName); err != nil {
-					h.App.Logger.Errorf("重试步骤失败: %v", err)
+				// 跳过上传相关步骤（由 UploadScheduler 处理）
+				if step.StepName == "上传到Bilibili" || step.StepName == "上传字幕到Bilibili" {
+					continue
+				}
+
+				videoID := step.VideoID
+				stepName := step.StepName
+
+				// 检查是否已在执行中
+				if _, loaded := h.inFlightTasks.LoadOrStore(videoID+":"+stepName, true); loaded {
+					continue
+				}
+
+				// 尝试获取 worker slot
+				select {
+				case h.workerPool <- struct{}{}:
+					// 获取到 slot，启动 goroutine 执行
+					go func(vID, sName string) {
+						defer func() {
+							<-h.workerPool
+							h.inFlightTasks.Delete(vID + ":" + sName)
+						}()
+
+						h.App.Logger.Infof("🔄 [并发] 开始重试步骤: %s - %s", vID, sName)
+						if err := h.RunSingleTaskStep(vID, sName); err != nil {
+							h.App.Logger.Errorf("重试步骤失败: %v", err)
+						}
+					}(videoID, stepName)
+				default:
+					// worker pool 已满，跳过本次调度
+					h.inFlightTasks.Delete(videoID + ":" + stepName)
 				}
 			}
-
-			h.isRunning = false
-			return
 		}
 
 		// 2. 处理新的视频任务
-		// 查询状态为 '001' 的任务
 		pendingTasks, err := h.getPendingTasks()
 		if err != nil {
 			h.App.Logger.Errorf("查询待处理任务失败: %v", err)
@@ -98,28 +119,42 @@ func (h *ChainTaskHandler) SetUp() {
 			return
 		}
 
-		// 状态流转
+		// 遍历所有待处理任务，尝试并发执行
+		for _, task := range pendingTasks {
+			videoID := task.VideoId
 
-		// 001 (待处理) → 002 (处理中) → 100 (完成) 或 999 (失败)
+			// 检查是否已在执行中
+			if _, loaded := h.inFlightTasks.LoadOrStore(videoID, true); loaded {
+				continue
+			}
 
-		// 执行第一个待处理任务
-		task := pendingTasks[0]
-		h.App.Logger.Infof("找到待处理任务，VideoId: %s", task.VideoId)
+			// 尝试获取 worker slot
+			select {
+			case h.workerPool <- struct{}{}:
+				// 获取到 slot，更新状态并启动 goroutine 执行
+				if err := h.updateSavedVideoStatus(task.Id, "002"); err != nil {
+					h.App.Logger.Errorf("更新任务状态为处理中时出错: %v", err)
+					<-h.workerPool
+					h.inFlightTasks.Delete(videoID)
+					continue
+				}
 
-		// 更新任务状态为处理中
-		if err := h.updateSavedVideoStatus(task.Id, "002"); err != nil {
-			h.App.Logger.Errorf("更新任务状态为处理中时出错: %v", err)
-			return
+				go func(t models2.TbVideo) {
+					defer func() {
+						<-h.workerPool
+						h.inFlightTasks.Delete(t.VideoId)
+					}()
+
+					h.App.Logger.Infof("🚀 [并发] 开始执行任务链: %s", t.VideoId)
+					h.RunTaskChain(t)
+					h.App.Logger.Infof("✅ [并发] 任务链完成: %s", t.VideoId)
+				}(*task)
+			default:
+				// worker pool 已满，跳过本次调度
+				h.inFlightTasks.Delete(videoID)
+				h.App.Logger.Debugf("Worker pool 已满，任务 %s 等待下次调度", videoID)
+			}
 		}
-
-		h.isRunning = true
-		h.App.Logger.Debug("开始执行任务链")
-
-		// 执行任务链
-		h.RunTaskChain(*task)
-
-		h.isRunning = false
-		h.App.Logger.Debug("任务链执行完成")
 	})
 
 	// 启动 cron 调度器

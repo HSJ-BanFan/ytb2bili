@@ -65,6 +65,8 @@ type DeepSeekUsage struct {
 
 // NewDeepSeekClient 创建DeepSeek客户端
 func NewDeepSeekClient(apiKey string) *DeepSeekClient {
+	// 清理 API Key 中的空格和换行符
+	apiKey = strings.TrimSpace(apiKey)
 	return &DeepSeekClient{
 		APIKey:     apiKey,
 		BaseURL:    "https://api.deepseek.com/v1/chat/completions",
@@ -147,6 +149,9 @@ func (c *DeepSeekClient) doRequest(systemPrompt, userPrompt string) (string, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return "", fmt.Errorf("API认证失败(401): 请检查 DeepSeek API Key 是否正确配置且未过期，当前Key长度: %d", len(c.APIKey))
+		}
 		return "", fmt.Errorf("API返回错误 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -204,6 +209,9 @@ func (c *DeepSeekClient) ChatCompletionWithUsage(systemPrompt, userPrompt string
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return "", nil, fmt.Errorf("API认证失败(401): 请检查 DeepSeek API Key 是否正确配置且未过期，当前Key长度: %d", len(c.APIKey))
+		}
 		return "", nil, fmt.Errorf("API返回错误 (状态码: %d): %s", resp.StatusCode, string(body))
 	}
 

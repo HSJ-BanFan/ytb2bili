@@ -82,6 +82,11 @@ type VideoMetadata struct {
 	Tags        []string `json:"tags"`
 }
 
+// sanitizeUTF8 清洗文本中的非法 UTF-8 字符
+func sanitizeUTF8(text string) string {
+	return strings.ToValidUTF8(text, "")
+}
+
 // checkUserPermission 检查用户是否有 AI 元数据生成权限
 func (g *GenerateMetadata) checkUserPermission() bool {
 	// 获取视频信息，包含提交用户ID
@@ -927,13 +932,15 @@ func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]in
 	g.App.Logger.Info("🖼️  关键帧分析模式（快速稳定）")
 	g.App.Logger.Infof("   视频: %.1f MB | 策略: 缩略图 + 字幕文本", fileSizeMB)
 
-	// 1. 查找缩略图
-	thumbnailPath := g.findBestThumbnail()
-	if thumbnailPath == "" {
-		g.App.Logger.Warn("   ⚠️ 未找到缩略图，回退到纯文本分析")
-		return g.executeWithGeminiText(taskContext)
+	imagePaths := g.findThumbnails(4)
+	if len(imagePaths) == 0 {
+		g.App.Logger.Warn("   ⚠️ 未找到缩略图")
+	} else {
+		g.App.Logger.Infof("   ✓ 缩略图: %s", filepath.Base(imagePaths[0]))
+		if len(imagePaths) > 1 {
+			g.App.Logger.Infof("   ✓ 额外图片: %d", len(imagePaths)-1)
+		}
 	}
-	g.App.Logger.Infof("   ✓ 缩略图: %s", filepath.Base(thumbnailPath))
 
 	// 2. 读取字幕文本（如果有）
 	var subtitleText string
@@ -966,16 +973,39 @@ func (g *GenerateMetadata) executeWithKeyframeAnalysis(taskContext map[string]in
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(g.App.Config.GeminiConfig.Timeout)*time.Second)
 	defer cancel()
 
+	contextText := g.buildGeminiKeyframeContextText(taskContext, subtitleText)
+
+	if len(imagePaths) == 0 {
+		if strings.TrimSpace(contextText) == "" {
+			return false
+		}
+		g.App.Logger.Info("   … AI 分析中（文本模式）...")
+		metadata, err := client.GenerateMetadataFromText(ctx, contextText)
+		if err != nil {
+			g.App.Logger.Errorf("   ✗ 分析失败: %v", err)
+			return false
+		}
+		duration := time.Since(startTime)
+		g.App.Logger.Infof("   ✓ 完成 (%.1fs)", duration.Seconds())
+		g.App.Logger.Infof("   标题: %s", metadata.Title)
+		g.App.Logger.Infof("   标签: %v", metadata.Tags)
+		return g.saveMetadataResults(metadata, taskContext)
+	}
+
 	g.App.Logger.Info("   … AI 分析中...")
-	metadata, err := client.GenerateMetadataFromImage(ctx, thumbnailPath, subtitleText)
+	metadata, err := client.GenerateMetadataFromImages(ctx, imagePaths, contextText)
 	if err != nil {
 		g.App.Logger.Errorf("   ✗ 分析失败: %v", err)
-		// 最后回退到纯文本分析
-		if subtitleText != "" {
-			g.App.Logger.Info("   → 回退到纯文本分析")
-			return g.executeWithGeminiText(taskContext)
+		if strings.TrimSpace(contextText) != "" {
+			g.App.Logger.Info("   → 回退到文本模式")
+			metadata, err = client.GenerateMetadataFromText(ctx, contextText)
+			if err != nil {
+				g.App.Logger.Errorf("   ✗ 文本回退失败: %v", err)
+				return false
+			}
+		} else {
+			return false
 		}
-		return false
 	}
 
 	duration := time.Since(startTime)
@@ -1023,6 +1053,121 @@ func (g *GenerateMetadata) findBestThumbnail() string {
 	}
 
 	return ""
+}
+
+func (g *GenerateMetadata) findThumbnails(maxCount int) []string {
+	if maxCount <= 0 {
+		return nil
+	}
+
+	thumbnailNames := []string{
+		"maxresdefault.jpg",
+		"sddefault.jpg",
+		"hqdefault.jpg",
+		"mqdefault.jpg",
+		"default.jpg",
+		"thumbnail.jpg",
+		"cover.jpg",
+	}
+
+	seen := make(map[string]struct{}, maxCount)
+	result := make([]string, 0, maxCount)
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+
+	for _, name := range thumbnailNames {
+		path := filepath.Join(g.StateManager.CurrentDir, name)
+		if _, err := os.Stat(path); err == nil {
+			add(path)
+			if len(result) >= maxCount {
+				return result
+			}
+		}
+	}
+
+	entries, err := os.ReadDir(g.StateManager.CurrentDir)
+	if err != nil {
+		return result
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
+			add(filepath.Join(g.StateManager.CurrentDir, entry.Name()))
+			if len(result) >= maxCount {
+				return result
+			}
+		}
+	}
+
+	return result
+}
+
+func (g *GenerateMetadata) buildGeminiKeyframeContextText(taskContext map[string]interface{}, subtitleText string) string {
+	parts := make([]string, 0, 6)
+	if strings.TrimSpace(subtitleText) != "" {
+		parts = append(parts, g.truncateString(subtitleText, 2500))
+	}
+
+	if v, ok := taskContext["original_title"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			parts = append(parts, "原始标题: "+g.truncateString(v, 200))
+		}
+	}
+	if v, ok := taskContext["original_description"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			parts = append(parts, "原始简介: "+g.truncateString(v, 1200))
+		}
+	}
+
+	if v, ok := taskContext["video_uploader"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			parts = append(parts, "上传者: "+g.truncateString(v, 200))
+		}
+	}
+	if v, ok := taskContext["video_duration"].(int); ok && v > 0 {
+		parts = append(parts, fmt.Sprintf("时长: %d秒", v))
+	} else if v, ok := taskContext["video_duration"].(float64); ok && v > 0 {
+		parts = append(parts, fmt.Sprintf("时长: %.0f秒", v))
+	} else if v, ok := taskContext["video_duration"].(string); ok {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			parts = append(parts, "时长: "+g.truncateString(v, 50))
+		}
+	}
+
+	if g.SavedVideoService != nil {
+		if savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID); err == nil {
+			title := strings.TrimSpace(savedVideo.Title)
+			if title != "" {
+				parts = append(parts, "数据库标题: "+g.truncateString(title, 200))
+			}
+			desc := strings.TrimSpace(savedVideo.Description)
+			if desc != "" {
+				parts = append(parts, "数据库简介: "+g.truncateString(desc, 1200))
+			}
+		}
+	}
+
+	text := strings.TrimSpace(strings.Join(parts, "\n"))
+	if text == "" {
+		return ""
+	}
+	return g.truncateString(text, 3000)
 }
 
 // executeWithGeminiText 使用 Gemini 分析字幕文本生成元数据
