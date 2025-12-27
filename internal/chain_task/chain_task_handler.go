@@ -12,6 +12,7 @@ import (
 	models2 "github.com/difyz9/ytb2bili/internal/core/models"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
 	"sync"
@@ -31,9 +32,11 @@ type ChainTaskHandler struct {
 	BiliAccountService *services.BiliAccountService
 
 	// 并发控制
-	workerPool    chan struct{} // 准备阶段并发控制
-	inFlightTasks sync.Map      // 防止重复调度 map[videoID]bool
-	maxWorkers    int           // 最大并发数
+	workerPool         chan struct{} // 准备阶段并发控制
+	downloadWorkerPool chan struct{} // 下载专用并发池（限制并发下载数）
+	inFlightTasks      sync.Map      // 防止重复调度 map[videoID]bool
+	maxWorkers         int           // 最大并发数
+	maxDownloads       int           // 最大并发下载数
 
 	Task  *cron.Cron
 	Db    *gorm.DB
@@ -41,7 +44,18 @@ type ChainTaskHandler struct {
 }
 
 func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService) *ChainTaskHandler {
-	maxWorkers := 10 // 准备阶段最大并发数
+	// 从配置读取最大并发数，默认为 10
+	maxWorkers := 10
+	if app.Config != nil && app.Config.DownloadConfig != nil && app.Config.DownloadConfig.MaxConcurrentTasks > 0 {
+		maxWorkers = app.Config.DownloadConfig.MaxConcurrentTasks
+	}
+
+	// 从配置读取最大并发下载数，默认为 3
+	maxDownloads := 3
+	if app.Config != nil && app.Config.DownloadConfig != nil && app.Config.DownloadConfig.MaxConcurrentDownloads > 0 {
+		maxDownloads = app.Config.DownloadConfig.MaxConcurrentDownloads
+	}
+
 	return &ChainTaskHandler{
 		App:                app,
 		Task:               task,
@@ -50,7 +64,9 @@ func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, save
 		TaskStepService:    taskStepService,
 		BiliAccountService: biliAccountService,
 		workerPool:         make(chan struct{}, maxWorkers),
+		downloadWorkerPool: make(chan struct{}, maxDownloads),
 		maxWorkers:         maxWorkers,
+		maxDownloads:       maxDownloads,
 		mutex:              sync.Mutex{},
 	}
 }
@@ -60,16 +76,25 @@ func (h *ChainTaskHandler) SetUp() {
 	// 应用启动时重置所有"运行中"的任务步骤
 	h.resetRunningTasksOnStartup()
 
-	h.App.Logger.Infof("✓ 任务调度器启动，准备阶段最大并发: %d", h.maxWorkers)
+	h.App.Logger.Infof("✓ 任务调度器启动，准备阶段最大并发: %d，下载最大并发: %d", h.maxWorkers, h.maxDownloads)
 
 	// 添加定时任务（每5秒扫描一次）
 	h.Task.AddFunc("*/5 * * * * *", func() {
+		// 使用智能日志器，自动过滤进度活动期间的噪音日志
+		smartLogger := logger.NewSmartLogger(h.App.Logger)
+
+		// 0. 重置失败步骤为 pending（修复竞态条件）
+		// 将 can_retry=true 的 failed 步骤转换为 pending，以便调度器能检测并重试
+		if err := h.TaskStepService.ResetFailedStepsToPending(); err != nil {
+			smartLogger.Errorf("重置失败步骤为 pending 出错: %v", err)
+		}
+
 		// 1. 优先处理重试的任务步骤（排除上传步骤）
 		retrySteps, err := h.getRetrySteps()
 		if err != nil {
-			h.App.Logger.Errorf("查询重试步骤失败: %v", err)
+			smartLogger.Errorf("查询重试步骤失败: %v", err)
 		} else if len(retrySteps) > 0 {
-			h.App.Logger.Infof("发现 %d 个待重试的步骤", len(retrySteps))
+			smartLogger.Debugf("发现 %d 个待重试的步骤", len(retrySteps))
 
 			for _, step := range retrySteps {
 				// 跳过上传相关步骤（由 UploadScheduler 处理）
@@ -85,13 +110,21 @@ func (h *ChainTaskHandler) SetUp() {
 					continue
 				}
 
-				// 尝试获取 worker slot
+				// 尝试获取 worker slot（下载任务使用专用池）
+				isDownloadStep := stepName == "下载视频"
+				var pool chan struct{}
+				if isDownloadStep {
+					pool = h.downloadWorkerPool
+				} else {
+					pool = h.workerPool
+				}
+
 				select {
-				case h.workerPool <- struct{}{}:
+				case pool <- struct{}{}:
 					// 获取到 slot，启动 goroutine 执行
-					go func(vID, sName string) {
+					go func(vID, sName string, workerPool chan struct{}) {
 						defer func() {
-							<-h.workerPool
+							<-workerPool
 							h.inFlightTasks.Delete(vID + ":" + sName)
 						}()
 
@@ -99,7 +132,7 @@ func (h *ChainTaskHandler) SetUp() {
 						if err := h.RunSingleTaskStep(vID, sName); err != nil {
 							h.App.Logger.Errorf("重试步骤失败: %v", err)
 						}
-					}(videoID, stepName)
+					}(videoID, stepName, pool)
 				default:
 					// worker pool 已满，跳过本次调度
 					h.inFlightTasks.Delete(videoID + ":" + stepName)
@@ -110,12 +143,12 @@ func (h *ChainTaskHandler) SetUp() {
 		// 2. 处理新的视频任务
 		pendingTasks, err := h.getPendingTasks()
 		if err != nil {
-			h.App.Logger.Errorf("查询待处理任务失败: %v", err)
+			smartLogger.Errorf("查询待处理任务失败: %v", err)
 			return
 		}
 
 		if len(pendingTasks) == 0 {
-			h.App.Logger.Debug("没有待处理的任务")
+			smartLogger.Debug("没有待处理的任务")
 			return
 		}
 
@@ -133,7 +166,7 @@ func (h *ChainTaskHandler) SetUp() {
 			case h.workerPool <- struct{}{}:
 				// 获取到 slot，更新状态并启动 goroutine 执行
 				if err := h.updateSavedVideoStatus(task.Id, "002"); err != nil {
-					h.App.Logger.Errorf("更新任务状态为处理中时出错: %v", err)
+					smartLogger.Errorf("更新任务状态为处理中时出错: %v", err)
 					<-h.workerPool
 					h.inFlightTasks.Delete(videoID)
 					continue
@@ -152,7 +185,7 @@ func (h *ChainTaskHandler) SetUp() {
 			default:
 				// worker pool 已满，跳过本次调度
 				h.inFlightTasks.Delete(videoID)
-				h.App.Logger.Debugf("Worker pool 已满，任务 %s 等待下次调度", videoID)
+				smartLogger.Debugf("Worker pool 已满，任务 %s 等待下次调度", videoID)
 			}
 		}
 	})
@@ -232,16 +265,16 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 
 	// ═══════════════════════════════════════════════════════════════
 	// 任务流程（按依赖关系排序）:
-	// ┌────┬─────────────┬─────────────┬──────┬────────────┐
-	// │序号│   任务名    │    依赖     │ 必需 │  失败处理  │
-	// ├────┼─────────────┼─────────────┼──────┼────────────┤
-	// │ 1  │ 获取元数据  │     无      │  是  │  终止链    │
-	// │ 2  │ 下载视频    │     无      │  否  │  继续执行  │
-	// │ 3  │ 生成字幕    │  下载视频   │  否  │    跳过    │
-	// │ 4  │ 下载封面    │  获取元数据 │  是  │  终止链    │
-	// │ 5  │ 翻译字幕    │  生成字幕   │  否  │    跳过    │
-	// │ 6  │ 生成元数据  │  下载视频   │  否  │    跳过    │
-	// └────┴─────────────┴─────────────┴──────┴────────────┘
+	// ┌────┬─────────────┬─────────────────────┬──────┬────────────┐
+	// │序号│   任务名    │        依赖         │ 必需 │  失败处理  │
+	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
+	// │ 1  │ 获取元数据  │        无           │  是  │  终止链    │
+	// │ 2  │ 下载封面    │    获取元数据       │  是  │  终止链    │
+	// │ 3  │ 下载字幕    │        无           │  否  │  继续执行  │
+	// │ 4  │ 翻译字幕    │      下载字幕       │  否  │    跳过    │
+	// │ 5  │ 下载视频    │        无           │  否  │  继续执行  │
+	// │ 6  │ 生成元数据  │ 获取元数据,翻译字幕 │  否  │    跳过    │
+	// └────┴─────────────┴─────────────────────┴──────┴────────────┘
 	// 注意: 上传任务由 UploadScheduler 定时执行
 	// ═══════════════════════════════════════════════════════════════
 
@@ -249,23 +282,23 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	fetchMetadataTask := handlers.NewFetchMetadata("获取元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(fetchMetadataTask, video.VideoId))
 
-	// 任务2: 下载视频（无依赖，非必需）
-	downloadTask := handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
-	chain.AddTask(h.wrapTaskWithStepTracking(downloadTask, video.VideoId))
-
-	// 任务3: 生成字幕（依赖: 下载视频，非必需）
-	subtitleTask := handlers.NewGenerateSubtitles("生成字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
-	chain.AddTask(h.wrapTaskWithStepTracking(subtitleTask, video.VideoId))
-
-	// 任务4: 下载封面（依赖: 获取元数据，必需）
+	// 任务2: 下载封面（依赖: 获取元数据，必需）
 	coverTask := handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
 	chain.AddTask(h.wrapTaskWithStepTracking(coverTask, video.VideoId))
 
-	// 任务5: 翻译字幕（依赖: 生成字幕，非必需）
+	// 任务3: 下载字幕（无依赖，非必需）- 使用 yt-dlp --skip-download 单独下载字幕
+	subtitleTask := handlers.NewGenerateSubtitles("下载字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(subtitleTask, video.VideoId))
+
+	// 任务4: 翻译字幕（依赖: 下载字幕，非必需）
 	translateTask := handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
 	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
 
-	// 任务6: 生成元数据（依赖: 下载视频，非必需）
+	// 任务5: 下载视频（无依赖，非必需）
+	downloadTask := handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(downloadTask, video.VideoId))
+
+	// 任务6: 生成元数据（依赖: 获取元数据+翻译字幕，非必需）
 	metadataTask := handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(metadataTask, video.VideoId))
 
@@ -382,8 +415,8 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		task = handlers.NewFetchMetadata("获取元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "下载视频":
 		task = handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
-	case "生成字幕":
-		task = handlers.NewGenerateSubtitles("生成字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	case "下载字幕", "生成字幕": // 支持新旧两种名称
+		task = handlers.NewGenerateSubtitles("下载字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "下载封面":
 		task = handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
 	case "翻译字幕":

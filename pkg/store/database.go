@@ -26,9 +26,9 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 	}
 
 	// 设置日志级别 - 只在出错时输出日志，避免控制台污染
-	// Debug 模式下使用 Warn 级别，生产环境使用 Silent
+	// 调高慢查询阈值到2秒，避免频繁输出慢SQL警告
 	if config.Debug {
-		gormConfig.Logger = logger.Default.LogMode(logger.Warn)
+		gormConfig.Logger = logger.Default.LogMode(logger.Error) // 只在错误时输出，不输出慢查询警告
 	} else {
 		gormConfig.Logger = logger.Default.LogMode(logger.Silent)
 	}
@@ -89,5 +89,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.SavedVideo{},
 		&model.App{},
 		&model.UserToken{},
+		&model.TaskStep{}, // 添加 TaskStep 迁移支持
 	)
 }

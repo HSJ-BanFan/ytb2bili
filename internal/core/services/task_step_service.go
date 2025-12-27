@@ -75,7 +75,7 @@ func (s *TaskStepService) InitTaskSteps(videoID string) error {
 			VideoID:   videoID,
 			StepName:  step.Name,
 			StepOrder: step.Order,
-			Status:    model.TaskStepStatusPending,
+			Status:    model.TaskStepStatusWaiting, // 使用 waiting 状态，防止调度器抢先执行
 			CanRetry:  step.CanRetry,
 		}
 
@@ -265,6 +265,32 @@ func (s *TaskStepService) GetPendingSteps() ([]*model.TaskStep, error) {
 	}
 
 	return steps, nil
+}
+
+// ResetFailedStepsToPending 将可重试的失败步骤重置为 pending
+// 这样调度器就能检测到这些步骤并进行重试
+func (s *TaskStepService) ResetFailedStepsToPending() error {
+	now := time.Now()
+
+	result := s.DB.Table("cw_task_steps").
+		Where("status = ?", model.TaskStepStatusFailed).
+		Where("can_retry = ?", true).
+		Updates(map[string]interface{}{
+			"status":     model.TaskStepStatusPending,
+			"updated_at": now,
+			"retry_count": gorm.Expr("retry_count + 1"),
+		})
+
+	if result.Error != nil {
+		return fmt.Errorf("重置失败步骤为 pending 失败: %w", result.Error)
+	}
+
+	// 只有实际有重置的步骤时才记录日志
+	if result.RowsAffected > 0 {
+		log.Printf("✓ 重置 %d 个失败步骤为 pending 状态", result.RowsAffected)
+	}
+
+	return nil
 }
 
 // DeleteTaskStepsByVideoID 删除指定视频的所有任务步骤（软删除）

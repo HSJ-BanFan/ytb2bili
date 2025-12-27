@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
@@ -75,22 +76,23 @@ type VideoListData struct {
 
 // VideoInfo 视频信息
 type VideoInfo struct {
-	ID             uint                   `json:"id"`
-	VideoID        string                 `json:"video_id"`
-	Title          string                 `json:"title"`
-	URL            string                 `json:"url"`
-	Status         string                 `json:"status"`
-	GeneratedTitle string                 `json:"generated_title"`
-	GeneratedDesc  string                 `json:"generated_desc"`
-	GeneratedTags  string                 `json:"generated_tags"`
-	BiliBVID       string                 `json:"bili_bvid"`
-	BiliAID        int64                  `json:"bili_aid"`
-	CreatedAt      string                 `json:"created_at"`
-	UpdatedAt      string                 `json:"updated_at"`
-	TaskSteps      []TaskStepInfo         `json:"task_steps,omitempty"`
-	Progress       map[string]interface{} `json:"progress,omitempty"`
-	CoverImage     string                 `json:"cover_image,omitempty"`
-	MetaData       map[string]interface{} `json:"meta_data,omitempty"`
+	ID               uint                   `json:"id"`
+	VideoID          string                 `json:"video_id"`
+	Title            string                 `json:"title"`
+	URL              string                 `json:"url"`
+	Status           string                 `json:"status"`
+	GeneratedTitle   string                 `json:"generated_title"`
+	GeneratedDesc    string                 `json:"generated_desc"`
+	GeneratedTags    string                 `json:"generated_tags"`
+	BiliBVID         string                 `json:"bili_bvid"`
+	BiliAID          int64                  `json:"bili_aid"`
+	CreatedAt        string                 `json:"created_at"`
+	UpdatedAt        string                 `json:"updated_at"`
+	TaskSteps        []TaskStepInfo         `json:"task_steps,omitempty"`
+	Progress         map[string]interface{} `json:"progress,omitempty"`
+	CoverImage       string                 `json:"cover_image,omitempty"`
+	MetaData         map[string]interface{} `json:"meta_data,omitempty"`
+	DownloadProgress string                 `json:"download_progress,omitempty"` // JSON格式的下载进度
 }
 
 // TaskStepInfo 任务步骤信息
@@ -119,7 +121,7 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 || limit > 100 {
-		limit = 10
+		limit = 50 // 默认显示更多视频
 	}
 
 	// 计算偏移量
@@ -140,18 +142,19 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 	videos := make([]VideoInfo, 0, len(savedVideos))
 	for _, sv := range savedVideos {
 		videos = append(videos, VideoInfo{
-			ID:             sv.ID,
-			VideoID:        sv.VideoID,
-			Title:          sv.Title,
-			URL:            sv.URL,
-			Status:         sv.Status,
-			GeneratedTitle: sv.GeneratedTitle,
-			GeneratedDesc:  sv.GeneratedDesc,
-			GeneratedTags:  sv.GeneratedTags,
-			BiliBVID:       sv.BiliBVID,
-			BiliAID:        sv.BiliAID,
-			CreatedAt:      sv.CreatedAt.Format("2006-01-02 15:04:05"),
-			UpdatedAt:      sv.UpdatedAt.Format("2006-01-02 15:04:05"),
+			ID:               sv.ID,
+			VideoID:          sv.VideoID,
+			Title:            sv.Title,
+			URL:              sv.URL,
+			Status:           sv.Status,
+			GeneratedTitle:   sv.GeneratedTitle,
+			GeneratedDesc:    sv.GeneratedDesc,
+			GeneratedTags:    sv.GeneratedTags,
+			BiliBVID:         sv.BiliBVID,
+			BiliAID:          sv.BiliAID,
+			CreatedAt:        sv.CreatedAt.Format("2006-01-02 15:04:05"),
+			UpdatedAt:        sv.UpdatedAt.Format("2006-01-02 15:04:05"),
+			DownloadProgress: sv.DownloadProgress,
 		})
 	}
 
@@ -322,6 +325,31 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 		return
 	}
 
+	// 如果重试的是字幕上传步骤，需要同时更新视频状态
+	if stepName == "上传字幕到Bilibili" {
+		// 更新视频状态为 300（待上传字幕），并重置重试计数和计划时间
+		now := time.Now()
+		if err := h.SavedVideoService.UpdateVideoFields(savedVideo.ID, map[string]interface{}{
+			"status":                  "300",
+			"subtitle_upload_retries": 0,
+			"subtitle_scheduled_at":   now, // 立即可以上传
+			"subtitle_upload_error":   "",
+		}); err != nil {
+			h.App.Logger.Warnf("更新视频状态失败: %v", err)
+		} else {
+			h.App.Logger.Infof("✅ 视频状态已更新为 300（待上传字幕）")
+		}
+	}
+
+	// 如果重试的是视频上传步骤，需要同时更新视频状态
+	if stepName == "上传到Bilibili" {
+		if err := h.SavedVideoService.UpdateStatus(savedVideo.ID, "200"); err != nil {
+			h.App.Logger.Warnf("更新视频状态失败: %v", err)
+		} else {
+			h.App.Logger.Infof("✅ 视频状态已更新为 200（准备上传）")
+		}
+	}
+
 	h.App.Logger.Infof("✅ 任务步骤 %s 已重置为待执行状态，等待调度器处理", stepName)
 
 	c.JSON(http.StatusOK, VideoListResponse{
@@ -371,14 +399,17 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 		return
 	}
 
-	// 2. 删除视频文件（可选）
-	videoDir := h.getVideoDirectory(savedVideo.VideoID)
-	if _, err := os.Stat(videoDir); err == nil {
-		if err := os.RemoveAll(videoDir); err != nil {
-			h.App.Logger.Warnf("⚠️ 删除视频文件目录失败: %v", err)
-			// 不中断流程，继续删除数据库记录
-		} else {
-			h.App.Logger.Infof("✅ 已删除视频文件目录: %s", videoDir)
+	// 2. 删除视频文件（使用 glob 匹配实际目录）
+	videoDirPattern := h.getVideoDirectory(savedVideo.VideoID)
+	matches, _ := filepath.Glob(videoDirPattern)
+	for _, videoDir := range matches {
+		if _, err := os.Stat(videoDir); err == nil {
+			if err := os.RemoveAll(videoDir); err != nil {
+				h.App.Logger.Warnf("⚠️ 删除视频文件目录失败: %v", err)
+				// 不中断流程，继续删除数据库记录
+			} else {
+				h.App.Logger.Infof("✅ 已删除视频文件目录: %s", videoDir)
+			}
 		}
 	}
 

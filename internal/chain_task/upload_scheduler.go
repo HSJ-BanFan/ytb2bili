@@ -12,6 +12,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	"github.com/difyz9/ytb2bili/pkg/logger"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
@@ -71,6 +72,9 @@ func (s *UploadScheduler) SetUp() {
 		s.mutex.Lock()
 		defer s.mutex.Unlock()
 
+		// 使用智能日志器，自动过滤进度活动期间的噪音日志
+		smartLogger := logger.NewSmartLogger(s.logger)
+
 		// 检查是否启用自动上传
 		autoUploadEnabled := true
 		if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
@@ -80,13 +84,13 @@ func (s *UploadScheduler) SetUp() {
 		if autoUploadEnabled {
 			// 1. 检查是否需要上传视频
 			if err := s.uploadNextVideo(); err != nil {
-				s.logger.Errorf("上传视频失败: %v", err)
+				smartLogger.Errorf("上传视频失败: %v", err)
 			}
 		}
 
 		// 2. 检查是否需要上传字幕
 		if err := s.uploadNextSubtitle(); err != nil {
-			s.logger.Errorf("上传字幕失败: %v", err)
+			smartLogger.Errorf("上传字幕失败: %v", err)
 		}
 	})
 
@@ -100,6 +104,9 @@ func (s *UploadScheduler) SetUp() {
 // 根据配置的上传模式（immediate/delayed）决定是否立即上传
 func (s *UploadScheduler) uploadNextVideo() error {
 	now := time.Now()
+
+	// 使用智能日志器过滤噪音日志
+	smartLogger := logger.NewSmartLogger(s.logger)
 
 	// 获取配置
 	uploadMode := "delayed"
@@ -155,7 +162,7 @@ func (s *UploadScheduler) uploadNextVideo() error {
 
 	if len(videos) == 0 {
 		if uploadMode != "delayed" {
-			s.logger.Debugf("未找到待上传视频 (模式: %s)", uploadMode)
+			smartLogger.Debugf("未找到待上传视频 (模式: %s)", uploadMode)
 		}
 		return nil
 	}
@@ -197,6 +204,9 @@ func (s *UploadScheduler) uploadNextVideo() error {
 // uploadNextSubtitle 上传下一个待上传字幕的视频
 // 使用智能延迟策略：根据视频大小计算延迟时间
 func (s *UploadScheduler) uploadNextSubtitle() error {
+	// 使用智能日志器过滤噪音日志
+	smartLogger := logger.NewSmartLogger(s.logger)
+
 	// 查询状态为 '300' (视频已上传，待上传字幕) 且已到达计划上传时间的视频
 	var videos []struct {
 		ID                    uint
@@ -228,7 +238,37 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 	}
 
 	if len(videos) == 0 {
-		s.logger.Debug("没有待上传字幕的视频")
+		// 检查是否有待上传但还没到时间的字幕
+		var pendingCount int64
+		s.Db.Table("cw_saved_videos").
+			Where("status = ?", "300").
+			Where("deleted_at IS NULL").
+			Where("subtitle_upload_retries < ?", 3).
+			Count(&pendingCount)
+
+		if pendingCount > 0 {
+			// 查询下一个计划时间
+			var nextVideo struct {
+				SubtitleScheduledAt *time.Time
+			}
+			s.Db.Table("cw_saved_videos").
+				Select("subtitle_scheduled_at").
+				Where("status = ?", "300").
+				Where("deleted_at IS NULL").
+				Where("subtitle_upload_retries < ?", 3).
+				Order("COALESCE(subtitle_scheduled_at, updated_at) ASC").
+				Limit(1).
+				Find(&nextVideo)
+
+			if nextVideo.SubtitleScheduledAt != nil && nextVideo.SubtitleScheduledAt.After(now) {
+				remaining := nextVideo.SubtitleScheduledAt.Sub(now).Round(time.Second)
+				smartLogger.Debugf("有 %d 个待上传字幕，下一个将在 %s 后上传", pendingCount, remaining)
+			} else {
+				smartLogger.Debug("没有待上传字幕的视频")
+			}
+		} else {
+			smartLogger.Debug("没有待上传字幕的视频")
+		}
 		return nil
 	}
 
@@ -283,6 +323,10 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 	})
 
 	s.logger.Infof("✅ 字幕上传成功: %s", video.VideoID)
+
+	// 触发自动清理（如果启用）
+	s.triggerAutoCleanup(video.VideoID)
+
 	return nil
 }
 
@@ -512,4 +556,103 @@ func (s *UploadScheduler) findCoverImage(dir string) string {
 	}
 
 	return ""
+}
+
+// triggerAutoCleanup 触发自动清理（如果启用）
+func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
+	// 检查是否启用自动清理
+	if s.App.Config == nil || s.App.Config.DownloadConfig == nil {
+		return
+	}
+
+	config := s.App.Config.DownloadConfig
+	if !config.AutoCleanupEnabled {
+		return
+	}
+
+	// 获取清理模式和延迟时间
+	cleanupMode := config.AutoCleanupMode
+	if cleanupMode == "" {
+		cleanupMode = "delayed"
+	}
+	cleanupDelay := config.AutoCleanupDelay
+	if cleanupDelay <= 0 {
+		cleanupDelay = 60 // 默认60分钟
+	}
+
+	if cleanupMode == "immediate" {
+		// 立即清理
+		s.logger.Infof("🧹 自动清理模式: 立即清理 - VideoID: %s", videoID)
+		go s.cleanupVideoFiles(videoID)
+	} else {
+		// 延迟清理
+		s.logger.Infof("🧹 自动清理模式: 延迟%d分钟 - VideoID: %s", cleanupDelay, videoID)
+		go func(vid string, delay int) {
+			time.Sleep(time.Duration(delay) * time.Minute)
+			s.cleanupVideoFiles(vid)
+		}(videoID, cleanupDelay)
+	}
+}
+
+// cleanupVideoFiles 清理指定视频的所有媒体文件
+func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
+	s.logger.Infof("🧹 开始清理视频文件: %s", videoID)
+
+	// 获取视频信息以确定目录
+	savedVideo, err := s.SavedVideoService.GetVideoByVideoID(videoID)
+	if err != nil {
+		s.logger.Warnf("⚠️ 获取视频信息失败，无法清理: %v", err)
+		return
+	}
+
+	// 构建视频目录路径
+	baseDir, err := filepath.Abs(s.App.Config.FileUpDir)
+	if err != nil {
+		s.logger.Warnf("⚠️ 获取文件上传目录失败: %v", err)
+		return
+	}
+
+	// 视频目录格式: data/media/YYYY-MM-DD/videoID
+	dateStr := savedVideo.CreatedAt.Format("2006-01-02")
+	videoDir := filepath.Join(baseDir, dateStr, videoID)
+
+	// 检查目录是否存在
+	if _, err := os.Stat(videoDir); os.IsNotExist(err) {
+		s.logger.Debugf("📂 视频目录不存在，无需清理: %s", videoDir)
+		return
+	}
+
+	// 统计文件
+	var fileCount int
+	var totalSize int64
+
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		s.logger.Warnf("⚠️ 读取目录失败: %v", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			if info, err := entry.Info(); err == nil {
+				fileCount++
+				totalSize += info.Size()
+			}
+		}
+	}
+
+	// 删除目录及其所有内容
+	if err := os.RemoveAll(videoDir); err != nil {
+		s.logger.Errorf("❌ 清理视频目录失败: %v", err)
+		return
+	}
+
+	// 更新数据库记录（标记为已清理）
+	s.Db.Table("cw_saved_videos").Where("video_id = ?", videoID).Updates(map[string]interface{}{
+		"files_cleaned":    true,
+		"files_cleaned_at": time.Now(),
+	})
+
+	s.logger.Infof("✅ 已清理视频 %s: 删除 %d 个文件, 释放 %.2f MB",
+		videoID, fileCount, float64(totalSize)/(1024*1024))
 }
