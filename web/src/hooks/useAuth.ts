@@ -7,6 +7,7 @@ interface UserInfo {
   avatar?: string;
   username?: string;
   tier?: string;
+  role?: string; // 'admin' or 'user'
   bili_mid?: string;
 }
 
@@ -47,6 +48,7 @@ export function useAuth() {
                 username: data.data.username,
                 avatar: data.data.avatar,
                 tier: data.data.tier,
+                role: data.data.role,
                 bili_mid: data.data.bili_mid,
               };
               setUser(userData);

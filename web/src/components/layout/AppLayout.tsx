@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown } from 'lucide-react';
+import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown, Sparkles } from 'lucide-react';
 import { MembershipCard, QuotaDisplay, UpgradeModal } from '@/components/membership';
 import { useJWTAuth } from '@/hooks/useJWTAuth';
 
@@ -31,7 +31,7 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                 Bili-Up Web
               </Link>
             </div>
-            
+
             <div className="flex items-center space-x-4">
               <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
                 <span className="text-xs text-gray-500">配额</span>
@@ -42,7 +42,7 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                 <User className="w-4 h-4" />
                 <span>{displayName}</span>
               </div>
-              
+
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 hover:text-red-600 transition-colors"
@@ -91,9 +91,15 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                   </Link>
                 </li>
                 <li>
+                  <Link href="/user-settings" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/user-settings' ? 'bg-purple-50 text-purple-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+                    <Sparkles className="w-5 h-5" />
+                    <span>个人设置</span>
+                  </Link>
+                </li>
+                <li>
                   <Link href="/settings" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/settings' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Settings className="w-5 h-5" />
-                    <span>设置</span>
+                    <span>系统设置</span>
                   </Link>
                 </li>
               </ul>
