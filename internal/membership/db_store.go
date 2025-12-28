@@ -239,11 +239,21 @@ func (s *DBMembershipStore) SaveUserBoostPack(ctx context.Context, pack *UserBoo
 func (s *DBMembershipStore) DecrBoostPack(ctx context.Context, userID string) error {
 	pack, err := s.GetUserBoostPack(ctx, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("获取加油包信息失败: %w", err)
 	}
 
-	if !pack.IsValid() {
-		return fmt.Errorf("加油包无效或已过期")
+	// 详细的错误信息
+	if pack == nil {
+		return fmt.Errorf("未找到加油包")
+	}
+
+	if pack.VideosRemaining <= 0 {
+		return fmt.Errorf("加油包配额已用完")
+	}
+
+	// 检查是否过期（使用 UTC 时间避免时区问题）
+	if time.Now().After(pack.ExpiresAt) {
+		return fmt.Errorf("加油包已过期 (过期时间: %s)", pack.ExpiresAt.Format("2006-01-02 15:04:05"))
 	}
 
 	// 原子减少
@@ -257,9 +267,10 @@ func (s *DBMembershipStore) DecrBoostPack(ctx context.Context, userID string) er
 	}
 
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("加油包配额不足")
+		return fmt.Errorf("加油包配额不足或更新失败")
 	}
 
+	fmt.Printf("✅ 加油包扣除成功: 用户 %s 剩余 %d 个\n", userID, pack.VideosRemaining-1)
 	return nil
 }
 

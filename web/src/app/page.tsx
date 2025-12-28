@@ -58,9 +58,28 @@ export default function HomePage() {
           failCount++;
           errors.push(`${url.substring(0, 50)}...: ${result.message || '提交失败'}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         failCount++;
-        errors.push(`${url.substring(0, 50)}...: 网络错误`);
+        // 尝试从错误响应中提取信息
+        let errorMessage = '网络错误';
+
+        if (error.response) {
+          // 后端返回的错误响应
+          const data = error.response.data;
+          if (data) {
+            errorMessage = data.message || data.error || errorMessage;
+          }
+        } else if (error.message) {
+          // 网络错误或其他错误
+          errorMessage = error.message;
+        }
+
+        // 特殊处理配额错误
+        if (error.response?.status === 403 || errorMessage.includes('配额')) {
+          errorMessage = '配额已用完，请升级会员或购买加油包';
+        }
+
+        errors.push(`${url.substring(0, 50)}...: ${errorMessage}`);
       }
     }
 

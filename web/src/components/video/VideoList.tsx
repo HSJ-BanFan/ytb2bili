@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Play, RefreshCw, Trash2 } from 'lucide-react';
 import StatusBadge from '@/components/ui/StatusBadge';
+import { authFetch } from '@/lib/authFetch';
 
 interface VideoListProps {
   onVideoSelect?: (videoId: string) => void;
@@ -17,9 +18,9 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
   const fetchVideos = async (pageNum = 1) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/v1/videos?page=${pageNum}&limit=10`);
+      const response = await authFetch(`/api/v1/videos?page=${pageNum}&limit=50`);
       const data = await response.json();
-      
+
       if (data.code === 200) {
         setVideos(data.data.videos || []);
         setTotal(data.data.total || 0);
@@ -54,13 +55,13 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
 
   const handleDelete = async (videoId: string, videoTitle: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止事件冒泡，避免触发视频选择
-    
+
     if (!confirm(`确定要删除视频 "${videoTitle || videoId}" 吗？\n\n此操作将删除：\n- 所有任务步骤\n- 视频文件和字幕文件\n- 数据库记录\n\n此操作无法恢复！`)) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}`, {
         method: 'DELETE',
       });
 
@@ -106,7 +107,7 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
             <span>刷新</span>
           </button>
         </div>
-        
+
         {total > 0 && (
           <p className="text-sm text-gray-500 mt-1">
             共 {total} 个视频
@@ -134,7 +135,7 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
                   <div className="w-20 h-12 bg-gray-200 rounded flex items-center justify-center flex-shrink-0">
                     <Play className="w-6 h-6 text-gray-400" />
                   </div>
-                  
+
                   {/* 视频信息 */}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-gray-900 truncate">
@@ -164,11 +165,11 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
                       </div>
                     )}
                   </div>
-                  
+
                   {/* 状态和操作按钮 */}
                   <div className="flex flex-col items-end space-y-2">
                     <StatusBadge status={video.status} />
-                    
+
                     {video.bili_bvid && (
                       <a
                         href={`https://www.bilibili.com/video/${video.bili_bvid}`}
@@ -180,7 +181,7 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
                         访问B站
                       </a>
                     )}
-                    
+
                     {/* 删除按钮 */}
                     <button
                       onClick={(e) => handleDelete(video.video_id, video.generated_title || video.title, e)}
@@ -192,7 +193,7 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
                     </button>
                   </div>
                 </div>
-                
+
                 {/* URL信息 */}
                 <div className="mt-2 ml-24">
                   <p className="text-xs text-gray-400 truncate">
@@ -206,7 +207,7 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
       </div>
 
       {/* 分页 */}
-      {total > 10 && (
+      {total > 50 && (
         <div className="p-4 border-t border-gray-200">
           <div className="flex items-center justify-between">
             <button
@@ -216,14 +217,14 @@ export default function VideoList({ onVideoSelect }: VideoListProps) {
             >
               上一页
             </button>
-            
+
             <span className="text-sm text-gray-600">
-              第 {page} 页，共 {Math.ceil(total / 10)} 页
+              第 {page} 页，共 {Math.ceil(total / 50)} 页
             </span>
-            
+
             <button
               onClick={() => setPage(page + 1)}
-              disabled={page >= Math.ceil(total / 10)}
+              disabled={page >= Math.ceil(total / 50)}
               className="px-3 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
             >
               下一页

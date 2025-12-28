@@ -982,6 +982,7 @@ type VideoMetadataInfo struct {
 	Description string `json:"description"`
 	Uploader    string `json:"uploader"`
 	Duration    int    `json:"duration"`
+	Thumbnail   string `json:"thumbnail"` // 封面图片 URL
 }
 
 // getVideoMetadata 使用 yt-dlp 获取视频元数据（带代理回退）
@@ -1214,8 +1215,11 @@ func (t *DownloadVideo) logDownloadProgress(line string, lastProgressTime *int64
 		return
 	}
 
-	// 下载完成
-	if strings.Contains(line, "100%") || strings.Contains(line, "has already been downloaded") {
+	// 下载完成（只识别视频下载的 100%，避免字幕下载进度误判）
+	// yt-dlp 视频下载完成格式: [download] 100% of XXXMiB in XX:XX
+	// 字幕下载使用不同的格式，不应该触发此判断
+	if (strings.HasPrefix(line, "[download]") && strings.Contains(line, "100%")) ||
+		strings.Contains(line, "has already been downloaded") {
 		t.App.Logger.Info("╭─────────────────────────────────────────────────────────────────╮")
 		t.App.Logger.Info("│                    ✅ 下载完成                                   │")
 		t.App.Logger.Info("╰─────────────────────────────────────────────────────────────────╯")

@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -94,6 +95,22 @@ func (s *TaskStepService) GetTaskStepsByVideoID(videoID string) ([]model.TaskSte
 		Order("step_order ASC").
 		Find(&steps).Error
 	return steps, err
+}
+
+// GetTaskStepsByVideoIDForUser 根据视频ID获取任务步骤列表（带用户隔离）
+// 先校验视频归属，再返回任务步骤
+func (s *TaskStepService) GetTaskStepsByVideoIDForUser(videoID string, userID uint) ([]model.TaskStep, error) {
+	// 先校验视频归属
+	var video model.SavedVideo
+	query := s.DB.Where("video_id = ?", videoID)
+	if userID > 0 {
+		query = query.Where("user_id = ?", userID)
+	}
+	if err := query.First(&video).Error; err != nil {
+		return nil, errors.New("视频不存在或无权访问")
+	}
+	// 返回任务步骤
+	return s.GetTaskStepsByVideoID(videoID)
 }
 
 // UpdateTaskStepStatus 更新任务步骤状态
@@ -269,15 +286,39 @@ func (s *TaskStepService) GetPendingSteps() ([]*model.TaskStep, error) {
 
 // ResetFailedStepsToPending 将可重试的失败步骤重置为 pending
 // 这样调度器就能检测到这些步骤并进行重试
+// 注意：超过最大重试次数(10次)的步骤将被标记为永久失败，不再重试
 func (s *TaskStepService) ResetFailedStepsToPending() error {
 	now := time.Now()
+	const maxRetryCount = 10 // 最大重试次数
 
+	// 1. 将超过最大重试次数的步骤标记为永久失败
+	permanentFailResult := s.DB.Table("cw_task_steps").
+		Where("status = ?", model.TaskStepStatusFailed).
+		Where("can_retry = ?", true).
+		Where("retry_count >= ?", maxRetryCount).
+		Updates(map[string]interface{}{
+			"status":     "failed_permanent",
+			"can_retry":  false,
+			"updated_at": now,
+			"error":      fmt.Sprintf("超过最大重试次数(%d次)，已停止重试", maxRetryCount),
+		})
+
+	if permanentFailResult.Error != nil {
+		return fmt.Errorf("标记永久失败步骤失败: %w", permanentFailResult.Error)
+	}
+
+	if permanentFailResult.RowsAffected > 0 {
+		log.Printf("⛔ 已将 %d 个步骤标记为永久失败（超过最大重试次数）", permanentFailResult.RowsAffected)
+	}
+
+	// 2. 重置可重试的失败步骤（未超过最大重试次数）
 	result := s.DB.Table("cw_task_steps").
 		Where("status = ?", model.TaskStepStatusFailed).
 		Where("can_retry = ?", true).
+		Where("retry_count < ?", maxRetryCount).
 		Updates(map[string]interface{}{
-			"status":     model.TaskStepStatusPending,
-			"updated_at": now,
+			"status":      model.TaskStepStatusPending,
+			"updated_at":  now,
 			"retry_count": gorm.Expr("retry_count + 1"),
 		})
 

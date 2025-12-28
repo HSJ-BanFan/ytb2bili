@@ -17,7 +17,7 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
 
   const getStepIcon = (status: TaskStepStatus) => {
     const className = "w-5 h-5";
-    
+
     switch (status) {
       case 'pending':
         return <Clock className={`${className} text-gray-500`} />;
@@ -36,10 +36,10 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
 
   const formatDuration = (duration?: number) => {
     if (!duration) return '-';
-    
+
     const seconds = Math.floor(duration / 1000);
     const minutes = Math.floor(seconds / 60);
-    
+
     if (minutes > 0) {
       return `${minutes}分${seconds % 60}秒`;
     }
@@ -48,7 +48,7 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
 
   const formatTime = (timeString?: string) => {
     if (!timeString) return '-';
-    
+
     const date = new Date(timeString);
     return date.toLocaleString('zh-CN', {
       month: '2-digit',
@@ -61,7 +61,7 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
 
   const handleRetry = async (stepName: string) => {
     if (retryingStep || isRetrying) return;
-    
+
     setRetryingStep(stepName);
     try {
       await onRetryStep(stepName);
@@ -74,13 +74,23 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
     return step.can_retry && (step.status === 'failed' || step.status === 'skipped');
   };
 
+  // 允许手动执行 pending 状态的上传步骤（Free 用户手动上传）
+  const canExecuteStep = (step: TaskStep) => {
+    // 支持中文和英文步骤名
+    const uploadSteps = [
+      '上传到Bilibili', '上传字幕到Bilibili',  // 中文
+      'upload_to_bilibili', 'upload_subtitles',  // 英文
+    ];
+    return step.status === 'pending' && uploadSteps.includes(step.step_name);
+  };
+
   // 检查是否有失败或跳过的步骤
   const hasFailedSteps = steps.some(step => step.status === 'failed' || step.status === 'skipped');
 
   // 处理一键重置所有失败步骤
   const handleResetAllFailed = async () => {
     if (!onResetAllFailed || isResettingAll || retryingStep) return;
-    
+
     setIsResettingAll(true);
     try {
       await onResetAllFailed();
@@ -102,17 +112,16 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
               视频处理任务链的执行状态
             </p>
           </div>
-          
+
           {/* 一键重置任务按钮 - 始终显示 */}
           {onResetAllFailed && (
             <button
               onClick={handleResetAllFailed}
               disabled={isResettingAll || retryingStep !== null || isRetrying}
-              className={`inline-flex items-center px-4 py-2 border shadow-sm text-sm font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                hasFailedSteps 
-                  ? 'border-orange-300 text-orange-700 bg-orange-50 hover:bg-orange-100 focus:ring-orange-500' 
-                  : 'border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 focus:ring-blue-500'
-              }`}
+              className={`inline-flex items-center px-4 py-2 border shadow-sm text-sm font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${hasFailedSteps
+                ? 'border-orange-300 text-orange-700 bg-orange-50 hover:bg-orange-100 focus:ring-orange-500'
+                : 'border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 focus:ring-blue-500'
+                }`}
             >
               {isResettingAll ? (
                 <>
@@ -177,8 +186,12 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
                     </div>
 
                     {/* 错误信息 */}
-                    {step.error_msg && step.status === 'failed' && (
-                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                    {step.error_msg && (step.status === 'failed' || step.status === 'pending') && (
+                      <div className={`mt-2 p-2 rounded text-xs ${step.status === 'failed'
+                          ? 'bg-red-50 border border-red-200 text-red-700'
+                          : 'bg-orange-50 border border-orange-200 text-orange-700'
+                        }`}>
+                        {step.status === 'pending' && <span className="font-semibold mr-1">上一次失败原因:</span>}
                         {step.error_msg}
                       </div>
                     )}
@@ -198,8 +211,8 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
                             查看结果详情
                           </summary>
                           <pre className="mt-1 p-2 bg-gray-50 border border-gray-200 rounded overflow-x-auto whitespace-pre-wrap">
-                            {typeof step.result_data === 'string' 
-                              ? step.result_data 
+                            {typeof step.result_data === 'string'
+                              ? step.result_data
                               : JSON.stringify(step.result_data, null, 2)}
                           </pre>
                         </details>
@@ -208,8 +221,29 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
                   </div>
                 </div>
 
-                {/* 重试按钮 */}
-                <div className="flex-shrink-0 ml-4">
+                {/* 重试按钮 / 立即执行按钮 */}
+                <div className="flex-shrink-0 ml-4 flex space-x-2">
+                  {/* 立即执行按钮（用于 pending 状态的上传步骤） */}
+                  {canExecuteStep(step) && (
+                    <button
+                      onClick={() => handleRetry(step.step_name)}
+                      disabled={isCurrentlyRetrying || retryingStep !== null}
+                      className="inline-flex items-center px-3 py-1.5 border border-blue-300 shadow-sm text-xs font-medium rounded text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isCurrentlyRetrying ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          上传中
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3 h-3 mr-1" />
+                          立即上传
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {/* 重试按钮（用于 failed/skipped 状态） */}
                   {canRetryStep(step) && (
                     <button
                       onClick={() => handleRetry(step.step_name)}

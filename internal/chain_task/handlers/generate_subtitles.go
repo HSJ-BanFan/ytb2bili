@@ -186,6 +186,7 @@ func truncateString(s string, maxLen int) string {
 // checkYtDlpSubtitles 检查 yt-dlp 是否已经下载了字幕文件
 // yt-dlp 下载的字幕文件命名格式: {video_id}.{lang}.srt
 // 例如: e1zJS31tr88.en.srt, e1zJS31tr88.zh-Hans.srt
+// 此函数会将字幕文件标准化为 en.srt 和 zh.srt 格式
 func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 	videoID := t.StateManager.VideoID
 	currentDir := t.StateManager.CurrentDir
@@ -198,6 +199,7 @@ func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 
 	var foundSubtitles []string
 	var englishSubtitle string
+	var chineseSubtitle string
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -208,15 +210,25 @@ func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 		// 格式: {video_id}.{lang}.srt 或 {video_id}.{lang}.vtt
 		if strings.HasPrefix(name, videoID+".") && strings.HasSuffix(name, ".srt") {
 			foundSubtitles = append(foundSubtitles, name)
+
 			// 检查是否是英文字幕
 			if strings.Contains(name, ".en.") || strings.Contains(name, ".en-") {
 				englishSubtitle = name
+			}
+
+			// 检查是否是中文字幕（简体或繁体）
+			if strings.Contains(name, ".zh-Hans.") || strings.Contains(name, ".zh-CN.") ||
+				strings.Contains(name, ".zh.") || strings.Contains(name, ".zh-Hant.") ||
+				strings.Contains(name, ".zh-TW.") {
+				chineseSubtitle = name
 			}
 		}
 	}
 
 	if len(foundSubtitles) == 0 {
-		t.App.Logger.Info("📝 未找到 yt-dlp 下载的字幕文件")
+		// 字幕文件不存在是正常的，因为 yt-dlp 会在下载视频时自动下载字幕
+		// 静默返回，让下载视频任务处理字幕
+		t.App.Logger.Debugf("📝 未找到 yt-dlp 下载的字幕文件，将由下载视频任务处理")
 		return false
 	}
 
@@ -225,7 +237,7 @@ func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 		t.App.Logger.Infof("   📄 %s", sub)
 	}
 
-	// 如果找到英文字幕，复制为 en.srt
+	// 处理英文字幕：复制为 en.srt
 	if englishSubtitle != "" {
 		srcPath := filepath.Join(currentDir, englishSubtitle)
 		dstPath := filepath.Join(currentDir, "en.srt")
@@ -234,8 +246,21 @@ func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 		} else {
 			t.App.Logger.Infof("✓ 已复制英文字幕: %s -> en.srt", englishSubtitle)
 		}
-	} else if len(foundSubtitles) > 0 {
-		// 如果没有英文字幕，使用第一个找到的字幕
+	}
+
+	// 处理中文字幕：复制为 zh.srt
+	if chineseSubtitle != "" {
+		srcPath := filepath.Join(currentDir, chineseSubtitle)
+		dstPath := filepath.Join(currentDir, "zh.srt")
+		if err := utils.CopyFile(srcPath, dstPath); err != nil {
+			t.App.Logger.Errorf("❌ 复制中文字幕失败: %v", err)
+		} else {
+			t.App.Logger.Infof("✓ 已复制中文字幕: %s -> zh.srt", chineseSubtitle)
+		}
+	}
+
+	// 如果没有找到标准语言字幕，但有其他字幕，使用第一个作为英文字幕
+	if englishSubtitle == "" && chineseSubtitle == "" && len(foundSubtitles) > 0 {
 		srcPath := filepath.Join(currentDir, foundSubtitles[0])
 		dstPath := filepath.Join(currentDir, "en.srt")
 		if err := utils.CopyFile(srcPath, dstPath); err != nil {

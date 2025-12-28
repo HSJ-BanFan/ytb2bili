@@ -106,12 +106,23 @@ func (s *QuotaService) ConsumeQuota(ctx context.Context, userID string) error {
 
 	// 优先消耗每日配额
 	if used < config.Limits.VideosPerDay {
-		_, err := s.store.IncrDailyUsage(ctx, userID, today)
-		return err
+		newCount, err := s.store.IncrDailyUsage(ctx, userID, today)
+		if err != nil {
+			return fmt.Errorf("增加每日使用量失败: %w", err)
+		}
+		// 添加日志便于调试
+		fmt.Printf("✅ 用户 %s 消耗每日配额: %d/%d\n", userID, newCount, config.Limits.VideosPerDay)
+		return nil
 	}
 
 	// 每日配额用完，消耗加油包
-	return s.store.DecrBoostPack(ctx, userID)
+	err = s.store.DecrBoostPack(ctx, userID)
+	if err != nil {
+		// 提供更详细的错误信息
+		return fmt.Errorf("消耗加油包失败 (每日配额已用完 %d/%d): %w", used, config.Limits.VideosPerDay, err)
+	}
+	fmt.Printf("✅ 用户 %s 消耗加油包配额\n", userID)
+	return nil
 }
 
 // HasQuota 检查用户是否有可用配额

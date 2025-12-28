@@ -201,20 +201,17 @@ func (g *GenerateMetadata) executeWithFallbackAI(ctx map[string]interface{}) boo
 func (g *GenerateMetadata) executeWithAIManager(ctx map[string]interface{}) bool {
 	g.App.Logger.Info("🔄 使用AI服务管理器生成元数据...")
 
-	// 1. 检查中文字幕文件是否存在
-	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
-	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
-	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
-		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
-		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成，使用默认标题和描述")
+	// 1. 检查字幕文件（优先中文，其次英文）
+	srtPath := g.findSubtitleForMetadata()
+	if srtPath == "" {
+		g.App.Logger.Warn("⚠️ 未找到任何字幕文件，使用默认标题和描述")
 		ctx["video_title"] = g.StateManager.VideoID
 		ctx["video_description"] = "包含字幕的视频"
 		return true
 	}
-	g.App.Logger.Infof("✓ 找到中文字幕文件: %s", zhSRTPath)
 
-	// 2. 读取中文字幕内容
-	srtContent, err := os.ReadFile(zhSRTPath)
+	// 2. 读取字幕内容
+	srtContent, err := os.ReadFile(srtPath)
 	if err != nil {
 		g.App.Logger.Errorf("❌ 读取中文字幕文件失败: %v", err)
 		ctx["error"] = "读取翻译字幕失败，请确保字幕翻译步骤已完成"
@@ -377,21 +374,17 @@ func (g *GenerateMetadata) executeWithDeepSeek(context map[string]interface{}) b
 	// 更新当前使用的客户端
 	g.DeepSeekClient = client
 
-	// 1. 检查中文字幕文件是否存在
-	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
-	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
-	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
-		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
-		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成，使用默认标题和描述")
-		// 使用默认值
+	// 1. 检查字幕文件（优先中文，其次英文）
+	srtPath := g.findSubtitleForMetadata()
+	if srtPath == "" {
+		g.App.Logger.Warn("⚠️ 未找到任何字幕文件，使用默认标题和描述")
 		context["video_title"] = g.StateManager.VideoID
-		context["video_description"] = fmt.Sprintf("包含字幕的视频")
-		return true // 没有字幕文件不算失败
+		context["video_description"] = "包含字幕的视频"
+		return true
 	}
-	g.App.Logger.Infof("✓ 找到中文字幕文件: %s", zhSRTPath)
 
-	// 2. 读取中文字幕内容
-	srtContent, err := os.ReadFile(zhSRTPath)
+	// 2. 读取字幕内容
+	srtContent, err := os.ReadFile(srtPath)
 	if err != nil {
 		g.App.Logger.Errorf("❌ 读取中文字幕文件失败: %v", err)
 		context["error"] = "读取翻译字幕失败，请确保字幕翻译步骤已完成"
@@ -603,6 +596,42 @@ func (g *GenerateMetadata) truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// findSubtitleForMetadata 查找用于生成元数据的字幕文件（优先中文，其次英文）
+func (g *GenerateMetadata) findSubtitleForMetadata() string {
+	currentDir := g.StateManager.CurrentDir
+	videoID := g.StateManager.VideoID
+
+	// 优先级列表
+	priorities := []string{
+		filepath.Join(currentDir, "zh.srt"),                               // 翻译后的中文字幕
+		filepath.Join(currentDir, fmt.Sprintf("%s.zh-Hans.srt", videoID)), // YouTube 简体中文
+		filepath.Join(currentDir, fmt.Sprintf("%s.zh-CN.srt", videoID)),   // YouTube 中文
+		filepath.Join(currentDir, "en.srt"),                               // 英文字幕
+		filepath.Join(currentDir, fmt.Sprintf("%s.en.srt", videoID)),      // YouTube 英文
+	}
+
+	for _, path := range priorities {
+		if _, err := os.Stat(path); err == nil {
+			g.App.Logger.Infof("🔍 找到字幕文件: %s", filepath.Base(path))
+			return path
+		}
+	}
+
+	// 查找任意 .srt 文件作为后备
+	entries, err := os.ReadDir(currentDir)
+	if err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".srt") {
+				path := filepath.Join(currentDir, entry.Name())
+				g.App.Logger.Infof("🔍 使用后备字幕文件: %s", entry.Name())
+				return path
+			}
+		}
+	}
+
+	return ""
 }
 
 // 视频分析策略常量
@@ -1174,17 +1203,15 @@ func (g *GenerateMetadata) buildGeminiKeyframeContextText(taskContext map[string
 func (g *GenerateMetadata) executeWithGeminiText(taskContext map[string]interface{}) bool {
 	g.App.Logger.Info("📝 使用 Gemini 分析字幕文本...")
 
-	// 1. 检查中文字幕文件
-	zhSRTPath := filepath.Join(g.StateManager.CurrentDir, "zh.srt")
-	g.App.Logger.Infof("🔍 检查中文字幕文件: %s", zhSRTPath)
-	if _, err := os.Stat(zhSRTPath); os.IsNotExist(err) {
-		g.App.Logger.Warnf("⚠️ 中文字幕文件不存在: %s", zhSRTPath)
-		g.App.Logger.Warn("⚠️ 请确保字幕翻译步骤已成功完成")
+	// 1. 检查字幕文件（优先中文，其次英文）
+	srtPath := g.findSubtitleForMetadata()
+	if srtPath == "" {
+		g.App.Logger.Warn("⚠️ 未找到任何字幕文件（中文或英文）")
 		return false
 	}
 
 	// 2. 读取字幕内容
-	srtContent, err := os.ReadFile(zhSRTPath)
+	srtContent, err := os.ReadFile(srtPath)
 	if err != nil {
 		g.App.Logger.Errorf("❌ 读取字幕文件失败: %v", err)
 		return false

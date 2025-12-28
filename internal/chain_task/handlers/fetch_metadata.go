@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
@@ -54,8 +55,22 @@ func (t *FetchMetadata) Execute(context map[string]interface{}) bool {
 	}
 	ytdlpPath := ytdlpManager.GetBinaryPath()
 
-	// 2. 构建命令
-	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	// 2. 从数据库获取原始 URL（支持所有 yt-dlp 平台）
+	savedVideo, err := t.SavedVideoService.GetVideoByVideoID(videoID)
+	if err != nil {
+		errMsg := fmt.Sprintf("获取视频记录失败: %v", err)
+		t.App.Logger.Error("❌ " + errMsg)
+		context["error"] = errMsg
+		context["permanent_error"] = true // 视频不存在，永久失败
+		return false
+	}
+
+	videoURL := savedVideo.URL
+	if videoURL == "" {
+		// 兼容旧数据：如果没有 URL，尝试 YouTube 格式
+		videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+	}
+
 	command := []string{
 		ytdlpPath,
 		"--dump-json",
@@ -80,11 +95,21 @@ func (t *FetchMetadata) Execute(context map[string]interface{}) bool {
 
 	// 3. 执行命令
 	cmd := exec.Command(command[0], command[1:]...)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput() // 使用 CombinedOutput 获取错误信息
 	if err != nil {
+		errOutput := string(output)
 		errMsg := fmt.Sprintf("执行 yt-dlp 获取元数据失败: %v", err)
 		t.App.Logger.Error("❌ " + errMsg)
-		context["error"] = errMsg
+
+		// 智能错误分类：识别永久性错误
+		isPermanent := isPermanentError(errOutput)
+		if isPermanent {
+			context["error"] = fmt.Sprintf("平台不支持或视频不可用: %s", getErrorSummary(errOutput))
+			context["permanent_error"] = true
+			t.App.Logger.Warnf("⛔ 永久性错误，不再重试: %s", getErrorSummary(errOutput))
+		} else {
+			context["error"] = errMsg
+		}
 		return false
 	}
 
@@ -97,8 +122,8 @@ func (t *FetchMetadata) Execute(context map[string]interface{}) bool {
 		return false
 	}
 
-	// 5. 更新数据库
-	savedVideo, err := t.SavedVideoService.GetVideoByVideoID(videoID)
+	// 5. 重新获取视频信息并更新
+	savedVideo, err = t.SavedVideoService.GetVideoByVideoID(videoID)
 	if err != nil {
 		errMsg := fmt.Sprintf("获取视频记录失败: %v", err)
 		t.App.Logger.Error("❌ " + errMsg)
@@ -150,4 +175,53 @@ func (t *FetchMetadata) findCookiesFile() string {
 	}
 
 	return ""
+}
+
+// isPermanentError 判断是否为永久性错误（不应该重试）
+func isPermanentError(errOutput string) bool {
+	permanentPatterns := []string{
+		"Unsupported URL",
+		"is not a valid URL",
+		"Unable to extract",
+		"Video unavailable",
+		"Private video",
+		"This video has been removed",
+		"Sign in to confirm your age",
+		"This video is not available",
+		"copyright",
+		"This video contains content from",
+		"blocked in your country",
+		"members-only",
+		"No video formats found",
+		"Requested format is not available",
+	}
+
+	errLower := strings.ToLower(errOutput)
+	for _, pattern := range permanentPatterns {
+		if strings.Contains(errLower, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
+}
+
+// getErrorSummary 提取错误摘要（取第一行或前100字符）
+func getErrorSummary(errOutput string) string {
+	// 取第一行
+	lines := strings.Split(errOutput, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" && strings.Contains(strings.ToLower(line), "error") {
+			if len(line) > 100 {
+				return line[:100] + "..."
+			}
+			return line
+		}
+	}
+
+	// 如果没找到 error 行，返回前100字符
+	if len(errOutput) > 100 {
+		return errOutput[:100] + "..."
+	}
+	return errOutput
 }

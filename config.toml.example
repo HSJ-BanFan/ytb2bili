@@ -1,100 +1,539 @@
-# Bilibili 视频上传后端 - 配置文件
+# ═══════════════════════════════════════════════════════════════════════════════
+# YouTube → Bilibili 视频上传系统 - 配置文件
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 本配置文件用于控制系统的各项功能和行为
+# 修改配置后需要重启应用才能生效
+#
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ───────────────────────────────────────────────────────────────────────────────
+# 基础配置
+# ───────────────────────────────────────────────────────────────────────────────
+
+# 服务监听地址（格式: "host:port"）
+# 默认值: ":8096"
+# 示例:
+#   - ":8096"           监听所有网卡的 8096 端口
+#   - "localhost:8096"  仅监听本地
+#   - "0.0.0.0:8096"    监听所有网卡（同 ":8096"）
 listen = ":8096"
+
+# 运行环境
+# 可选值: "development"（开发）, "production"（生产）
+# - development: 显示详细日志，启用热重载
+# - production:    精简日志，优化性能
 environment = "development"
+
+# 调试模式
+# - true:  输出详细的调试日志
+# - false: 仅输出重要日志
 debug = true
+
+# 文件上传目录（视频下载和处理的临时文件存储路径）
+# Windows 示例: "D:/Videos/Upload"
+# Linux/Mac 示例: "/opt/media"
+# 注意: 确保该目录存在且有读写权限
 fileUpDir = "/Users/apple/opt/file_upload/media"
+
+# yt-dlp 可执行文件路径
+# 留空则自动查找系统 PATH 中的 yt-dlp
+# 如果指定了路径，将使用指定路径的 yt-dlp
+# Windows 示例: "C:/yt-dlp/yt-dlp.exe"
+# Linux/Mac 示例: "/usr/local/bin/yt-dlp"
 yt_dlp_path = ""
 
+# ───────────────────────────────────────────────────────────────────────────────
+# 数据库配置
+# ───────────────────────────────────────────────────────────────────────────────
+
 [database]
+  # 数据库类型
+  # 可选值: "sqlite", "mysql", "postgres"
+  # - sqlite:  轻量级，适合个人使用和小规模部署（默认推荐）
+  # - mysql:   适合大规模部署和高并发场景
+  # - postgres: 企业级部署，支持高级特性
   type = "sqlite"
+
+  # SQLite 配置（仅当 type = "sqlite" 时生效）
+  # host: 数据库文件的完整路径（留空则使用当前目录的 bili_up.db）
+  # database: 数据库文件名（当 host 为空时生效）
+  # Windows 示例: host = "D:/data/bili_up.db"
+  # Linux/Mac 示例: host = "/var/lib/bili_up/bili_up.db"
   host = ""
-  port = 0
-  username = ""
-  password = ""
-  database = "bili_up.db"
-  ssl_mode = ""
-  timezone = ""
+  port = 0                    # SQLite 不需要配置端口
+  username = ""               # SQLite 不需要用户名
+  password = ""               # SQLite 不需要密码
+  database = "bili_up.db"     # 数据库文件名
+  ssl_mode = ""               # SQLite 不需要 SSL
+  timezone = ""               # SQLite 不需要时区配置
+
+  # MySQL/PostgreSQL 配置示例（当 type = "mysql" 或 "postgres" 时需要配置）
+  # host = "localhost"         # 数据库服务器地址
+  # port = 3306               # MySQL 默认 3306，PostgreSQL 默认 5432
+  # username = "bili_up"      # 数据库用户名
+  # password = "your_password" # 数据库密码
+  # database = "bili_up_db"   # 数据库名称
+  # ssl_mode = "disable"      # SSL 模式（disable/require/verify-ca/verify-full）
+  # timezone = "Asia/Shanghai" # 时区设置
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 认证配置
+# ───────────────────────────────────────────────────────────────────────────────
 
 [auth]
+  # JWT 密钥（用于生成和验证用户令牌）
+  # ⚠️ 生产环境必须修改为随机字符串，否则存在安全风险！
+  # 生成方法: openssl rand -hex 32
   jwt_secret = "your-jwt-secret-key"
+
+  # JWT 令牌过期时间（小时）
+  # - 开发环境建议设置较小值（如 24 小时）
+  # - 生产环境可根据需要调整
   jwt_expiration = 24
+
+  # 会话密钥（用于 session 加密）
+  # ⚠️ 生产环境必须修改为随机字符串！
   session_secret = "your-session-secret"
 
+# ───────────────────────────────────────────────────────────────────────────────
+# 腾讯云 COS 对象存储配置
+# ───────────────────────────────────────────────────────────────────────────────
+
 [TenCosConfig]
+  # 是否启用腾讯云 COS 存储
+  # - true:  视频文件上传到 COS，节省本地存储空间
+  # - false: 视频文件仅存储在本地
+  # 优势:
+  #   - 永久存储，不占本地空间
+  #   - CDN 加速，提高访问速度
+  #   - 自动备份，防止数据丢失
   Enabled = false
-  CosBucketURL = ""
-  CosSecretId = ""
-  CosSecretKey = ""
-  CosRegion = ""
-  CosBucket = ""
-  SubAppId = ""
-  CosUrL = ""
+
+  # COS 存储桶配置
+  CosBucketURL = ""           # 存储桶访问域名（例如: https://bucket-name.cos.ap-guangzhou.myqcloud.com）
+  CosSecretId = ""            # 腾讯云 SecretId（在腾讯云控制台获取）
+  CosSecretKey = ""           # 腾讯云 SecretKey（在腾讯云控制台获取）
+  CosRegion = ""              # 地域（例如: ap-guangzhou, ap-shanghai, ap-beijing）
+  CosBucket = ""              # 存储桶名称（例如: bili-up-1234567890）
+  SubAppId = ""               # 应用 ID（可选，默认为存储桶命名中的数字部分）
+  CosUrL = ""                 # 保留字段，暂不使用
+
+  # 📖 获取 COS 配置步骤:
+  # 1. 登录腾讯云控制台: https://console.cloud.tencent.com/cos
+  # 2. 创建存储桶，记录下存储桶名称和地域
+  # 3. 在"访问管理"中创建子账号并获取 SecretId 和 SecretKey
+  # 4. 配置存储桶权限为"公有读私有写"
+
+# ───────────────────────────────────────────────────────────────────────────────
+# DeepSeek AI 服务配置
+# ───────────────────────────────────────────────────────────────────────────────
 
 [DeepSeekTransConfig]
-  enabled = true
-  api_key = "sk-deepseek_api_key"
-  models = ""
+  # 是否启用 DeepSeek 服务
+  # - true:  使用 DeepSeek 进行字幕翻译和元数据生成
+  # - false: 不使用 DeepSeek
+  enabled = false
+
+  # API 密钥（在 DeepSeek 控制台获取）
+  # 📖 获取 API Key: https://platform.deepseek.com/api_keys
+  api_key = "sk-your-deepseek-api-key"
+
+  # 使用的模型
+  # 可选值:
+  #   - "deepseek-chat":     对话模型（推荐，适合大多数场景）
+  #   - "deepseek-coder":    代码模型（不推荐用于字幕翻译）
+  models = "deepseek-chat"
+
+  # API 端点地址
+  # - 官方端点: https://api.deepseek.com
+  # - 国内端点: https://api.deepseek.com（如需代理请自行配置）
   endpoint = "https://api.deepseek.com"
+
+  # 请求超时时间（秒）
+  # - 默认 60 秒，网络较慢时可适当增加
   timeout = 60
+
+  # 最大输出 token 数
+  # - 字幕翻译建议 4000
+  # - 元数据生成建议 8000
   max_tokens = 4000
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Google Gemini AI 服务配置（多模态视频分析）
+# ───────────────────────────────────────────────────────────────────────────────
+
 [GeminiConfig]
-  enabled = false                  # 是否启用Gemini服务
-  api_key = ""                     # Google AI API密钥（单个，兼容旧配置）
-  api_keys = []                    # 多个API密钥，用于轮询（优先使用，格式：["key1", "key2", "key3"]）
-  model = "gemini-2.0-flash"       # 使用的模型（gemini-2.0-flash 快速, gemini-2.5-pro 强大）
-  timeout = 120                    # 超时时间（秒）
-  max_tokens = 8000                # 最大输出token数
-  use_for_metadata = true          # 是否使用Gemini生成元数据（元数据生成必须使用Gemini）
-  analyze_video = true             # 是否分析视频文件（true=多模态分析，false=仅文本）
-  video_sample_frames = 0          # 视频采样帧数（0=上传完整视频）
-  # 注意：Gemini原生API必须使用Google官方地址，不支持自定义代理（文件上传功能需要）
-  # 如需代理访问，请使用翻译服务配置中的Gemini提供商（通过OpenAI兼容API）
+  # 是否启用 Gemini 服务
+  # ⚠️ 元数据生成功能必须启用 Gemini（因为需要视频多模态分析能力）
+  enabled = false
+
+  # API 密钥配置
+  # 📖 获取 API Key: https://makersuite.google.com/app/apikey
+  api_key = ""                     # 单个 API 密钥（兼容旧配置）
+  api_keys = []                    # 多个 API 密钥（优先使用，格式：["key1", "key2", "key3"]）
+                                  # 多密钥会自动轮询，避免单个密钥达到限流
+
+  # 模型选择
+  # 可选值:
+  #   - "gemini-2.0-flash":  快速响应，适合实时分析（推荐）
+  #   - "gemini-2.5-pro":    强大模型，适合复杂场景
+  #   - "gemini-1.5-flash":  旧版快速模型
+  #   - "gemini-1.5-pro":    旧版强大模型
+  model = "gemini-2.0-flash"
+
+  # 请求超时时间（秒）
+  # - 小视频（<150MB）建议 120 秒
+  # - 大视频（>150MB）建议 300 秒
+  timeout = 120
+
+  # 最大输出 token 数
+  # - 元数据生成建议 8000
+  max_tokens = 8000
+
+  # 是否使用 Gemini 生成视频元数据
+  # ⚠️ 必须设为 true，否则无法生成 AI 标题和描述
+  use_for_metadata = true
+
+  # 是否分析视频文件（多模态分析）
+  # - true:  上传视频到 Gemini 进行分析（准确度高，速度慢）
+  # - false: 仅分析字幕文本（速度较快，准确度较低）
+  # 💡 推荐设置:
+  #   - 小视频（<300MB）: true（多模态分析）
+  #   - 大视频（>300MB）: false（仅文本分析，避免超时）
+  analyze_video = true
+
+  # 视频采样帧数（当 analyze_video = false 时生效）
+  # - 0:     不采样，使用缩略图+字幕文本（推荐）
+  # - >0:    提取指定数量的关键帧进行分析
+  video_sample_frames = 0
+
+  # ⚠️ 重要提示:
+  # 1. Gemini 原生 API 必须使用 Google 官方地址，不支持自定义代理
+  # 2. 如需代理访问，请使用 OpenAI 兼容 API 配置 Gemini 提供商
+  # 3. Gemini 有免费额度限制: 每天 15 次/分钟，1500 次/天
+  # 4. 多密钥配置可以突破限流，每个密钥独立计算配额
+
+# ───────────────────────────────────────────────────────────────────────────────
+# OpenAI 兼容 API 配置（支持多种 AI 服务提供商）
+# ───────────────────────────────────────────────────────────────────────────────
+
+[OpenAICompatibleConfig]
+  # 是否启用 OpenAI 兼容 API
+  # - true:  使用 OpenAI 兼容接口进行字幕翻译和元数据生成
+  # - false: 不使用
+  enabled = false
+
+  # 服务提供商标识
+  # 可选值: "openai", "deepseek", "qwen", "zhipu", "gemini", "custom"
+  # - openai:   OpenAI 官方 API（推荐 GPT-4/GPT-3.5）
+  # - deepseek: DeepSeek API
+  # - qwen:     通义千问 API
+  # - zhipu:    智谱 AI API
+  # - gemini:   Google Gemini（通过 OpenAI 兼容接口）
+  # - custom:   自定义兼容 OpenAI 格式的服务
+  provider = "openai"
+
+  # API 密钥
+  api_key = ""
+
+  # API 基础地址
+  # - OpenAI 官方: https://api.openai.com/v1
+  # - DeepSeek:   https://api.deepseek.com/v1
+  # - 通义千问:   https://dashscope.aliyuncs.com/compatible-mode/v1
+  # - 智谱 AI:    https://open.bigmodel.cn/api/paas/v4
+  base_url = "https://api.openai.com/v1"
+
+  # 使用的模型
+  # OpenAI: "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"
+  # DeepSeek: "deepseek-chat"
+  # 通义千问: "qwen-turbo", "qwen-plus", "qwen-max"
+  # 智谱 AI: "glm-4-flash", "glm-4-plus"
+  model = "gpt-3.5-turbo"
+
+  # 请求超时时间（秒）
+  timeout = 60
+
+  # 最大输出 token 数
+  max_tokens = 4000
+
+  # 温度参数（0-2）
+  # - 0.0:   更确定性和保守的输出
+  # - 0.7:   平衡创造性和准确性（推荐）
+  # - 1.0+:  更随机和创造性的输出
+  temperature = 0.7
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 代理配置
+# ───────────────────────────────────────────────────────────────────────────────
 
 [ProxyConfig]
+  # 是否使用代理
+  # - true:  所有网络请求（YouTube、B站等）都通过代理
+  # - false: 直连
   use_proxy = false
+
+  # 代理服务器地址
+  # 支持的协议: http, https, socks5
+  # 示例:
+  #   - HTTP 代理:  "http://127.0.0.1:7890"
+  #   - SOCKS5:    "socks5://127.0.0.1:1080"
+  # 常用代理软件端口:
+  #   - Clash:      7890 (HTTP), 7891 (SOCKS5)
+  #   - V2Ray:      10809 (SOCKS5)
+  #   - Shadowsocks: 1080 (SOCKS5)
   proxy_host = "http://127.0.0.1:7890"
 
+  # ⚠️ 注意事项:
+  # 1. 使用代理时，YouTube 视频下载速度取决于代理带宽
+  # 2. 如果代理速度慢，建议将 aria2c_with_proxy 设为 false，改用 aria2c 直连
+  # 3. Gemini 原生 API 不支持代理，请使用 OpenAI 兼容接口
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 数据分析配置
+# ───────────────────────────────────────────────────────────────────────────────
+
 [AnalyticsConfig]
+  # 是否启用数据分析
+  # - true:  收集使用数据（用于优化和改进）
+  # - false: 不收集
   enabled = false
+
+  # 分析服务器地址
   server_url = "http://localhost:8080"
+
+  # API 密钥
   api_key = ""
+
+  # 产品 ID
   product_id = "bili-up-api"
+
+  # 调试模式
   debug = false
+
+  # AES 加密密钥（可选，16/24/32 字节）
   encryption_key = ""
 
-[BilibiliConfig]
-  copyright = 2                # 1=自制, 2=转载
-  source = "YouTube"           # 转载来源
-  no_reprint = 1               # 0=允许转载, 1=禁止转载
-  use_original_title = true     # true=使用原视频标题, false=使用AI生成标题
-  use_original_desc = false     # true=使用原视频描述, false=使用AI生成描述
-  custom_title_template = ""    # 自定义标题模板（可选），支持变量: {original_title}, {ai_title}
-                                # 示例: "{original_title}【中文字幕】" 或 "【原神MMD】{ai_title}"
-  custom_desc_template = ""     # 自定义描述模板（可选），支持变量: {original_desc}, {ai_desc}
-  
-  # 新增配置项
-  tid = 122                    # 分区ID（122=日常，138=搞笑，详见B站分区列表）
-  dynamic = "发布了新视频！"      # 动态文本
-  open_elec = 0                # 是否开启充电面板 0=关闭, 1=开启
-  selection_reserve = 0        # 参与活动ID（0表示不参与，暂不被SDK支持）
-  up_selection_reply = 0       # 是否展示推荐评论 0=关闭, 1=开启（暂不被SDK支持）
-  up_close_reply = 0           # 是否关闭评论 0=开启评论, 1=关闭评论（暂不被SDK支持）
-  up_close_reward = 0          # 是否关闭打赏 0=开启, 1=关闭（暂不被SDK支持）
+# ───────────────────────────────────────────────────────────────────────────────
+# Bilibili 上传配置
+# ───────────────────────────────────────────────────────────────────────────────
 
-  # 自定义描述模板示例：
+[BilibiliConfig]
+  # ─────────────────────────────────────────────────────────────
+  # 版权设置
+  # ─────────────────────────────────────────────────────────────
+  # 1 = 原创（自制）
+  # 2 = 转载（需注明来源）
+  copyright = 2
+
+  # 转载来源（当 copyright = 2 时必填）
+  # 常用值: "YouTube", "哔哩哔哩", "优酷" 等
+  source = "YouTube"
+
+  # 是否禁止转载
+  # 0 = 允许转载（他人可以转载你的视频）
+  # 1 = 禁止转载（他人未经授权不得转载）
+  no_reprint = 1
+
+  # ─────────────────────────────────────────────────────────────
+  # 标题和描述配置
+  # ─────────────────────────────────────────────────────────────
+  # 标题来源选择
+  # - true:  使用 YouTube 原始标题（会自动清理 #标签）
+  # - false: 使用 AI 生成的标题
+  use_original_title = true
+
+  # 描述来源选择
+  # - true:  使用 YouTube 原始描述
+  # - false: 使用 AI 生成的精炼描述（推荐）
+  use_original_desc = false
+
+  # 自定义标题模板（可选）
+  # 支持的变量:
+  #   {original_title}  YouTube 原始标题
+  #   {ai_title}        AI 生成的标题
+  # 示例:
+  #   - "{original_title}【中文字幕】"
+  #   - "【原神MMD】{ai_title}"
+  #   - "{ai_title} - {original_title}"
+  custom_title_template = ""
+
+  # 自定义描述模板（可选）
+  # 支持的变量:
+  #   {original_desc}  YouTube 原始描述
+  #   {ai_desc}        AI 生成的精炼描述
+  # 示例:
   # custom_desc_template = """
-  # 【视频内容】
+  # 【视频简介】
   # {ai_desc}
-  # 
+  #
   # 【原视频描述】
   # {original_desc}
   # """
+  custom_desc_template = ""
+
+  # ─────────────────────────────────────────────────────────────
+  # 投稿详情配置
+  # ─────────────────────────────────────────────────────────────
+  # 分区 ID（决定视频在 B 站的分类）
+  # 常用分区:
+  #   122  = 日常（默认，适合大多数视频）
+  #   138  = 搞笑
+  #   21   = 影视
+  #   3    = 音乐
+  #   129  = 舞蹈
+  #   4    = 游戏
+  #   36   = 知识
+  #   188  = 科技
+  #   230  = 野生技能协会
+  # 📖 完整分区列表: https://www.bilibili.com/v/topic/#/详情
+  tid = 122
+
+  # 动态文本（投稿成功后自动发布的动态）
+  dynamic = "发布了新视频！"
+
+  # 是否开启充电面板
+  # 0 = 关闭（观众无法给视频充电）
+  # 1 = 开启（观众可以给视频充电）
+  open_elec = 0
+
+  # ─────────────────────────────────────────────────────────────
+  # 高级配置（暂不被 SDK 支持，配置无效）
+  # ─────────────────────────────────────────────────────────────
+  selection_reserve = 0        # 参与活动 ID（0 表示不参与）
+  up_selection_reply = 0       # 是否展示推荐评论（0=关闭, 1=开启）
+  up_close_reply = 0           # 是否关闭评论（0=开启, 1=关闭）
+  up_close_reward = 0          # 是否关闭打赏（0=开启, 1=关闭）
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 视频下载和处理配置
+# ───────────────────────────────────────────────────────────────────────────────
+
 [DownloadConfig]
-use_aria2c = true           # 是否使用 aria2c 多线程下载
-aria2c_path = ""            # aria2c 可执行文件路径（留空自动查找）
-concurrent_fragments = 8    # yt-dlp 并发分片数（不使用 aria2c 时生效）
-aria2c_connections = 16     # aria2c 连接数
-http_chunk_size = "10M"     # HTTP 分块大小
-aria2c_with_proxy = false   # 使用代理时是否仍尝试 aria2c（可能遇到403，建议先测试）
+  # ─────────────────────────────────────────────────────────────
+  # 下载工具配置
+  # ─────────────────────────────────────────────────────────────
+  # 是否使用 aria2c 多线程下载
+  # - true:  使用 aria2c 下载（速度更快，推荐）
+  # - false: 使用 yt-dlp 内置下载器
+  use_aria2c = true
+
+  # aria2c 可执行文件路径
+  # 留空则自动查找系统 PATH 中的 aria2c
+  # Windows: "C:/aria2/aria2c.exe"
+  # Linux/Mac: "/usr/local/bin/aria2c" 或 "/usr/bin/aria2c"
+  aria2c_path = ""
+
+  # yt-dlp 并发分片数（不使用 aria2c 时生效）
+  # 推荐值: 8（默认），最多不超过 16
+  concurrent_fragments = 8
+
+  # aria2c 连接数（使用 aria2c 时生效）
+  # 推荐值: 16（默认），网络好可设为 32 或 64
+  aria2c_connections = 16
+
+  # HTTP 分块大小
+  # 推荐值: "10M"（默认），网络好可设为 "16M"
+  http_chunk_size = "10M"
+
+  # 使用代理时是否仍尝试 aria2c
+  # - true:  即使配置了代理也使用 aria2c（可能遇到 403 错误）
+  # - false: 使用代理时禁用 aria2c，改用 yt-dlp 内置下载器（推荐）
+  aria2c_with_proxy = false
+
+  # ─────────────────────────────────────────────────────────────
+  # Cookies 配置
+  # ─────────────────────────────────────────────────────────────
+  # 从浏览器自动提取 cookies（当 cookies.txt 不存在时生效）
+  # 可选值: "chrome", "firefox", "edge", "brave", "opera", "safari", "none"
+  # 注意:
+  #   1. 需要关闭对应浏览器才能读取 cookies
+  #   2. "none" 表示禁用自动提取
+  # 推荐使用 "chrome" 或 "edge"
+  cookies_from_browser = "chrome"
+
+  # ─────────────────────────────────────────────────────────────
+  # 并发控制
+  # ─────────────────────────────────────────────────────────────
+  # 准备阶段最大并发任务数
+  # - 控制同时处理多少个视频的下载和元数据提取
+  # 推荐值: 10（默认）
+  # - 4 核 CPU: 建议 8-10
+  # - 8 核 CPU: 建议 15-20
+  max_concurrent_tasks = 10
+
+  # Cookies 刷新间隔（分钟）
+  # 0 表示禁用自动刷新
+  # 推荐值: 30（默认）
+  # - YouTube cookies 有效期较短，建议定期刷新
+  cookies_refresh_interval = 30
+
+  # ─────────────────────────────────────────────────────────────
+  # 自动上传配置
+  # ─────────────────────────────────────────────────────────────
+  # 是否启用自动上传
+  # - true:  视频处理完成后自动上传到 B 站
+  # - false: 仅处理不上传（需要手动触发上传）
+  auto_upload_enabled = true
+
+  # 上传模式
+  # 可选值:
+  #   - "immediate": 视频处理完成后立即上传
+  #   - "delayed":   延迟上传（根据 video_upload_delay 延迟）
+  # 推荐使用 "delayed"（默认），避免频繁上传被限流
+  auto_upload_mode = "delayed"
+
+  # 视频处理完成后延迟上传时间（分钟）
+  # 推荐值: 10（默认）
+  # - 快速上传: 5
+  # - 正常上传: 10-15
+  # - 避免限流: 20-30
+  video_upload_delay = 10
+
+  # 视频上传后字幕延迟上传时间（分钟）
+  # 原因: B 站视频需要审核，审核通过后才能上传字幕
+  # 推荐值:
+  #   - 小视频（<100MB）:  10 分钟
+  #   - 中等视频（100-300MB）: 15 分钟
+  #   - 大视频（>300MB）:  20-25 分钟
+  subtitle_upload_delay = 10
+
+  # 上传调度器检查间隔（秒）
+  # 控制系统多久检查一次是否有视频需要上传
+  # 建议值:
+  #   - 10:  快速响应（适合频繁上传）
+  #   - 30:  正常使用（推荐）
+  #   - 60:  低频检查（节省 CPU）
+  #   - 300: 极低频（适合批量处理）
+  # ⚠️ 注意: 此值过小会增加 CPU 占用，过大会降低响应速度
+  upload_check_interval = 10
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 📖 配置完成检查清单
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# ✅ 基础配置
+#   [ ] 根据需要修改 fileUpDir（文件上传目录）
+#   [ ] 确认数据库配置（推荐使用默认的 SQLite）
+#   [ ] 生产环境务必修改 jwt_secret 和 session_secret
+#
+# ✅ AI 服务配置（至少配置一个）
+#   [ ] DeepSeek 配置（字幕翻译、元数据生成）
+#   [ ] Gemini 配置（必须配置，元数据生成需要多模态分析）
+#   [ ] 或 OpenAI 兼容 API 配置
+#
+# ✅ 网络配置
+#   [ ] 如需访问 YouTube，配置代理或确保网络通畅
+#   [ ] 配置浏览器 cookies 提取
+#
+# ✅ B 站配置
+#   [ ] 配置版权类型（自制/转载）
+#   [ ] 选择合适的分区 ID
+#   [ ] 根据需要配置标题和描述来源
+#
+# ✅ 上传策略
+#   [ ] 确认自动上传开关
+#   [ ] 调整上传延迟时间
+#   [ ] 设置调度器检查间隔
+#
+# ═══════════════════════════════════════════════════════════════════════════════

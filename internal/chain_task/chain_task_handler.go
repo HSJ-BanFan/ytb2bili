@@ -1,6 +1,7 @@
 package chain_task
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	models2 "github.com/difyz9/ytb2bili/internal/core/models"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	applogger "github.com/difyz9/ytb2bili/internal/logger"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
@@ -41,6 +43,9 @@ type ChainTaskHandler struct {
 	Task  *cron.Cron
 	Db    *gorm.DB
 	mutex sync.Mutex
+
+	// 用户级并发控制（可选注入）
+	ConcurrencyLimiter *ConcurrencyLimiter
 }
 
 func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService) *ChainTaskHandler {
@@ -155,10 +160,21 @@ func (h *ChainTaskHandler) SetUp() {
 		// 遍历所有待处理任务，尝试并发执行
 		for _, task := range pendingTasks {
 			videoID := task.VideoId
+			userID := task.UserID
 
 			// 检查是否已在执行中
 			if _, loaded := h.inFlightTasks.LoadOrStore(videoID, true); loaded {
 				continue
+			}
+
+			// 检查用户级并发限制
+			if h.ConcurrencyLimiter != nil && userID > 0 {
+				acquired, current, max, _ := h.ConcurrencyLimiter.TryAcquire(context.Background(), userID)
+				if !acquired {
+					smartLogger.Debugf("⏳ 用户 %d 并发已达上限 (%d/%d)，任务 %s 等待下次调度", userID, current, max, videoID)
+					h.inFlightTasks.Delete(videoID)
+					continue
+				}
 			}
 
 			// 尝试获取 worker slot
@@ -172,19 +188,37 @@ func (h *ChainTaskHandler) SetUp() {
 					continue
 				}
 
-				go func(t models2.TbVideo) {
+				go func(t models2.TbVideo, uid uint) {
 					defer func() {
 						<-h.workerPool
 						h.inFlightTasks.Delete(t.VideoId)
+						// 释放用户级并发槽位
+						if h.ConcurrencyLimiter != nil && uid > 0 {
+							h.ConcurrencyLimiter.Release(uid)
+						}
 					}()
 
-					h.App.Logger.Infof("🚀 [并发] 开始执行任务链: %s", t.VideoId)
+					// 创建用户日志助手
+					userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), uid)
+					userLogger.TaskLog(t.VideoId, "schedule", "started",
+						map[string]interface{}{
+							"title": t.Title,
+							"mode":  "concurrent",
+						})
 					h.RunTaskChain(t)
-					h.App.Logger.Infof("✅ [并发] 任务链完成: %s", t.VideoId)
-				}(*task)
+					userLogger.TaskLog(t.VideoId, "schedule", "completed",
+						map[string]interface{}{
+							"title": t.Title,
+							"mode":  "concurrent",
+						})
+				}(*task, userID)
 			default:
 				// worker pool 已满，跳过本次调度
 				h.inFlightTasks.Delete(videoID)
+				// ⚠️ 重要：释放已获取的并发槽位，否则会槽位泄漏
+				if h.ConcurrencyLimiter != nil && userID > 0 {
+					h.ConcurrencyLimiter.Release(userID)
+				}
 				smartLogger.Debugf("Worker pool 已满，任务 %s 等待下次调度", videoID)
 			}
 		}
@@ -223,6 +257,7 @@ func (h *ChainTaskHandler) getPendingTasks() ([]*models2.TbVideo, error) {
 		task := &models2.TbVideo{
 			Id:        sv.ID,
 			URL:       sv.URL,
+			UserID:    sv.UserID,
 			Title:     sv.Title,
 			VideoId:   sv.VideoID,
 			Status:    sv.Status,
@@ -251,12 +286,23 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		return
 	}
 
+	// 创建用户日志助手
+	userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), video.UserID)
+	userLogger.TaskLog(video.VideoId, "task_chain", "started",
+		map[string]interface{}{
+			"title": video.Title,
+			"url":   video.URL,
+		})
+
 	// 初始化任务步骤
 	if err := h.TaskStepService.InitTaskSteps(video.VideoId); err != nil {
-		h.App.Logger.Errorf("初始化任务步骤失败: %v", err)
+		userLogger.Errorm("初始化任务步骤失败",
+			map[string]interface{}{
+				"error": err.Error(),
+			})
 	}
 
-	stateManager := manager.NewStateManager(video.Id, video.VideoId, currentDir, video.CreatedAt)
+	stateManager := manager.NewStateManager(video.Id, video.UserID, video.VideoId, currentDir, video.CreatedAt)
 
 	// 创建任务链并设置日志和视频ID
 	chain := manager.NewTaskChain().
@@ -316,10 +362,20 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		if err := h.updateSavedVideoStatus(video.Id, "200"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为完成时出错: %v", err)
 		}
+		userLogger.TaskLog(video.VideoId, "task_chain", "completed",
+			map[string]interface{}{
+				"duration_seconds": duration.Seconds(),
+				"failed_tasks":     len(chain.FailedTasks),
+			})
 	} else {
 		if err := h.updateSavedVideoStatus(video.Id, "999"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为失败时出错: %v", err)
 		}
+		userLogger.TaskLog(video.VideoId, "task_chain", "failed",
+			map[string]interface{}{
+				"duration_seconds": duration.Seconds(),
+				"failed_tasks":     len(chain.FailedTasks),
+			})
 	}
 
 	// 记录最终结果
@@ -351,6 +407,7 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	video := models2.TbVideo{
 		Id:        savedVideo.ID,
 		URL:       savedVideo.URL,
+		UserID:    savedVideo.UserID,
 		Title:     savedVideo.Title,
 		VideoId:   savedVideo.VideoID,
 		Status:    savedVideo.Status,
@@ -365,7 +422,7 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	}
 
 	// 创建状态管理器
-	stateManager := manager.NewStateManager(video.Id, video.VideoId, currentDir, video.CreatedAt)
+	stateManager := manager.NewStateManager(video.Id, video.UserID, video.VideoId, currentDir, video.CreatedAt)
 
 	// 重置步骤状态
 	if err := h.TaskStepService.ResetTaskStep(videoID, stepName); err != nil {

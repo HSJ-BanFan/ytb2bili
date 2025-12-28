@@ -90,6 +90,15 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Infof("开始翻译字幕: VideoID=%s", t.StateManager.VideoID)
 	t.App.Logger.Info("========================================")
 
+	// 检查是否启用字幕翻译
+	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
+		if !t.App.Config.DownloadConfig.SubtitleTranslationEnabled {
+			t.App.Logger.Info("⏭️  字幕翻译已禁用，跳过翻译步骤")
+			t.App.Logger.Info("========================================")
+			return true
+		}
+	}
+
 	// 0. 优先检查是否已存在 YouTube 官方翻译的中文字幕
 	if existingZhSrt := t.findExistingChineseSubtitle(); existingZhSrt != "" {
 		t.App.Logger.Infof("✅ 发现 YouTube 官方中文字幕: %s", filepath.Base(existingZhSrt))

@@ -230,7 +230,7 @@ type DownloadConfig struct {
 	UseAria2c              bool   `toml:"use_aria2c"`               // 是否使用 aria2c 多线程下载
 	Aria2cPath             string `toml:"aria2c_path"`              // aria2c 可执行文件路径
 	ConcurrentFragments    int    `toml:"concurrent_fragments"`     // 并发分片数（默认8）
-	Aria2cConnections      int    `toml:"aria2c_connections"`       // aria2c 连接数（默认16）
+	Aria2cConnections      int    `toml:"aria2c_connections"`       // aria2c 连接数（默认8，降低以避免资源竞争）
 	HttpChunkSize          string `toml:"http_chunk_size"`          // HTTP 分块大小（默认10M）
 	PreferFormat           string `toml:"prefer_format"`            // 首选格式: best, 1080p, 720p, 480p
 	Aria2cWithProxy        bool   `toml:"aria2c_with_proxy"`        // 使用代理时是否仍尝试 aria2c（可能遇到403）
@@ -238,11 +238,25 @@ type DownloadConfig struct {
 	MaxConcurrentTasks     int    `toml:"max_concurrent_tasks"`     // 准备阶段最大并发任务数（默认10）
 	CookiesRefreshInterval int    `toml:"cookies_refresh_interval"` // Cookies 刷新间隔（分钟），默认30，0表示禁用
 
+	// 下载并发控制配置（新增）
+	MaxConcurrentDownloads int `toml:"max_concurrent_downloads"` // 最大并发下载数（默认3）
+	LongVideoThreshold     int `toml:"long_video_threshold"`     // 长视频阈值（分钟，默认30）
+	DownloadTimeout        int `toml:"download_timeout"`         // 下载超时时间（分钟，默认120）
+
 	// 自动上传配置
 	AutoUploadEnabled   bool   `toml:"auto_upload_enabled"`   // 是否启用自动上传（默认true）
 	AutoUploadMode      string `toml:"auto_upload_mode"`      // 上传模式: immediate=立即, delayed=延迟（默认delayed）
 	VideoUploadDelay    int    `toml:"video_upload_delay"`    // 视频处理完成后延迟上传时间（分钟，默认10）
 	SubtitleUploadDelay int    `toml:"subtitle_upload_delay"` // 视频上传后字幕延迟上传时间（分钟，默认10）
+	UploadCheckInterval int    `toml:"upload_check_interval"` // 上传调度器检查间隔（秒，默认10）
+
+	// 自动清理配置
+	AutoCleanupEnabled bool   `toml:"auto_cleanup_enabled"` // 是否启用自动清理（默认false）
+	AutoCleanupMode    string `toml:"auto_cleanup_mode"`    // 清理模式: immediate=立即, delayed=延迟（默认delayed）
+	AutoCleanupDelay   int    `toml:"auto_cleanup_delay"`   // 延迟清理时间（分钟，默认60）
+
+	// 字幕翻译配置
+	SubtitleTranslationEnabled bool `toml:"subtitle_translation_enabled"` // 是否启用字幕翻译（默认true）
 }
 
 // AnalyticsConfig 数据分析配置
@@ -332,12 +346,19 @@ func NewDefaultConfig() *AppConfig {
 
 		// 下载配置（默认值，可被 config.toml 覆盖）
 		DownloadConfig: &DownloadConfig{
-			UseAria2c:           true,   // 默认启用 aria2c（如果可用）
-			Aria2cPath:          "",     // 空表示自动检测
-			ConcurrentFragments: 8,      // yt-dlp 并发分片数
-			Aria2cConnections:   16,     // aria2c 连接数
-			HttpChunkSize:       "10M",  // HTTP 分块大小
-			PreferFormat:        "best", // 默认最佳质量
+			UseAria2c:                  true,      // 默认启用 aria2c（如果可用）
+			Aria2cPath:                 "",        // 空表示自动检测
+			ConcurrentFragments:        8,         // yt-dlp 并发分片数
+			Aria2cConnections:          8,         // aria2c 连接数（降低以避免资源竞争）
+			HttpChunkSize:              "10M",     // HTTP 分块大小
+			PreferFormat:               "best",    // 默认最佳质量
+			MaxConcurrentDownloads:     3,         // 最大并发下载数（默认3）
+			LongVideoThreshold:         30,        // 长视频阈值（分钟，默认30）
+			DownloadTimeout:            120,       // 下载超时时间（分钟，默认120）
+			AutoCleanupEnabled:         false,     // 默认不启用自动清理
+			AutoCleanupMode:            "delayed", // 默认延迟清理
+			AutoCleanupDelay:           60,        // 默认延迟60分钟
+			SubtitleTranslationEnabled: true,      // 默认启用字幕翻译
 		},
 
 		// 数据分析配置（默认值，可被 config.toml 覆盖）

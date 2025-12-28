@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -110,6 +111,16 @@ type TaskStepInfo struct {
 
 // getVideoList 获取视频列表
 func (h *VideoHandler) getVideoList(c *gin.Context) {
+	// 获取用户ID进行权限验证
+	userID, exists := auth.GetUserID(c)
+	if !exists || userID == 0 {
+		c.JSON(http.StatusUnauthorized, VideoListResponse{
+			Code:    401,
+			Message: "未登录",
+		})
+		return
+	}
+
 	// 解析分页参数
 	pageStr := c.DefaultQuery("page", "1")
 	limitStr := c.DefaultQuery("limit", "10")
@@ -127,8 +138,8 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 	// 计算偏移量
 	offset := (page - 1) * limit
 
-	// 获取视频列表
-	savedVideos, total, err := h.SavedVideoService.GetVideosPaginated(offset, limit)
+	// 获取视频列表（带用户隔离）
+	savedVideos, total, err := h.SavedVideoService.GetVideosPaginatedForUser(offset, limit, userID)
 	if err != nil {
 		h.App.Logger.Errorf("获取视频列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, VideoListResponse{
@@ -174,16 +185,26 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 func (h *VideoHandler) getVideoDetail(c *gin.Context) {
 	idStr := c.Param("id")
 
+	// 获取用户ID进行权限验证
+	userID, exists := auth.GetUserID(c)
+	if !exists || userID == 0 {
+		c.JSON(http.StatusUnauthorized, VideoListResponse{
+			Code:    401,
+			Message: "未登录",
+		})
+		return
+	}
+
 	// 尝试解析为数字ID，如果失败则当作video_id（字符串）处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		// 如果可以解析为数字，则按ID查询
-		savedVideo, err = h.SavedVideoService.GetByID(uint(id))
+		// 如果可以解析为数字，则按ID查询（带用户隔离）
+		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
 	} else {
-		// 否则按video_id查询
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
+		// 否则按video_id查询（带用户隔离）
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
 	}
 
 	if err != nil {
@@ -195,8 +216,8 @@ func (h *VideoHandler) getVideoDetail(c *gin.Context) {
 		return
 	}
 
-	// 获取任务步骤
-	taskSteps, err := h.TaskStepService.GetTaskStepsByVideoID(savedVideo.VideoID)
+	// 获取任务步骤（带用户隔离）
+	taskSteps, err := h.TaskStepService.GetTaskStepsByVideoIDForUser(savedVideo.VideoID, userID)
 	if err != nil {
 		h.App.Logger.Errorf("获取任务步骤失败: %v", err)
 	}
@@ -274,14 +295,24 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 	idStr := c.Param("id")
 	stepName := c.Param("stepName")
 
+	// 获取用户ID进行权限验证
+	userID, exists := auth.GetUserID(c)
+	if !exists || userID == 0 {
+		c.JSON(http.StatusUnauthorized, VideoListResponse{
+			Code:    401,
+			Message: "未登录",
+		})
+		return
+	}
+
 	// 尝试解析为数字ID，如果失败则当作video_id处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		savedVideo, err = h.SavedVideoService.GetByID(uint(id))
+		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
 	} else {
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
 	}
 
 	if err != nil {
@@ -368,21 +399,31 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 func (h *VideoHandler) deleteVideo(c *gin.Context) {
 	idStr := c.Param("id")
 
+	// 获取用户ID进行权限验证
+	userID, exists := auth.GetUserID(c)
+	if !exists || userID == 0 {
+		c.JSON(http.StatusUnauthorized, VideoListResponse{
+			Code:    401,
+			Message: "未登录",
+		})
+		return
+	}
+
 	// 尝试解析为数字ID，如果失败则当作video_id处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		savedVideo, err = h.SavedVideoService.GetByID(uint(id))
+		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
 	} else {
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
 	}
 
 	if err != nil {
 		h.App.Logger.Errorf("获取视频详情失败: %v", err)
 		c.JSON(http.StatusNotFound, VideoListResponse{
 			Code:    404,
-			Message: "视频不存在",
+			Message: "视频不存在或无权操作",
 		})
 		return
 	}
@@ -413,8 +454,8 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 		}
 	}
 
-	// 3. 删除数据库记录（软删除）
-	if err := h.SavedVideoService.DeleteVideo(savedVideo.ID); err != nil {
+	// 3. 删除数据库记录（带用户隔离）
+	if err := h.SavedVideoService.DeleteVideoForUser(savedVideo.ID, userID); err != nil {
 		h.App.Logger.Errorf("删除视频记录失败: %v", err)
 		c.JSON(http.StatusInternalServerError, VideoListResponse{
 			Code:    500,

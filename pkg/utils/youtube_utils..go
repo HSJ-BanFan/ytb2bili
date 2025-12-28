@@ -83,15 +83,46 @@ func ExtractVideoID(videoURL string) string {
 	parsedURL, err := url.Parse(videoURL)
 	if err != nil {
 		fmt.Printf("URL 解析失败: %v\n", err)
-		return "unknown"
+		return ""
 	}
 
 	host := parsedURL.Host
+
+	// 1. YouTube - 使用原生视频ID
 	if strings.Contains(host, "youtube.com") || strings.Contains(host, "youtu.be") {
 		videoId, _ := extractYoutTuBeVideoID(videoURL)
 		return videoId
-	} else if strings.Contains(host, "bilibili.com") || strings.Contains(host, "b23.tv") {
+	}
+
+	// 2. Bilibili - 使用BV号
+	if strings.Contains(host, "bilibili.com") || strings.Contains(host, "b23.tv") {
 		return extractBiliVideoID(videoURL)
 	}
-	return RandString(12)
+
+	// 3. 其他 yt-dlp 支持的平台 - 生成基于 URL 的唯一 ID
+	// yt-dlp 支持 1000+ 个平台，让它自己判断是否支持
+	// 生成一个可复现的短ID（基于URL哈希）
+	videoID := generateURLHash(videoURL)
+	fmt.Printf("🌐 其他平台视频: %s -> ID: %s (yt-dlp 将尝试下载)\n", host, videoID)
+	return videoID
+}
+
+// generateURLHash 生成基于 URL 的短哈希作为视频 ID
+// 这样同一个 URL 会生成相同的 ID，便于去重
+func generateURLHash(videoURL string) string {
+	// 使用简单的哈希算法生成12位ID
+	// 与 YouTube 的 11 位 ID 长度接近
+	var hash uint64 = 0
+	for _, c := range videoURL {
+		hash = hash*31 + uint64(c)
+	}
+
+	// 转换为 Base36（0-9, a-z）编码，更短
+	const chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+	result := make([]byte, 12)
+	for i := 11; i >= 0; i-- {
+		result[i] = chars[hash%36]
+		hash /= 36
+	}
+	return string(result)
 }

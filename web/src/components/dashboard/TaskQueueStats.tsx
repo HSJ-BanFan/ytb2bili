@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { RefreshCw, Clock, Play, CheckCircle, Upload, AlertCircle, Trash2, RotateCcw, ExternalLink } from 'lucide-react';
+import { authFetch } from '@/lib/authFetch';
 
 interface Video {
   id: number;
@@ -14,6 +15,54 @@ interface Video {
   task_steps?: TaskStep[];
   bili_bvid?: string;
   subtitle_scheduled_at?: string;
+  download_progress?: string; // JSON格式的下载进度信息
+}
+
+interface DownloadProgressData {
+  percent: number;
+  downloaded: string;
+  total: string;
+  speed: string;
+  eta: string;
+  updated_at: string;
+}
+
+// 解析下载进度JSON
+function parseDownloadProgress(progressJson?: string): DownloadProgressData | null {
+  if (!progressJson) return null;
+  try {
+    return JSON.parse(progressJson) as DownloadProgressData;
+  } catch {
+    return null;
+  }
+}
+
+// 下载进度条组件
+function DownloadProgressBar({ progress }: { progress: DownloadProgressData }) {
+  const percent = Math.min(100, Math.max(0, progress.percent));
+
+  return (
+    <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+      <div className="flex items-center justify-between text-xs text-blue-700 mb-1">
+        <span>下载中: {percent.toFixed(1)}%</span>
+        <span className="flex items-center space-x-3">
+          {progress.speed && <span>速度: {progress.speed}</span>}
+          {progress.eta && progress.eta !== '计算中' && <span>剩余: {progress.eta}</span>}
+        </span>
+      </div>
+      <div className="w-full bg-blue-200 rounded-full h-2 overflow-hidden">
+        <div
+          className="bg-gradient-to-r from-blue-500 to-blue-600 h-full rounded-full transition-all duration-300"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      {progress.total && (
+        <div className="text-xs text-blue-600 mt-1">
+          {progress.downloaded ? `${progress.downloaded} / ${progress.total}` : `总大小: ${progress.total}`}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface TaskStep {
@@ -52,7 +101,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
   const fetchVideos = async () => {
     try {
       setRefreshing(true);
-      const response = await fetch('/api/v1/videos?page=1&limit=1000');
+      const response = await authFetch('/api/v1/videos?page=1&limit=1000');
       const data = await response.json();
 
       console.log('视频数据响应:', data); // 调试日志
@@ -77,7 +126,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
       setExpandedVideoId(videoId);
       setIsDetailLoading(true);
       try {
-        const response = await fetch(`/api/v1/videos/${videoId}`);
+        const response = await authFetch(`/api/v1/videos/${videoId}`);
         const data = await response.json();
         if (data.code === 200 || data.code === 0) {
           setDetailedVideo(data.data);
@@ -94,7 +143,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
 
   const handleRetryStep = async (videoId: number, stepName: string) => {
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}/steps/${stepName}/retry`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}/steps/${stepName}/retry`, {
         method: 'POST',
       });
       const data = await response.json();
@@ -114,7 +163,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
       const endpoint = resetAll
         ? `/api/v1/videos/${videoId}/steps/reset-all`
         : `/api/v1/videos/${videoId}/steps/reset-failed`;
-      const response = await fetch(endpoint, {
+      const response = await authFetch(endpoint, {
         method: 'POST',
       });
       const data = await response.json();
@@ -145,7 +194,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
     }
 
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}`, {
         method: 'DELETE',
       });
 
@@ -363,7 +412,7 @@ export default function TaskQueueStats({ onVideoSelect }: TaskQueueStatsProps) {
                               </a>
                             )}
                           </div>
-                          <p className="text-sm text-gray-600 mb-3">
+                          <p className="text-sm text-gray-600 mb-2">
                             {getStageDescription(video)}
                           </p>
                           <div className="flex items-center space-x-6 text-xs text-gray-500">

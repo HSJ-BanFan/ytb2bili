@@ -87,9 +87,21 @@ func (s *BiliAccountService) GetUserAccounts(userID uint) ([]model.UserBiliAccou
 }
 
 // GetAllEnabledAccounts 获取所有启用的B站账号（用于多账号上传）
+// ⚠️ 警告：此方法返回所有用户的账号，应该仅用于管理目的
+// 对于视频上传等场景，请使用 GetEnabledAccountsForUser(userID)
 func (s *BiliAccountService) GetAllEnabledAccounts() ([]model.UserBiliAccount, error) {
 	var accounts []model.UserBiliAccount
 	err := s.db.Where("is_enabled = ?", true).Order("is_primary DESC, created_at ASC").Find(&accounts).Error
+	return accounts, err
+}
+
+// GetEnabledAccountsForUser 获取指定用户的所有启用B站账号
+// 这是上传视频时应该使用的方法，确保账号隔离
+func (s *BiliAccountService) GetEnabledAccountsForUser(userID uint) ([]model.UserBiliAccount, error) {
+	var accounts []model.UserBiliAccount
+	err := s.db.Where("user_id = ? AND is_enabled = ?", userID, true).
+		Order("is_primary DESC, created_at ASC").
+		Find(&accounts).Error
 	return accounts, err
 }
 

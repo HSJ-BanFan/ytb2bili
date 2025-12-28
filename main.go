@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -103,6 +105,11 @@ func main() {
 			return logger.NewLogger(config.Debug)
 		}),
 
+		// 初始化进度日志管理器
+		fx.Invoke(func(lg *zap.SugaredLogger) {
+			logger.InitProgressLogManager(lg)
+		}),
+
 		// 数据库模块
 		fx.Provide(store.NewDatabase),
 
@@ -152,6 +159,17 @@ func main() {
 		}),
 		fx.Provide(membership.NewMembershipHandler),
 		fx.Provide(membership.NewMembershipMiddleware),
+		// 权限服务
+		fx.Provide(func(store membership.MembershipStore) *membership.FeatureChecker {
+			return membership.NewFeatureChecker(store)
+		}),
+		fx.Provide(func(store membership.MembershipStore, checker *membership.FeatureChecker) *membership.PermissionService {
+			return membership.NewPermissionService(store, checker)
+		}),
+		// 并发控制器
+		fx.Provide(func(permService *membership.PermissionService, logger *zap.SugaredLogger) *chain_task.ConcurrencyLimiter {
+			return chain_task.NewConcurrencyLimiter(permService, logger)
+		}),
 
 		// 注册cron
 		fx.Provide(func() *cron.Cron {
@@ -177,20 +195,52 @@ func main() {
 		// 初始化并检查 yt-dlp
 		fx.Invoke(func(logger *zap.SugaredLogger, config *types.AppConfig) error {
 			logger.Info("Checking yt-dlp installation...")
-			return checkYtDlpInstallation(logger, config)
+			if err := checkYtDlpInstallation(logger, config); err != nil {
+				return err
+			}
+			// 启动时从浏览器刷新 cookies.txt
+			return refreshCookiesFromBrowser(logger, config)
 		}),
 
 		fx.Provide(chain_task.NewChainTaskHandler),
-		fx.Invoke(func(h *chain_task.ChainTaskHandler) {
+		fx.Invoke(func(h *chain_task.ChainTaskHandler, limiter *chain_task.ConcurrencyLimiter) {
+			// 注入并发控制器
+			h.ConcurrencyLimiter = limiter
 			// 设置并启动任务消费者（准备阶段：下载、字幕、翻译、元数据）
 			h.SetUp()
 		}),
 
 		// 添加上传调度器
 		fx.Provide(chain_task.NewUploadScheduler),
-		fx.Invoke(func(s *chain_task.UploadScheduler) {
+		fx.Invoke(func(s *chain_task.UploadScheduler, permService *membership.PermissionService) {
+			// 注入权限服务
+			s.PermissionService = permService
 			// 设置并启动上传调度器（上传阶段：每小时上传视频，1小时后上传字幕）
 			s.SetUp()
+		}),
+
+		// 定时刷新 cookies 到备用文件
+		fx.Invoke(func(logger *zap.SugaredLogger, config *types.AppConfig, c *cron.Cron) {
+			interval := 30 // 默认30分钟
+			if config.DownloadConfig != nil && config.DownloadConfig.CookiesRefreshInterval > 0 {
+				interval = config.DownloadConfig.CookiesRefreshInterval
+			}
+			if interval == 0 {
+				logger.Info("Cookies 定时刷新已禁用")
+				return
+			}
+
+			// 添加定时任务
+			cronExpr := fmt.Sprintf("0 */%d * * * *", interval)
+			_, err := c.AddFunc(cronExpr, func() {
+				logger.Info("🔄 定时刷新 cookies 到备用文件...")
+				refreshCookiesToBackup(logger, config)
+			})
+			if err != nil {
+				logger.Errorf("添加 cookies 刷新定时任务失败: %v", err)
+				return
+			}
+			logger.Infof("✓ Cookies 定时刷新已启动，每 %d 分钟刷新一次", interval)
 		}),
 
 		// 初始化应用服务器和基础路由
@@ -471,8 +521,11 @@ func registerHandlers(
 	videoHandler.AnalyticsHandler = analyticsHandler
 	// 设置上传调度器（避免循环依赖）
 	videoHandler.SetUploadScheduler(uploadScheduler)
-	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
-	logger.Info("✓ Video routes registered")
+	// 使用带 JWT 认证的路由组
+	videoGroup := server.Engine.Group("/api/v1")
+	videoGroup.Use(authMiddleware.JWTAuth())
+	videoHandler.RegisterRoutes(videoGroup)
+	logger.Info("✓ Video routes registered (JWT protected)")
 
 	// 迁移：为所有视频添加"上传字幕到Bilibili"步骤
 	if count, err := taskStepService.MigrateAllVideosSubtitleStep(); err != nil {
@@ -531,4 +584,145 @@ func checkYtDlpInstallation(logger *zap.SugaredLogger, config *types.AppConfig) 
 
 	logger.Infof("✅ yt-dlp 就绪，路径: %s", manager.GetBinaryPath())
 	return nil
+}
+
+// refreshCookiesFromBrowser 从浏览器刷新 cookies.txt 文件
+func refreshCookiesFromBrowser(logger *zap.SugaredLogger, config *types.AppConfig) error {
+	// 检查是否配置了浏览器
+	if config == nil || config.DownloadConfig == nil ||
+		config.DownloadConfig.CookiesFromBrowser == "" ||
+		config.DownloadConfig.CookiesFromBrowser == "none" ||
+		config.DownloadConfig.CookiesFromBrowser == "disabled" {
+		logger.Debug("浏览器 cookies 提取已禁用，跳过刷新")
+		return nil
+	}
+
+	browserName := config.DownloadConfig.CookiesFromBrowser
+	logger.Infof("🍪 正在从 %s 浏览器刷新 cookies.txt...", browserName)
+
+	// 获取 yt-dlp 路径
+	ytdlpPath, err := exec.LookPath("yt-dlp")
+	if err != nil {
+		// 尝试本地目录
+		if exePath, err2 := os.Executable(); err2 == nil {
+			localPath := filepath.Join(filepath.Dir(exePath), "yt-dlp.exe")
+			if _, err3 := os.Stat(localPath); err3 == nil {
+				ytdlpPath = localPath
+			}
+		}
+		if ytdlpPath == "" {
+			logger.Warnf("⚠️ 未找到 yt-dlp，跳过 cookies 刷新: %v", err)
+			return nil
+		}
+	}
+
+	// 确定 cookies.txt 保存路径（优先使用当前工作目录）
+	cookiesPath := "cookies.txt"
+	if cwd, err := os.Getwd(); err == nil {
+		cookiesPath = filepath.Join(cwd, "cookies.txt")
+	}
+
+	// 删除旧的 cookies.txt 文件（避免格式不兼容错误）
+	_ = os.Remove(cookiesPath)
+
+	// 构建命令：从浏览器提取 cookies 并保存到文件
+	// 使用带超时的 context 避免卡住
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 使用一个公开的短视频提取 cookies（需要真实的 YouTube 请求才能保存 cookies）
+	cmd := exec.CommandContext(ctx,
+		ytdlpPath,
+		"--cookies-from-browser", browserName,
+		"--cookies", cookiesPath,
+		"--skip-download",
+		"--no-warnings",
+		"--quiet",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ", // Rick Astley 公开视频
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			logger.Warn("⚠️ Cookies 刷新超时（30秒），跳过此步骤")
+		} else {
+			logger.Warnf("⚠️ 从 %s 提取 cookies 失败: %v", browserName, err)
+			logger.Debugf("输出: %s", string(output))
+		}
+		logger.Info("💡 提示: 请确保 Firefox 已登录 YouTube 并已关闭")
+		return nil // 不阻止应用启动
+	}
+
+	// 验证 cookies.txt 是否已更新
+	if _, statErr := os.Stat(cookiesPath); statErr == nil {
+		logger.Infof("✅ 已从 %s 刷新 cookies.txt: %s", browserName, cookiesPath)
+	} else {
+		logger.Warnf("⚠️ cookies.txt 文件未生成")
+	}
+	return nil
+}
+
+// refreshCookiesToBackup 定时刷新 cookies 到备用文件
+func refreshCookiesToBackup(logger *zap.SugaredLogger, config *types.AppConfig) {
+	// 检查是否配置了浏览器
+	if config == nil || config.DownloadConfig == nil ||
+		config.DownloadConfig.CookiesFromBrowser == "" ||
+		config.DownloadConfig.CookiesFromBrowser == "none" ||
+		config.DownloadConfig.CookiesFromBrowser == "disabled" {
+		return
+	}
+
+	browserName := config.DownloadConfig.CookiesFromBrowser
+
+	// 获取 yt-dlp 路径
+	ytdlpPath, err := exec.LookPath("yt-dlp")
+	if err != nil {
+		if exePath, err2 := os.Executable(); err2 == nil {
+			localPath := filepath.Join(filepath.Dir(exePath), "yt-dlp.exe")
+			if _, err3 := os.Stat(localPath); err3 == nil {
+				ytdlpPath = localPath
+			}
+		}
+		if ytdlpPath == "" {
+			return
+		}
+	}
+
+	// 备用 cookies 文件路径
+	cookiesBackupPath := "cookies_backup.txt"
+	if cwd, err := os.Getwd(); err == nil {
+		cookiesBackupPath = filepath.Join(cwd, "cookies_backup.txt")
+	}
+
+	// 删除旧的备用文件
+	_ = os.Remove(cookiesBackupPath)
+
+	// 使用超时
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
+		ytdlpPath,
+		"--cookies-from-browser", browserName,
+		"--cookies", cookiesBackupPath,
+		"--skip-download",
+		"--no-warnings",
+		"--quiet",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			logger.Warn("⚠️ 备用 Cookies 刷新超时（30秒）")
+		} else {
+			logger.Warnf("⚠️ 刷新备用 cookies 失败: %v", err)
+			logger.Debugf("输出: %s", string(output))
+		}
+		return
+	}
+
+	if _, statErr := os.Stat(cookiesBackupPath); statErr == nil {
+		logger.Infof("✅ 已刷新备用 cookies: %s", cookiesBackupPath)
+	}
 }

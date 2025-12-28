@@ -262,18 +262,29 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 			// 设置字幕计划上传时间（根据视频大小智能计算延迟）
 			videoSizeMB := t.getVideoSizeMB()
 			savedVideo.VideoSizeMB = videoSizeMB
-			subtitleDelay := t.calculateSubtitleDelay(videoSizeMB)
-			scheduledTime := time.Now().Add(subtitleDelay)
-			savedVideo.SubtitleScheduledAt = &scheduledTime
-			savedVideo.SubtitleUploadRetries = 0
-			savedVideo.SubtitleUploadError = ""
+
+			// 检查是否有字幕
+			hasSubtitle := savedVideo.Subtitles != "" && savedVideo.Subtitles != "[]" && savedVideo.Subtitles != "null"
+
+			if hasSubtitle {
+				subtitleDelay := t.calculateSubtitleDelay(videoSizeMB)
+				scheduledTime := time.Now().Add(subtitleDelay)
+				savedVideo.SubtitleScheduledAt = &scheduledTime
+				savedVideo.SubtitleUploadRetries = 0
+				savedVideo.SubtitleUploadError = ""
+			}
 
 			if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
 				t.App.Logger.Errorf("❌ 保存上传结果到数据库失败: %v", err)
 			} else {
 				t.App.Logger.Info("✅ 上传结果已保存到数据库")
-				t.App.Logger.Infof("🕒 字幕将在 %s 后上传 (计划时间: %s)",
-					subtitleDelay.Round(time.Minute), scheduledTime.Format("15:04:05"))
+				if hasSubtitle {
+					t.App.Logger.Infof("🕒 字幕将在 %s 后上传 (计划时间: %s)",
+						t.calculateSubtitleDelay(videoSizeMB).Round(time.Minute),
+						savedVideo.SubtitleScheduledAt.Format("15:04:05"))
+				} else {
+					t.App.Logger.Info("✓ 视频无字幕，不计划字幕上传")
+				}
 			}
 		}
 
@@ -381,15 +392,33 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 	return bvid, aid, nil
 }
 
-// getAllEnabledAccounts 获取所有启用的B站账号
+// getAllEnabledAccounts 获取当前视频所属用户的所有启用B站账号
+// ⚠️ 重要：确保账号隔离，只返回当前用户绑定的账号
 func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 	var accounts []*storage.BiliAccount
 
-	// 1. 优先从数据库获取所有启用的账号
+	// 1. 获取当前视频所属的用户ID
+	userID := t.StateManager.UserID
+	if userID == 0 && t.StateManager.VideoID != "" {
+		// 如果 StateManager 没有 UserID，从数据库查询
+		savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
+		if err == nil && savedVideo.UserID > 0 {
+			userID = savedVideo.UserID
+		}
+	}
+
+	if userID == 0 {
+		t.App.Logger.Warn("⚠️ 无法确定视频所属用户，将不使用任何账号")
+		return accounts
+	}
+
+	t.App.Logger.Infof("🔍 获取用户 %d 的 B 站账号...", userID)
+
+	// 2. 从数据库获取该用户的所有启用账号
 	if t.BiliAccountService != nil {
-		dbAccounts, err := t.BiliAccountService.GetAllEnabledAccounts()
+		dbAccounts, err := t.BiliAccountService.GetEnabledAccountsForUser(userID)
 		if err == nil && len(dbAccounts) > 0 {
-			t.App.Logger.Infof("📦 从数据库获取到 %d 个启用账号", len(dbAccounts))
+			t.App.Logger.Infof("📦 从数据库获取到用户 %d 的 %d 个启用账号", userID, len(dbAccounts))
 			for _, dbAccount := range dbAccounts {
 				// 解析 cookies 中的 LoginInfo
 				var loginInfo *bilibili.LoginInfo
@@ -417,43 +446,15 @@ func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 			if len(accounts) > 0 {
 				return accounts
 			}
+		} else if err != nil {
+			t.App.Logger.Warnf("获取用户 %d 的账号失败: %v", userID, err)
+		} else {
+			t.App.Logger.Warnf("用户 %d 没有绑定任何 B 站账号", userID)
 		}
 	}
 
-	// 2. 回退：从多账号本地存储获取所有启用的账号
-	multiStore := storage.GetMultiAccountStore()
-	if multiStore != nil {
-		enabledAccounts, err := multiStore.GetEnabledAccounts()
-		if err == nil && len(enabledAccounts) > 0 {
-			t.App.Logger.Infof("📦 从多账号存储获取到 %d 个启用账号", len(enabledAccounts))
-			accounts = append(accounts, enabledAccounts...)
-		}
-	}
-
-	// 3. 如果没有多账号，尝试从旧存储获取单账号
-	if len(accounts) == 0 {
-		legacyStore := storage.GetDefaultStore()
-		if legacyStore.IsValid() {
-			loginInfo, userInfo, err := legacyStore.LoadWithUserInfo()
-			if err == nil && loginInfo != nil {
-				account := &storage.BiliAccount{
-					ID:        fmt.Sprintf("%d", loginInfo.TokenInfo.Mid),
-					Mid:       loginInfo.TokenInfo.Mid,
-					Name:      loginInfo.TokenInfo.Uname,
-					IsEnabled: true,
-					IsPrimary: true,
-					LoginInfo: loginInfo,
-					UserInfo:  userInfo,
-				}
-				if userInfo != nil {
-					account.Name = userInfo.Name
-				}
-				accounts = append(accounts, account)
-				t.App.Logger.Info("📦 从旧存储获取到 1 个账号")
-			}
-		}
-	}
-
+	// 3. 如果用户没有绑定账号，返回空列表（不再回退到全局账号）
+	t.App.Logger.Warn("⚠️ 用户没有绑定有效的 B 站账号，无法上传")
 	return accounts
 }
 

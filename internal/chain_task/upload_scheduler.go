@@ -1,6 +1,7 @@
 package chain_task
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	applogger "github.com/difyz9/ytb2bili/internal/logger"
+	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 
 	"github.com/robfig/cron/v3"
@@ -34,6 +37,9 @@ type UploadScheduler struct {
 	// 上传队列跟踪
 	lastVideoUploadTime    time.Time // 最后一次视频上传时间
 	lastSubtitleUploadTime time.Time // 最后一次字幕上传时间
+
+	// 权限服务（可选注入）
+	PermissionService *membership.PermissionService
 }
 
 // NewUploadScheduler 创建上传调度器实例
@@ -127,14 +133,16 @@ func (s *UploadScheduler) uploadNextVideo() error {
 	// 查询状态为 '200' (准备就绪) 的视频
 	var videos []struct {
 		ID                    uint
+		UserID                uint // 用户ID，用于权限检查
 		VideoID               string
 		Title                 string
+		Subtitles             string // 字幕数据，用于判断是否有字幕
 		ProcessingCompletedAt *time.Time
 		CreatedAt             time.Time
 	}
 
 	query := s.Db.Table("cw_saved_videos").
-		Select("id, video_id, title, processing_completed_at, created_at").
+		Select("id, user_id, video_id, title, subtitles, processing_completed_at, created_at").
 		Where("status = ?", "200").
 		Where("deleted_at IS NULL")
 
@@ -169,12 +177,47 @@ func (s *UploadScheduler) uploadNextVideo() error {
 
 	video := videos[0]
 
+	// 检查用户自动上传权限
+	if s.PermissionService != nil && video.UserID > 0 {
+		userIDStr := fmt.Sprintf("%d", video.UserID)
+		canUpload, reason, err := s.PermissionService.CanAutoUpload(context.Background(), userIDStr)
+		if err != nil {
+			// 使用用户日志助手
+			userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
+			userLogger.Warnm("检查用户上传权限失败",
+				map[string]interface{}{
+					"video_id": video.VideoID,
+					"error":    err,
+				})
+			// 权限检查失败时继续执行（容错）
+		} else if !canUpload {
+			// 无自动上传权限，跳过此视频（保持状态 200，不改为 205）
+			// 用户可以在"定时上传"页面手动触发上传
+			userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
+			userLogger.TaskLog(video.VideoID, "upload_video", "skipped",
+				map[string]interface{}{
+					"reason": reason,
+					"title":  video.Title,
+				})
+			return nil
+		}
+	}
+
+	// 创建用户日志助手
+	userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
+
 	// 显示调度信息
 	if video.ProcessingCompletedAt != nil {
-		s.logger.Infof("📤 开始上传视频: %s (VideoID: %s, 处理完成于: %s)",
-			video.Title, video.VideoID, video.ProcessingCompletedAt.Format("15:04:05"))
+		userLogger.TaskLog(video.VideoID, "upload_video", "started",
+			map[string]interface{}{
+				"title":        video.Title,
+				"completed_at": video.ProcessingCompletedAt.Format("15:04:05"),
+			})
 	} else {
-		s.logger.Infof("📤 开始上传视频: %s (VideoID: %s)", video.Title, video.VideoID)
+		userLogger.TaskLog(video.VideoID, "upload_video", "started",
+			map[string]interface{}{
+				"title": video.Title,
+			})
 	}
 
 	// 更新状态为 '201' (上传视频中)
@@ -189,15 +232,69 @@ func (s *UploadScheduler) uploadNextVideo() error {
 		return fmt.Errorf("上传视频失败: %v", err)
 	}
 
-	// 上传成功，更新状态为 '300' 并记录上传时间和计划字幕上传时间
-	subtitleScheduledAt := now.Add(time.Duration(subtitleUploadDelay) * time.Minute)
-	s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
-		"status":                "300",
-		"video_uploaded_at":     now,
-		"subtitle_scheduled_at": subtitleScheduledAt,
-	})
+	// 重新获取视频信息（因为 executeUploadTask 可能会更新 video 信息，如 SubtitleScheduledAt）
+	// 注意：不能直接使用 videos[0]，因为那是旧数据
+	var updatedVideo struct {
+		ID                  uint
+		VideoID             string
+		Subtitles           string
+		SubtitleScheduledAt *time.Time
+	}
+	if err := s.Db.Table("cw_saved_videos").Select("id, video_id, subtitles, subtitle_scheduled_at").Where("id = ?", video.ID).First(&updatedVideo).Error; err != nil {
+		s.logger.Warnf("⚠️ 重新获取视频信息失败: %v", err)
+	} else {
+		// 更新本地变量以反映最新状态
+		video.Subtitles = updatedVideo.Subtitles
+		// 如果上传任务设置了计划时间，也认为是有的
+		if updatedVideo.SubtitleScheduledAt != nil {
+			// 如果数据库中有计划时间，我们应该尊重它
+			// 这里我们不需要手动更新 video.Subtitles，只需要确保下面的 checks 能通过
+		}
+	}
 
-	s.logger.Infof("✅ 视频上传成功: %s, 字幕将在 %s 后上传", video.VideoID, subtitleScheduledAt.Format("15:04:05"))
+	// 上传成功，检查是否有字幕数据 OR 是否有计划的字幕上传
+	hasSubtitle := video.Subtitles != "" && video.Subtitles != "[]" && video.Subtitles != "null"
+	hasScheduledSubtitle := updatedVideo.SubtitleScheduledAt != nil
+
+	if hasSubtitle || hasScheduledSubtitle {
+		// 有字幕或已有计划，更新状态为 '300'
+		// 如果已有计划时间，保持原样；否则计算默认延迟
+		updates := map[string]interface{}{
+			"status":            "300",
+			"video_uploaded_at": now,
+		}
+
+		if !hasScheduledSubtitle {
+			// 只有在没被设置过的情况下才设置默认值
+			subtitleScheduledAt := now.Add(time.Duration(subtitleUploadDelay) * time.Minute)
+			updates["subtitle_scheduled_at"] = subtitleScheduledAt
+			userLogger.TaskLog(video.VideoID, "upload_video", "success",
+				map[string]interface{}{
+					"subtitle_scheduled_at": subtitleScheduledAt.Format("15:04:05"),
+					"note":                  "default_delay",
+				})
+		} else {
+			userLogger.TaskLog(video.VideoID, "upload_video", "success",
+				map[string]interface{}{
+					"subtitle_scheduled_at": updatedVideo.SubtitleScheduledAt.Format("15:04:05"),
+					"note":                  "respected_existing_schedule",
+				})
+		}
+
+		s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(updates)
+	} else {
+		// 无字幕且无计划，直接标记为完成状态 '400'
+		s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
+			"status":            "400",
+			"video_uploaded_at": now,
+		})
+		userLogger.TaskLog(video.VideoID, "upload_video", "completed",
+			map[string]interface{}{
+				"has_subtitle": false,
+			})
+		// 触发自动清理
+		s.triggerAutoCleanup(video.VideoID)
+	}
 	return nil
 }
 
@@ -210,6 +307,7 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 	// 查询状态为 '300' (视频已上传，待上传字幕) 且已到达计划上传时间的视频
 	var videos []struct {
 		ID                    uint
+		UserID                uint // 用户ID
 		VideoID               string
 		Title                 string
 		VideoSizeMB           float64
@@ -223,7 +321,7 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 
 	// 查询已到达计划上传时间的视频，或者没有设置计划时间但已过去1小时的视频
 	err := s.Db.Table("cw_saved_videos").
-		Select("id, video_id, title, video_size_mb, subtitle_scheduled_at, subtitle_upload_retries, updated_at, created_at").
+		Select("id, user_id, video_id, title, video_size_mb, subtitle_scheduled_at, subtitle_upload_retries, updated_at, created_at").
 		Where("status = ?", "300").
 		Where("deleted_at IS NULL").
 		Where("subtitle_upload_retries < ?", 3). // 最多重试3次
@@ -274,13 +372,23 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 
 	video := videos[0]
 
+	// 创建用户日志助手
+	userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
+
 	// 显示调度信息
 	if video.SubtitleScheduledAt != nil {
-		s.logger.Infof("📝 开始上传字幕: %s (VideoID: %s, 计划时间: %s, 重试: %d/3)",
-			video.Title, video.VideoID, video.SubtitleScheduledAt.Format("15:04:05"), video.SubtitleUploadRetries)
+		userLogger.TaskLog(video.VideoID, "upload_subtitle", "started",
+			map[string]interface{}{
+				"title":        video.Title,
+				"scheduled_at": video.SubtitleScheduledAt.Format("15:04:05"),
+				"retry":        video.SubtitleUploadRetries,
+			})
 	} else {
-		s.logger.Infof("📝 开始上传字幕: %s (VideoID: %s, 重试: %d/3)",
-			video.Title, video.VideoID, video.SubtitleUploadRetries)
+		userLogger.TaskLog(video.VideoID, "upload_subtitle", "started",
+			map[string]interface{}{
+				"title": video.Title,
+				"retry": video.SubtitleUploadRetries,
+			})
 	}
 
 	// 更新状态为 '301' (上传字幕中)
@@ -304,10 +412,18 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 		if retryCount >= 3 {
 			// 超过最大重试次数，标记为失败
 			s.SavedVideoService.UpdateStatus(video.ID, "399")
-			s.logger.Errorf("✗ 字幕上传失败 (已达最大重试次数): %s", video.VideoID)
+			userLogger.TaskLog(video.VideoID, "upload_subtitle", "failed",
+				map[string]interface{}{
+					"reason": "max_retries_exceeded",
+					"error":  err.Error(),
+				})
 		} else {
-			s.logger.Warnf("⚠️ 字幕上传失败，将在 %s 重试 (%d/3): %v",
-				nextRetryTime.Format("15:04:05"), retryCount, err)
+			userLogger.TaskLog(video.VideoID, "upload_subtitle", "retry",
+				map[string]interface{}{
+					"next_retry": nextRetryTime.Format("15:04:05"),
+					"retry":      retryCount,
+					"error":      err.Error(),
+				})
 		}
 		return fmt.Errorf("上传字幕失败: %v", err)
 	}
@@ -322,7 +438,7 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 		"subtitle_upload_error": "",
 	})
 
-	s.logger.Infof("✅ 字幕上传成功: %s", video.VideoID)
+	userLogger.TaskLog(video.VideoID, "upload_subtitle", "success", map[string]interface{}{})
 
 	// 触发自动清理（如果启用）
 	s.triggerAutoCleanup(video.VideoID)
@@ -431,7 +547,7 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	}
 
 	// 创建状态管理器
-	stateManager := manager.NewStateManager(savedVideo.ID, savedVideo.VideoID, currentDir, savedVideo.CreatedAt)
+	stateManager := manager.NewStateManager(savedVideo.ID, savedVideo.UserID, savedVideo.VideoID, currentDir, savedVideo.CreatedAt)
 
 	// 更新步骤状态为运行中
 	if err := s.TaskStepService.UpdateTaskStepStatus(videoID, taskName, "running"); err != nil {
@@ -612,9 +728,17 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 		return
 	}
 
-	// 视频目录格式: data/media/YYYY-MM-DD/videoID
-	dateStr := savedVideo.CreatedAt.Format("2006-01-02")
-	videoDir := filepath.Join(baseDir, dateStr, videoID)
+	// 视频目录格式: data/media/user_{id}/YYYY-MM-DD/videoID
+	userDir := fmt.Sprintf("user_%d", savedVideo.UserID)
+	// 注意：使用 Local() 确保日期与创建目录时一致
+	dateStr := savedVideo.CreatedAt.Local().Format("2006-01-02")
+
+	// 如果目录不存在，尝试查找其他可能的日期目录（处理时区问题）
+	// 但首先尝试标准的构建路径
+	videoDir := filepath.Join(baseDir, userDir, dateStr, videoID)
+
+	// 增加调试日志
+	s.logger.Infof("🧹 目标清理路径: %s", videoDir)
 
 	// 检查目录是否存在
 	if _, err := os.Stat(videoDir); os.IsNotExist(err) {
@@ -655,4 +779,20 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 
 	s.logger.Infof("✅ 已清理视频 %s: 删除 %d 个文件, 释放 %.2f MB",
 		videoID, fileCount, float64(totalSize)/(1024*1024))
+
+	// 尝试清理空的父目录 (日期目录)
+	dateDirPath := filepath.Dir(videoDir)
+	if entries, err := os.ReadDir(dateDirPath); err == nil && len(entries) == 0 {
+		if err := os.Remove(dateDirPath); err == nil {
+			s.logger.Debugf("🧹 已清理空日期目录: %s", dateDirPath)
+
+			// 尝试清理空的父目录 (用户目录)
+			userDirPath := filepath.Dir(dateDirPath)
+			if entries, err := os.ReadDir(userDirPath); err == nil && len(entries) == 0 {
+				if err := os.Remove(userDirPath); err == nil {
+					s.logger.Debugf("🧹 已清理空用户目录: %s", userDirPath)
+				}
+			}
+		}
+	}
 }

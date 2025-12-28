@@ -112,6 +112,9 @@ type SavedVideo struct {
 	// 自动上传调度字段
 	ProcessingCompletedAt *time.Time `gorm:"index" json:"processing_completed_at"` // 视频处理完成时间（用于视频上传调度）
 	VideoUploadedAt       *time.Time `gorm:"index" json:"video_uploaded_at"`       // 视频上传完成时间（用于字幕上传调度）
+
+	// 下载进度字段
+	DownloadProgress string `gorm:"type:text" json:"download_progress,omitempty"` // JSON格式的下载进度
 }
 
 // TableName 指定表名

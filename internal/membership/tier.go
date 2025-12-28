@@ -18,8 +18,9 @@ var AllTiers = []Tier{TierFree, TierBasic, TierPro, TierEnterprise}
 
 // Limits 配额限制
 type Limits struct {
-	VideosPerDay int `json:"videos_per_day"` // -1 表示无限
-	BatchSize    int `json:"batch_size"`
+	VideosPerDay       int `json:"videos_per_day"`       // -1 表示无限
+	BatchSize          int `json:"batch_size"`           // 批量提交数
+	MaxConcurrentTasks int `json:"max_concurrent_tasks"` // 最大并发任务数 (-1=无限)
 }
 
 // Features 功能开关
@@ -57,8 +58,8 @@ var DefaultTierConfigs = map[Tier]TierConfig{
 		Description: "基础功能，适合个人体验",
 		Price:       0,
 		YearlyPrice: 0,
-		Limits:      Limits{VideosPerDay: 5, BatchSize: 1},
-		Features:    Features{}, // 全部 false
+		Limits:      Limits{VideosPerDay: 5, BatchSize: 1, MaxConcurrentTasks: 1}, // Free: 串行处理
+		Features:    Features{},                                                   // 全部 false
 		Priority:    0,
 	},
 	TierBasic: {
@@ -67,7 +68,7 @@ var DefaultTierConfigs = map[Tier]TierConfig{
 		Description: "AI 增强功能，适合轻度用户",
 		Price:       29,
 		YearlyPrice: 290,
-		Limits:      Limits{VideosPerDay: 20, BatchSize: 5},
+		Limits:      Limits{VideosPerDay: 20, BatchSize: 5, MaxConcurrentTasks: 2}, // Basic: 2 并发
 		Features: Features{
 			AITranslation:     true,
 			AITitleGeneration: true,
@@ -81,7 +82,7 @@ var DefaultTierConfigs = map[Tier]TierConfig{
 		Description: "全功能解锁，适合内容创作者",
 		Price:       99,
 		YearlyPrice: 990,
-		Limits:      Limits{VideosPerDay: 100, BatchSize: 20},
+		Limits:      Limits{VideosPerDay: 100, BatchSize: 20, MaxConcurrentTasks: 5}, // Pro: 5 并发
 		Features: Features{
 			AITranslation:       true,
 			TranslationOptimize: true,
@@ -100,7 +101,7 @@ var DefaultTierConfigs = map[Tier]TierConfig{
 		Description: "无限制使用，适合团队和企业",
 		Price:       299,
 		YearlyPrice: 2990,
-		Limits:      Limits{VideosPerDay: -1, BatchSize: 100}, // -1 表示无限
+		Limits:      Limits{VideosPerDay: -1, BatchSize: 100, MaxConcurrentTasks: -1}, // Enterprise: 无限
 		Features: Features{
 			AITranslation:       true,
 			TranslationOptimize: true,

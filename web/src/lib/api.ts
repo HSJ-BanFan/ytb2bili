@@ -69,6 +69,19 @@ api.interceptors.response.use(
   },
   (error) => {
     console.error("API Error:", error);
+
+    // 尝试从错误响应中提取错误信息
+    if (error.response) {
+      const { data, status } = error.response;
+
+      // 如果响应中有错误信息，使用它
+      if (data && (data.message || data.error)) {
+        error.message = data.message || data.error;
+        error.data = data;
+        error.code = status;
+      }
+    }
+
     return Promise.reject(error);
   }
 );

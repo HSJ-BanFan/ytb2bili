@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Upload, FileText, AlertCircle, CheckCircle, Loader2, Trash2 } from 'lucide-react';
+import { authFetch } from '@/lib/authFetch';
 
 interface VideoActionsProps {
   videoId: string;
@@ -24,7 +25,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}/upload/video`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}/upload/video`, {
         method: 'POST',
       });
 
@@ -56,7 +57,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}/upload/subtitle`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}/upload/subtitle`, {
         method: 'POST',
       });
 
@@ -88,7 +89,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await fetch(`/api/v1/videos/${videoId}`, {
+      const response = await authFetch(`/api/v1/videos/${videoId}`, {
         method: 'DELETE',
       });
 
@@ -112,7 +113,12 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
   };
 
   // 根据状态决定显示哪些操作按钮
-  const canUploadVideo = ['200', '299'].includes(status);
+  // 200: 准备就绪（可自动上传）
+  // 205: 等待手动上传（Free 用户或手动上传模式）
+  // 299: 上传失败（可重试）
+  const canUploadVideo = ['200', '205', '299'].includes(status);
+  // 300: 视频已上传，等待字幕上传
+  // 399: 字幕上传失败（可重试）
   const canUploadSubtitle = ['300', '399'].includes(status);
 
   return (
@@ -125,82 +131,84 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
             手动操作
           </h3>
 
-      {/* 成功消息 */}
-      {success && (
-        <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start space-x-2">
-          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-          <span className="text-sm text-green-800">{success}</span>
-        </div>
-      )}
+          {/* 成功消息 */}
+          {success && (
+            <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg flex items-start space-x-2">
+              <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm text-green-800">{success}</span>
+            </div>
+          )}
 
-      {/* 错误消息 */}
-      {error && (
-        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-2">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <span className="text-sm text-red-800">{error}</span>
-        </div>
-      )}
+          {/* 错误消息 */}
+          {error && (
+            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-2">
+              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <span className="text-sm text-red-800">{error}</span>
+            </div>
+          )}
 
-      <div className="space-y-2">
-        {/* 手动上传视频按钮 */}
-        {canUploadVideo && (
-          <div>
-            <button
-              onClick={handleManualUploadVideo}
-              disabled={uploading}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>处理中...</span>
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4" />
-                  <span>立即上传视频</span>
-                </>
-              )}
-            </button>
-            <p className="text-xs text-gray-500 mt-1">
-              {status === '200' ? '视频已准备就绪，可以立即上传' : '视频上传失败，可以重试'}
+          <div className="space-y-2">
+            {/* 手动上传视频按钮 */}
+            {canUploadVideo && (
+              <div>
+                <button
+                  onClick={handleManualUploadVideo}
+                  disabled={uploading}
+                  className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>处理中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>立即上传视频</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-xs text-gray-500 mt-1">
+                  {status === '200' && '视频已准备就绪，可以立即上传'}
+                  {status === '205' && '等待手动上传，点击按钮立即上传'}
+                  {status === '299' && '视频上传失败，可以重试'}
+                </p>
+              </div>
+            )}
+
+            {/* 手动上传字幕按钮 */}
+            {canUploadSubtitle && (
+              <div>
+                <button
+                  onClick={handleManualUploadSubtitle}
+                  disabled={uploading}
+                  className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>处理中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="w-4 h-4" />
+                      <span>立即上传字幕</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-xs text-gray-500 mt-1">
+                  {status === '300' ? '视频已上传，可以立即上传字幕' : '字幕上传失败，可以重试'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* 提示信息 */}
+          <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-xs text-yellow-800">
+              💡 <strong>提示：</strong>手动上传会打断定时任务队列，建议只在紧急情况下使用。
             </p>
           </div>
-        )}
-
-        {/* 手动上传字幕按钮 */}
-        {canUploadSubtitle && (
-          <div>
-            <button
-              onClick={handleManualUploadSubtitle}
-              disabled={uploading}
-              className="w-full flex items-center justify-center space-x-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>处理中...</span>
-                </>
-              ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  <span>立即上传字幕</span>
-                </>
-              )}
-            </button>
-            <p className="text-xs text-gray-500 mt-1">
-              {status === '300' ? '视频已上传，可以立即上传字幕' : '字幕上传失败，可以重试'}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* 提示信息 */}
-      <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-        <p className="text-xs text-yellow-800">
-          💡 <strong>提示：</strong>手动上传会打断定时任务队列，建议只在紧急情况下使用。
-        </p>
-      </div>
         </div>
       )}
 
@@ -244,7 +252,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
             </>
           )}
         </button>
-        
+
         <p className="text-xs text-gray-500 mt-2">
           删除后将无法恢复，请谨慎操作
         </p>
