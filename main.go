@@ -20,6 +20,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/difyz9/ytb2bili/internal/handler"
 	"github.com/difyz9/ytb2bili/internal/membership"
+	"github.com/difyz9/ytb2bili/internal/migration"
 	"github.com/difyz9/ytb2bili/internal/web"
 	"github.com/difyz9/ytb2bili/pkg/analytics"
 	"github.com/difyz9/ytb2bili/pkg/cos"
@@ -145,6 +146,8 @@ func main() {
 		fx.Provide(services.NewSavedVideoService),
 		fx.Provide(services.NewTaskStepService),
 		fx.Provide(services.NewBiliAccountService),
+		fx.Provide(services.NewUserConfigService),
+		fx.Provide(services.NewAIConfigResolver),
 
 		// 认证系统
 		fx.Provide(func() *auth.JWTService {
@@ -189,7 +192,14 @@ func main() {
 		// 初始化数据库
 		fx.Invoke(func(db *gorm.DB, logger *zap.SugaredLogger) error {
 			logger.Info("Running database migrations...")
-			return store.MigrateDatabase(db)
+			if err := store.MigrateDatabase(db); err != nil {
+				return err
+			}
+			// 运行角色系统迁移（自动添加 role 字段）
+			if err := migration.MigrateAll(db); err != nil {
+				logger.Warnf("Role migration skipped or failed: %v", err)
+			}
+			return nil
 		}),
 
 		// 初始化并检查 yt-dlp
@@ -258,6 +268,7 @@ func main() {
 			authHandler *auth.AuthHandler,
 			authMiddleware *auth.AuthMiddleware,
 			biliAccountService *services.BiliAccountService,
+			userConfigService *services.UserConfigService,
 		) {
 			// 初始化服务器
 			server.Init(db)
@@ -269,7 +280,7 @@ func main() {
 			}
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -484,6 +495,7 @@ func registerHandlers(
 	authHandler *auth.AuthHandler,
 	authMiddleware *auth.AuthMiddleware,
 	biliAccountService *services.BiliAccountService,
+	userConfigService *services.UserConfigService,
 ) {
 	logger.Info("Registering handlers...")
 
@@ -499,8 +511,8 @@ func registerHandlers(
 
 	// 上传 Handler
 	uploadHandler := handler.NewUploadHandler(server)
-	uploadHandler.RegisterRoutes(server)
-	logger.Info("✓ Upload routes registered")
+	uploadHandler.RegisterRoutes(server, authMiddleware)
+	logger.Info("✓ Upload routes registered (JWT protected)")
 
 	// 分类 Handler
 	categoryHandler := handler.NewCategoryHandler(server)
@@ -536,8 +548,13 @@ func registerHandlers(
 
 	// 配置 Handler
 	configHandler := handler.NewConfigHandler(server)
-	configHandler.RegisterRoutes(server)
+	configHandler.RegisterRoutes(server, authMiddleware)
 	logger.Info("✓ Config routes registered")
+
+	// 用户配置 Handler
+	userConfigHandler := handler.NewUserConfigHandler(server, userConfigService)
+	userConfigHandler.RegisterRoutes(server, authMiddleware)
+	logger.Info("✓ User Config routes registered")
 
 	// 会员 Handler（使用可选 JWT 中间件获取用户 ID）
 	membershipGroup := server.Engine.Group("/api/v1")

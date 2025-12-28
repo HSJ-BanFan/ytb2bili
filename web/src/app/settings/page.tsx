@@ -26,10 +26,21 @@ export default function SettingsPage() {
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
 
+  // 获取认证头
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('jwt_token');
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    };
+  };
+
   // Fetch download config from backend
   const fetchDownloadConfig = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/config/download');
+      const res = await fetch('/api/v1/config/download', {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       if (data.code === 200) {
         setAutoUpload(data.data.auto_upload_enabled);
@@ -62,9 +73,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch('/api/v1/config/download', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(newConfig),
       });
       const data = await res.json();

@@ -88,6 +88,15 @@ const getApiBaseUrl = () => {
   return 'http://localhost:8096';
 };
 
+// 获取认证头
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('jwt_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  };
+};
+
 export default function AIModelSettings() {
   // 状态
   const [config, setConfig] = useState<OpenAICompatibleConfig>({
@@ -140,7 +149,9 @@ export default function AIModelSettings() {
   const loadConfig = useCallback(async () => {
     try {
       const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible`);
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible`, {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (data.code === 200 && data.data) {
         setConfig(data.data);
@@ -154,7 +165,9 @@ export default function AIModelSettings() {
   const loadProviders = useCallback(async () => {
     try {
       const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible/providers`);
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible/providers`, {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (data.code === 200 && data.data) {
         setProviders(data.data);
@@ -168,7 +181,9 @@ export default function AIModelSettings() {
   const loadServicesStatus = useCallback(async () => {
     try {
       const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/v1/config/ai-services/status`);
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/ai-services/status`, {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (data.code === 200 && data.data) {
         setServicesStatus(data.data);
@@ -182,7 +197,9 @@ export default function AIModelSettings() {
   const loadGeminiConfig = useCallback(async () => {
     try {
       const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`);
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (data.code === 200 && data.data) {
         setGeminiConfig(data.data);
@@ -219,7 +236,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updateData),
       });
       
@@ -269,7 +286,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible/test`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(testData),
       });
       
@@ -319,7 +336,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/ai-services/primary`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ provider }),
       });
       
@@ -371,7 +388,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updateData),
       });
       
@@ -405,7 +422,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           api_keys: [], // 发送空数组来清空
           clear_api_keys: true, // 明确标记要清空
@@ -435,7 +452,9 @@ export default function AIModelSettings() {
     setGeminiRefreshing(true);
     try {
       const apiBaseUrl = getApiBaseUrl();
-      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/models`);
+      const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/models`, {
+        headers: getAuthHeaders(),
+      });
       const data = await response.json();
       if (data.code === 200 && data.data?.models) {
         alert(`可用模型: ${data.data.models.join(', ')}`);
@@ -458,7 +477,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/validate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {

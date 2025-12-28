@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	bilibili2 "github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/pkg/cos"
@@ -24,10 +25,12 @@ func NewUploadHandler(app *core.AppServer) *UploadHandler {
 }
 
 // RegisterRoutes 注册上传相关路由
-func (h *UploadHandler) RegisterRoutes(server *core.AppServer) {
+func (h *UploadHandler) RegisterRoutes(server *core.AppServer, authMiddleware *auth.AuthMiddleware) {
 	api := server.Engine.Group("/api/v1")
 
+	// 上传相关路由需要 JWT 认证
 	upload := api.Group("/upload")
+	upload.Use(authMiddleware.JWTAuth())
 	{
 		upload.POST("/video", h.uploadVideo)
 		upload.POST("/cover", h.uploadCover)
