@@ -16,6 +16,7 @@ const (
 	ContextKeyUserID   = "user_id"
 	ContextKeyUsername = "username"
 	ContextKeyUserTier = "user_tier"
+	ContextKeyUserRole = "user_role" // 用户角色: admin/user
 	ContextKeyAppID    = "app_id"
 	ContextKeyApp      = "app"
 	ContextKeyClaims   = "claims"
@@ -205,6 +206,21 @@ func (m *AuthMiddleware) JWTAuth() gin.HandlerFunc {
 		c.Set(ContextKeyUserTier, claims.Tier)
 		c.Set(ContextKeyClaims, claims)
 
+		// 从数据库加载用户角色
+		var user struct {
+			Role string `gorm:"column:role"`
+		}
+		if err := m.db.Table("cw_users").Select("role").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+			// 查询失败，默认为普通用户
+			c.Set(ContextKeyUserRole, "user")
+		} else {
+			// 检查角色是否为空，如果为空则默认为 user
+			if user.Role == "" {
+				user.Role = "user"
+			}
+			c.Set(ContextKeyUserRole, user.Role)
+		}
+
 		c.Next()
 	}
 }
@@ -230,6 +246,19 @@ func (m *AuthMiddleware) OptionalJWTAuth() gin.HandlerFunc {
 			c.Set(ContextKeyUsername, claims.Username)
 			c.Set(ContextKeyUserTier, claims.Tier)
 			c.Set(ContextKeyClaims, claims)
+
+			// 从数据库加载用户角色
+			var user struct {
+				Role string `gorm:"column:role"`
+			}
+			if err := m.db.Table("cw_users").Select("role").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+				c.Set(ContextKeyUserRole, "user")
+			} else {
+				if user.Role == "" {
+					user.Role = "user"
+				}
+				c.Set(ContextKeyUserRole, user.Role)
+			}
 		}
 
 		c.Next()

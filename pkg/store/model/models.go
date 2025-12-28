@@ -55,6 +55,9 @@ type User struct {
 	LastLoginAt *time.Time `json:"last_login_at"`
 	BiliMid     string     `gorm:"index;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号（允许为空）
 
+	// 权限和角色
+	Role        string     `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user（与会员等级解耦）
+
 	// 会员系统字段
 	MembershipTier   string     `gorm:"size:20;default:free" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
 	MembershipExpire *time.Time `json:"membership_expire"`                           // 会员到期时间

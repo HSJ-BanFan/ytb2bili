@@ -11,54 +11,63 @@ import (
 	"sync"
 	"time"
 
+	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type ConfigHandler struct {
 	BaseHandler
+	db *gorm.DB
 }
 
 func NewConfigHandler(app *core.AppServer) *ConfigHandler {
 	return &ConfigHandler{
 		BaseHandler: BaseHandler{App: app},
+		db:          app.DB,
 	}
 }
 
 // RegisterRoutes 注册配置相关路由
-func (h *ConfigHandler) RegisterRoutes(server *core.AppServer) {
+func (h *ConfigHandler) RegisterRoutes(server *core.AppServer, authMiddleware *auth.AuthMiddleware) {
 	api := server.Engine.Group("/api/v1")
+
+	// 先进行JWT认证，确保用户已登录
+	api.Use(authMiddleware.JWTAuth())
+
+	// 然后加载用户角色（JWTAuth已包含角色加载，这里再调用一次也无妨）
+	api.Use(auth.LoadUserRole(h.db))
 
 	config := api.Group("/config")
 	{
+		// 公开端点（所有登录用户可读取）
 		config.GET("/deepseek", h.getDeepSeekConfig)
-		config.PUT("/deepseek", h.updateDeepSeekConfig)
 		config.GET("/proxy", h.getProxyConfig)
-		config.PUT("/proxy", h.updateProxyConfig)
-
-		// OpenAI兼容API配置
 		config.GET("/openai-compatible", h.getOpenAICompatibleConfig)
-		config.PUT("/openai-compatible", h.updateOpenAICompatibleConfig)
-		config.POST("/openai-compatible/test", h.testOpenAICompatibleAPI)
 		config.GET("/openai-compatible/providers", h.getOpenAICompatibleProviders)
-
-		// AI服务状态
 		config.GET("/ai-services/status", h.getAIServicesStatus)
-		config.PUT("/ai-services/primary", h.setPrimaryAIService)
-
-		// Gemini原生配置（用于元数据生成）
 		config.GET("/gemini", h.getGeminiConfig)
-		config.PUT("/gemini", h.updateGeminiConfig)
-		config.POST("/gemini/validate", h.validateGeminiApiKeys)
 		config.GET("/gemini/models", h.getGeminiModels)
-
-		// Download configuration
 		config.GET("/download", h.getDownloadConfig)
-		config.PUT("/download", h.updateDownloadConfig)
+
+		// 管理员端点（仅管理员可修改）
+		adminConfig := config.Group("")
+		adminConfig.Use(auth.RequireAdmin())
+		{
+			adminConfig.PUT("/deepseek", h.updateDeepSeekConfig)
+			adminConfig.PUT("/proxy", h.updateProxyConfig)
+			adminConfig.PUT("/openai-compatible", h.updateOpenAICompatibleConfig)
+			adminConfig.POST("/openai-compatible/test", h.testOpenAICompatibleAPI)
+			adminConfig.PUT("/ai-services/primary", h.setPrimaryAIService)
+			adminConfig.PUT("/gemini", h.updateGeminiConfig)
+			adminConfig.POST("/gemini/validate", h.validateGeminiApiKeys)
+			adminConfig.PUT("/download", h.updateDownloadConfig)
+		}
 	}
 }
 
