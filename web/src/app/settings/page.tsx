@@ -1,12 +1,175 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
-import QRLogin from '@/components/auth/QRLogin';
 import AIModelSettings from '@/components/settings/AIModelSettings';
 import { useAuth } from '@/hooks/useAuth';
 import { authApi, BiliAccount } from '@/lib/api';
-import { Settings, Bot, Upload, User, Link2, CheckCircle, AlertCircle, Trash2, Star, ToggleLeft, ToggleRight, Plus, RefreshCw } from 'lucide-react';
+import { Settings, Bot, Upload, User, Link2, CheckCircle, AlertCircle, Trash2, Star, ToggleLeft, ToggleRight, Plus, RefreshCw, XCircle } from 'lucide-react';
+
+// 扫码绑定组件
+interface QRBindComponentProps {
+  onBindSuccess: () => void;
+  onCancel: () => void;
+}
+
+function QRBindComponent({ onBindSuccess, onCancel }: QRBindComponentProps) {
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [qrStatus, setQrStatus] = useState<'idle' | 'loading' | 'waiting' | 'success' | 'error'>('loading');
+  const [message, setMessage] = useState<string>('正在生成二维码...');
+
+  // 使用 useRef 追踪轮询是否应该停止（组件卸载时设置为 true）
+  const pollingStoppedRef = useRef(false);
+
+  // Define pollQRCodeStatus first
+  const pollQRCodeStatus = useCallback(async (authCode: string) => {
+    const maxAttempts = 60;
+    let attempts = 0;
+
+    const poll = async () => {
+      // 如果已停止或超过最大次数，不再继续
+      if (pollingStoppedRef.current || attempts >= maxAttempts) {
+        if (attempts >= maxAttempts && !pollingStoppedRef.current) {
+          setQrStatus('error');
+          setMessage('二维码已过期');
+        }
+        return;
+      }
+
+      try {
+        // 后端使用 POST /api/v1/auth/poll 进行轮询
+        const response = await fetch('/api/v1/auth/poll', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auth_code: authCode }),
+        });
+        const data = await response.json();
+
+        if (pollingStoppedRef.current) return; // 再次检查，避免组件卸载后更新状态
+
+        if (data.code === 0 && data.login_info) {
+          pollingStoppedRef.current = true; // 标记为已停止，防止继续轮询
+          setQrStatus('success');
+          setMessage('扫码成功，正在绑定...');
+
+          // 调用绑定接口
+          const bindResponse = await authApi.bindBiliAccountFromQRCode();
+          if (bindResponse.code === 0) {
+            setTimeout(() => onBindSuccess(), 500);
+          } else {
+            setQrStatus('error');
+            setMessage(bindResponse.message || '绑定失败');
+          }
+          return; // 成功后停止轮询
+        } else if (data.code === 86038 || data.message?.includes('过期')) {
+          pollingStoppedRef.current = true;
+          setQrStatus('error');
+          setMessage('二维码已过期');
+          return; // 过期后停止轮询
+        } else if (data.code === 86090) {
+          // 已扫码，等待确认，继续轮询
+        }
+
+        attempts++;
+        if (!pollingStoppedRef.current) {
+          setTimeout(poll, 3000);
+        }
+      } catch (error) {
+        if (pollingStoppedRef.current) return;
+        attempts++;
+        if (!pollingStoppedRef.current) {
+          setTimeout(poll, 3000);
+        }
+      }
+    };
+
+    poll();
+  }, [onBindSuccess]); // Add onBindSuccess to dependencies
+
+  const generateQRCode = useCallback(async () => {
+    try {
+      const response = await fetch('/api/v1/auth/qrcode');
+      const data = await response.json();
+
+      // 后端返回格式: { code: 0, message: "success", qr_code_url: "...", auth_code: "..." }
+      if (data.code === 0 && data.qr_code_url) {
+        setQrCodeUrl(data.qr_code_url);
+        setQrStatus('waiting');
+        setMessage('请使用 B站APP 扫描二维码');
+        pollQRCodeStatus(data.auth_code);
+      } else {
+        throw new Error(data.message || '获取二维码失败');
+      }
+    } catch (error: any) {
+      setQrStatus('error');
+      setMessage(error.message || '获取二维码失败');
+    }
+  }, [pollQRCodeStatus]); // Add pollQRCodeStatus to dependencies
+
+  useEffect(() => {
+    // 重置轮询停止标志
+    pollingStoppedRef.current = false;
+    generateQRCode();
+
+    // 清理函数：组件卸载时停止轮询
+    return () => {
+      pollingStoppedRef.current = true;
+    };
+  }, [generateQRCode]);
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      {qrStatus === 'waiting' && qrCodeUrl && (
+        <>
+          <img
+            src={qrCodeUrl}
+            alt="扫码绑定"
+            className="w-48 h-48 border rounded-lg"
+          />
+          <p className="text-sm text-gray-600">{message}</p>
+        </>
+      )}
+
+      {qrStatus === 'loading' && (
+        <div className="text-center py-8">
+          <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="mt-2 text-gray-600">{message}</p>
+        </div>
+      )}
+
+      {qrStatus === 'success' && (
+        <div className="text-center py-4">
+          <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-2" />
+          <p className="text-green-600">{message}</p>
+        </div>
+      )}
+
+      {qrStatus === 'error' && (
+        <div className="text-center py-4">
+          <XCircle className="w-12 h-12 text-red-500 mx-auto mb-2" />
+          <p className="text-red-600 mb-3">{message}</p>
+          <button
+            onClick={() => {
+              setQrStatus('loading');
+              setMessage('正在生成二维码...');
+              generateQRCode();
+            }}
+            className="text-blue-600 hover:text-blue-700"
+          >
+            重新生成
+          </button>
+        </div>
+      )}
+
+      <button
+        onClick={onCancel}
+        className="text-sm text-gray-500 hover:text-gray-700 mt-2"
+      >
+        取消
+      </button>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
@@ -496,7 +659,7 @@ export default function SettingsPage() {
                           {/* 设为主账号 */}
                           {!account.is_primary && account.is_enabled && !account.is_expired && (
                             <button
-                              onClick={() => handleSetPrimary(account.mid)}
+                              onClick={() => handleSetPrimary(account.mid!)}
                               className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
                               title="设为主账号"
                             >
@@ -506,7 +669,7 @@ export default function SettingsPage() {
                           {/* 启用/禁用 */}
                           {!account.is_primary && (
                             <button
-                              onClick={() => handleToggleEnabled(account.mid, account.is_enabled)}
+                              onClick={() => handleToggleEnabled(account.mid!, account.is_enabled)}
                               className={`p-2 rounded-lg transition-colors ${account.is_enabled
                                 ? 'text-green-600 hover:bg-green-100'
                                 : 'text-gray-400 hover:bg-gray-100'
@@ -522,7 +685,7 @@ export default function SettingsPage() {
                           )}
                           {/* 删除 */}
                           <button
-                            onClick={() => handleRemoveAccount(account.mid)}
+                            onClick={() => handleRemoveAccount(account.mid!)}
                             className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
                             title="删除账号"
                           >
@@ -549,18 +712,14 @@ export default function SettingsPage() {
                   </button>
                 ) : (
                   <div className="border rounded-lg p-4">
-                    <div className="flex justify-between items-center mb-4">
-                      <span className="text-sm text-gray-600">请使用 Bilibili 手机客户端扫描二维码</span>
-                      <button
-                        onClick={() => setShowBindQR(false)}
-                        className="text-sm text-gray-500 hover:text-gray-700"
-                      >
-                        取消
-                      </button>
-                    </div>
-                    <QRLogin
-                      onLoginSuccess={handleBiliBindSuccess}
-                      onRefreshStatus={checkBiliStatus}
+                    <QRBindComponent
+                      onBindSuccess={() => {
+                        setShowBindQR(false);
+                        checkBiliStatus();
+                        loadAccounts();
+                        handleRefreshStatus();
+                      }}
+                      onCancel={() => setShowBindQR(false)}
                     />
                   </div>
                 )}
@@ -583,6 +742,6 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
-    </AppLayout>
+    </AppLayout >
   );
 }

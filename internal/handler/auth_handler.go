@@ -269,8 +269,14 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 		}
 	}
 
-	// 扫码成功，返回登录信息
-	// 前端收到后会调用 /auth/accounts POST 接口保存到数据库
+	// 扫码成功，保存登录信息到 BiliStore 供 bindFromQRCode 使用
+	biliStore := internalAuth.GetBiliStore()
+	if biliStore != nil {
+		biliStore.Save(loginInfo)
+		log.Printf("[pollQRCode] 登录信息已保存到 BiliStore")
+	}
+
+	// 前端收到后会调用 /auth/accounts POST 或 /bili-accounts/bind-from-qrcode 接口保存到数据库
 	log.Printf("[pollQRCode] 扫码成功, Mid: %d, Name: %s", loginInfo.TokenInfo.Mid, loginInfo.TokenInfo.Uname)
 
 	c.JSON(http.StatusOK, PollQRCodeResponse{

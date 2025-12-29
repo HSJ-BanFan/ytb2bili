@@ -167,7 +167,13 @@ func (h *UserLogHelper) TaskLog(videoID, action, status string, fields map[strin
 	}
 
 	prefix := fmt.Sprintf("%s%s", h.formatPrefix(), icon)
-	h.logger.Info(prefix, allFields...)
+
+	// 根据状态选择日志级别：skipped 使用 debug 避免免费用户日志刷屏
+	if status == "skipped" {
+		h.logger.Debug(prefix, allFields...)
+	} else {
+		h.logger.Info(prefix, allFields...)
+	}
 }
 
 // WithFields 带任意字段的日志

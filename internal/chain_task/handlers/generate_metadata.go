@@ -193,8 +193,10 @@ func (g *GenerateMetadata) executeWithFallbackAI(ctx map[string]interface{}) boo
 		return g.executeWithDeepSeek(ctx)
 	}
 
-	g.App.Logger.Error("❌ 所有AI服务都不可用，无法生成元数据")
-	return false
+	// 所有AI服务都不可用，设置跳过状态
+	g.App.Logger.Warn("⚠️ 所有AI服务不可用，跳过元数据生成")
+	ctx["skipped"] = "AI服务不可用(Gemini地区限制/额度不足/网络错误)"
+	return true
 }
 
 // executeWithAIManager 使用AI服务管理器生成元数据（首选方式）
@@ -204,7 +206,9 @@ func (g *GenerateMetadata) executeWithAIManager(ctx map[string]interface{}) bool
 	// 1. 检查字幕文件（优先中文，其次英文）
 	srtPath := g.findSubtitleForMetadata()
 	if srtPath == "" {
-		g.App.Logger.Warn("⚠️ 未找到任何字幕文件，使用默认标题和描述")
+		reason := "未找到字幕文件，无法进行AI增强"
+		g.App.Logger.Warnf("⚠️ %s", reason)
+		ctx["skipped"] = reason
 		ctx["video_title"] = g.StateManager.VideoID
 		ctx["video_description"] = "包含字幕的视频"
 		return true
@@ -362,9 +366,9 @@ func (g *GenerateMetadata) executeWithDeepSeek(context map[string]interface{}) b
 	// 0. 动态获取最新的DeepSeek客户端
 	client, err := g.getCurrentDeepSeekClient()
 	if err != nil {
-		g.App.Logger.Errorf("❌ 获取 DeepSeek 客户端失败: %v", err)
-		g.App.Logger.Warn("⚠️ 使用默认标题和描述")
-		// 使用默认值而不是失败
+		reason := fmt.Sprintf("DeepSeek 服务不可用: %v", err)
+		g.App.Logger.Warnf("⚠️ %s", reason)
+		context["skipped"] = reason
 		context["video_title"] = g.StateManager.VideoID
 		context["video_description"] = "包含字幕的视频"
 		return true
@@ -377,7 +381,9 @@ func (g *GenerateMetadata) executeWithDeepSeek(context map[string]interface{}) b
 	// 1. 检查字幕文件（优先中文，其次英文）
 	srtPath := g.findSubtitleForMetadata()
 	if srtPath == "" {
-		g.App.Logger.Warn("⚠️ 未找到任何字幕文件，使用默认标题和描述")
+		reason := "未找到字幕文件，无法进行AI增强"
+		g.App.Logger.Warnf("⚠️ %s", reason)
+		context["skipped"] = reason
 		context["video_title"] = g.StateManager.VideoID
 		context["video_description"] = "包含字幕的视频"
 		return true

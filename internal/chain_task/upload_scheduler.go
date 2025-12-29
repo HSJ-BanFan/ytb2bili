@@ -330,6 +330,12 @@ func (s *UploadScheduler) uploadNextVideo() error {
 			map[string]interface{}{
 				"has_subtitle": false,
 			})
+
+		// 将"上传字幕到Bilibili"任务步骤标记为跳过，避免UI显示waiting
+		if s.TaskStepService != nil {
+			s.TaskStepService.UpdateTaskStepStatus(video.VideoID, "上传字幕到Bilibili", "skipped", "视频没有字幕数据")
+		}
+
 		// 触发自动清理
 		s.triggerAutoCleanup(video.VideoID)
 	}
