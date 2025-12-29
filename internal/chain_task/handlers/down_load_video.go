@@ -384,7 +384,7 @@ func (t *DownloadVideo) executeDownloadWithAuthMode(ytdlpPath, videoURL string, 
 		"--extractor-retries", "5",
 		"--write-subs",
 		"--write-auto-subs",
-		"--sub-langs", "en,zh-Hans",
+		"--sub-langs", "en.*,zh.*,ja.*", // 匹配所有英文、中文、日文变体
 		"--sub-format", "srt/best",
 		"--convert-subs", "srt",
 		"--no-abort-on-error",
@@ -587,10 +587,10 @@ func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy boo
 		"--socket-timeout", "30", // Socket 超时（秒）
 		"--file-access-retries", "5", // 文件访问重试
 		"--extractor-retries", "5", // 提取器重试
-		// 字幕下载参数（只下载必要的语言，减少冗余文件）
-		"--write-subs",              // 下载字幕
-		"--write-auto-subs",         // 下载自动生成的字幕
-		"--sub-langs", "en,zh-Hans", // 只下载英文和简体中文字幕
+		// 字幕下载参数（使用通配符匹配所有变体）
+		"--write-subs",                  // 下载字幕
+		"--write-auto-subs",             // 下载自动生成的字幕
+		"--sub-langs", "en.*,zh.*,ja.*", // 匹配所有英文、中文、日文变体
 		"--sub-format", "srt/best", // 字幕格式优先级
 		"--convert-subs", "srt", // 转换为 SRT 格式
 		// 错误处理
