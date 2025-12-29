@@ -47,14 +47,25 @@ export interface TaskProgress {
 export interface VideoDetail {
   id: number;
   video_id: string;
-  title: string;
+  title: string; // 原始标题（YouTube）
+  description?: string; // 原始描述（YouTube）
   url: string;
   status: VideoStatus;
   created_at: string;
   updated_at: string;
+
+  // AI 生成的元数据
   generated_title?: string;
-  generated_description?: string;
+  generated_desc?: string;
   generated_tags?: string;
+
+  // 最终上传使用的元数据
+  upload_title?: string;
+  upload_desc?: string;
+  upload_tags?: string;
+  metadata_source?: 'original' | 'ai_generated' | 'user_edited';
+  metadata_edit_status?: 'auto' | 'pending_review' | 'edited';
+
   cover_image?: string;
   task_steps: TaskStep[];
   progress: TaskProgress;
@@ -137,6 +148,7 @@ export const TASK_STEP_STATUS_MAP = {
   'completed': { label: '已完成', className: 'bg-green-100 text-green-800', color: 'green' },
   'failed': { label: '失败', className: 'bg-red-100 text-red-800', color: 'red' },
   'skipped': { label: '已跳过', className: 'bg-yellow-100 text-yellow-800', color: 'yellow' },
+  'failed_permanent': { label: '永久失败', className: 'bg-red-200 text-red-900', color: 'red' },
 } as const;
 
 export const TASK_STEP_NAMES = {
@@ -149,10 +161,12 @@ export const TASK_STEP_NAMES = {
   // 中文步骤名映射（后端使用中文名）
   '获取元数据': '获取元数据',
   '下载视频': '下载视频',
-  '生成字幕': '生成字幕',
+  '下载字幕': '下载字幕',
   '下载封面': '下载封面',
   '翻译字幕': '翻译字幕',
-  '生成元数据': '生成元数据',
+  'AI增强元数据': 'AI增强元数据',
+  '生成元数据': '生成元数据', // 旧名称，兼容
+  '确认元数据': '确认元数据',
   '上传到Bilibili': '上传到Bilibili',
   '上传字幕到Bilibili': '上传字幕到Bilibili',
 } as const;

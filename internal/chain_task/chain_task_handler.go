@@ -310,43 +310,66 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		SetVideoID(video.VideoId)
 
 	// ═══════════════════════════════════════════════════════════════
-	// 任务流程（按依赖关系排序）:
+	// 任务流程（按依赖关系组织，支持并行执行）:
 	// ┌────┬─────────────┬─────────────────────┬──────┬────────────┐
 	// │序号│   任务名    │        依赖         │ 必需 │  失败处理  │
 	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
 	// │ 1  │ 获取元数据  │        无           │  是  │  终止链    │
-	// │ 2  │ 下载封面    │    获取元数据       │  是  │  终止链    │
-	// │ 3  │ 下载字幕    │        无           │  否  │  继续执行  │
+	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
+	// │ 2a │ 下载封面    │    获取元数据       │  是  │  终止链    │
+	// │ 2b │ 下载视频    │    获取元数据       │  否  │  继续执行  │
+	// │ 2c │ AI增强元数据│    获取元数据       │  否  │    跳过    │
+	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
+	// │ 3  │ 下载字幕    │      下载视频       │  否  │  继续执行  │
+	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
 	// │ 4  │ 翻译字幕    │      下载字幕       │  否  │    跳过    │
-	// │ 5  │ 下载视频    │        无           │  否  │  继续执行  │
-	// │ 6  │ 生成元数据  │ 获取元数据,翻译字幕 │  否  │    跳过    │
+	// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
+	// │ 5  │ 确认元数据  │ AI增强+翻译字幕     │  是  │  终止链    │
 	// └────┴─────────────┴─────────────────────┴──────┴────────────┘
+	//
+	// 并行说明：
+	// - Group 2a, 2b, 2c 可以并行执行（都只依赖 Group 1）
+	// - AI增强元数据可以和下载并行，节省总时间
+	// - 确认元数据等待 AI 和翻译都完成后才执行
+	//
 	// 注意: 上传任务由 UploadScheduler 定时执行
 	// ═══════════════════════════════════════════════════════════════
 
-	// 任务1: 获取元数据（无依赖，必需）
+	// ═══════════════════════════════════════════════════════════════
+	// 任务执行顺序（必须按依赖关系排列）：
+	// 1. 获取元数据 (无依赖)
+	// 2. 下载视频   (无依赖)
+	// 3. 下载字幕   (无依赖)
+	// 4. 下载封面   (依赖: 获取元数据)
+	// 5. 翻译字幕   (依赖: 下载字幕)
+	// 6. AI增强元数据 (依赖: 下载视频, 翻译字幕)  ← 必须在翻译字幕之后
+	// 7. 确认元数据   (依赖: AI增强元数据)
+	// ═══════════════════════════════════════════════════════════════
+
+	// Group 1: 基础任务（无依赖或仅依赖获取元数据）
 	fetchMetadataTask := handlers.NewFetchMetadata("获取元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(fetchMetadataTask, video.VideoId))
 
-	// 任务2: 下载封面（依赖: 获取元数据，必需）
-	coverTask := handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
-	chain.AddTask(h.wrapTaskWithStepTracking(coverTask, video.VideoId))
-
-	// 任务3: 下载字幕（无依赖，非必需）- 使用 yt-dlp --skip-download 单独下载字幕
-	subtitleTask := handlers.NewGenerateSubtitles("下载字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
-	chain.AddTask(h.wrapTaskWithStepTracking(subtitleTask, video.VideoId))
-
-	// 任务4: 翻译字幕（依赖: 下载字幕，非必需）
-	translateTask := handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
-	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
-
-	// 任务5: 下载视频（无依赖，非必需）
 	downloadTask := handlers.NewDownloadVideo("下载视频", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(downloadTask, video.VideoId))
 
-	// 任务6: 生成元数据（依赖: 获取元数据+翻译字幕，非必需）
-	metadataTask := handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
+	subtitleTask := handlers.NewGenerateSubtitles("下载字幕", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(subtitleTask, video.VideoId))
+
+	coverTask := handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
+	chain.AddTask(h.wrapTaskWithStepTracking(coverTask, video.VideoId))
+
+	// Group 2: 翻译字幕（依赖下载字幕）
+	translateTask := handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
+	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
+
+	// Group 3: AI增强元数据（依赖下载视频和翻译字幕） ← 必须在翻译字幕之后
+	metadataTask := handlers.NewGenerateMetadata("AI增强元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(metadataTask, video.VideoId))
+
+	// Group 4: 确认最终元数据（依赖 AI增强元数据）
+	confirmMetadataTask := handlers.NewConfirmMetadata("确认元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
+	chain.AddTask(h.wrapTaskWithStepTracking(confirmMetadataTask, video.VideoId))
 
 	// 执行任务链
 	startTime := time.Now()
@@ -359,7 +382,12 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 
 	// 根据执行结果更新任务状态
 	if success {
-		if err := h.updateSavedVideoStatus(video.Id, "200"); err != nil {
+		// 更新状态为 200 并设置处理完成时间（用于延迟上传调度）
+		now := time.Now()
+		if err := h.Db.Table("cw_saved_videos").Where("id = ?", video.Id).Updates(map[string]interface{}{
+			"status":                  "200",
+			"processing_completed_at": now,
+		}).Error; err != nil {
 			h.App.Logger.Errorf("更新任务状态为完成时出错: %v", err)
 		}
 		userLogger.TaskLog(video.VideoId, "task_chain", "completed",
@@ -367,6 +395,7 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 				"duration_seconds": duration.Seconds(),
 				"failed_tasks":     len(chain.FailedTasks),
 			})
+		h.App.Logger.Infof("✅ 任务链完成，视频准备就绪 (处理完成时间: %s)", now.Format("15:04:05"))
 	} else {
 		if err := h.updateSavedVideoStatus(video.Id, "999"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为失败时出错: %v", err)
@@ -478,8 +507,10 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		task = handlers.NewDownloadImgHandler("下载封面", h.App, stateManager, h.App.CosClient)
 	case "翻译字幕":
 		task = handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
-	case "生成元数据":
-		task = handlers.NewGenerateMetadata("生成元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
+	case "生成元数据", "AI增强元数据": // 支持新旧两种名称
+		task = handlers.NewGenerateMetadata("AI增强元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
+	case "确认元数据":
+		task = handlers.NewConfirmMetadata("确认元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "上传到Bilibili":
 		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
 	case "上传字幕到Bilibili":
@@ -568,7 +599,9 @@ func (w *TaskStepWrapper) InsertTask() error {
 }
 
 func (w *TaskStepWrapper) UpdateStatus(status, message string) error {
-	return w.task.UpdateStatus(status, message)
+	// 直接更新数据库中的步骤状态
+	stepName := w.task.GetName()
+	return w.taskStepService.UpdateTaskStepStatus(w.videoID, stepName, status, message)
 }
 
 func (w *TaskStepWrapper) Execute(context map[string]interface{}) bool {

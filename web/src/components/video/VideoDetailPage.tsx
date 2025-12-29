@@ -7,6 +7,7 @@ import { videoApi } from '@/lib/api';
 import TaskStepList from './TaskStepList';
 import StatusBadge from '@/components/ui/StatusBadge';
 import VideoActions from './VideoActions';
+import { MetadataSourceBadge, MetadataComparison } from '@/components/MetadataSourceBadge';
 
 interface VideoDetailPageProps {
   videoId: string;
@@ -22,7 +23,7 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
   const fetchVideoDetail = async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
     else setLoading(true);
-    
+
     try {
       const response = await videoApi.getVideoDetail(videoId);
       if (response.code === 200 || response.code === 0) {
@@ -201,10 +202,10 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
                     <span>ID: {video.video_id}</span>
                   </div>
                 </div>
-                
+
                 <div className="flex flex-col items-end space-y-2">
                   <StatusBadge status={video.status} />
-                  
+
                   {video.cover_image && (
                     <a
                       href={video.cover_image}
@@ -219,29 +220,58 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
                 </div>
               </div>
 
-              {/* 描述信息 */}
-              {video.generated_description && (
-                <div className="mb-4">
-                  <h3 className="text-sm font-medium text-gray-900 mb-2">生成的描述</h3>
-                  <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 whitespace-pre-wrap">
-                    {video.generated_description}
+              {/* 元数据来源信息 */}
+              {video.metadata_source && (
+                <div className="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-100">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-gray-900">元数据来源</h3>
+                    <MetadataSourceBadge source={video.metadata_source} />
+                  </div>
+
+                  {/* 标题三栏对比 */}
+                  <MetadataComparison
+                    label="标题"
+                    original={video.title}
+                    generated={video.generated_title}
+                    upload={video.upload_title}
+                    source={video.metadata_source}
+                    maxLength={80}
+                  />
+
+                  {/* 描述三栏对比 */}
+                  <div className="mt-4">
+                    <MetadataComparison
+                      label="描述"
+                      original={video.description}
+                      generated={video.generated_desc}
+                      upload={video.upload_desc}
+                      source={video.metadata_source}
+                      maxLength={150}
+                    />
                   </div>
                 </div>
               )}
 
               {/* 标签 */}
-              {video.generated_tags && (
+              {(video.upload_tags || video.generated_tags) && (
                 <div className="mb-4">
-                  <h3 className="text-sm font-medium text-gray-900 mb-2">生成的标签</h3>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-sm font-medium text-gray-900">标签</h3>
+                    {video.metadata_source && (
+                      <span className="text-xs text-gray-500">
+                        ({video.metadata_source === 'ai_generated' ? 'AI生成' : '原始'})
+                      </span>
+                    )}
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    {video.generated_tags.split(',').map((tag, index) => (
+                    {(video.upload_tags || video.generated_tags || '').split(',').map((tag, index) => (
                       <span
                         key={index}
                         className="inline-block px-2 py-1 text-sm bg-blue-100 text-blue-800 rounded"
                       >
                         {tag.trim()}
                       </span>
-                    ))}
+                    )).filter(tag => tag.props.children.trim())}
                   </div>
                 </div>
               )}
@@ -273,8 +303,8 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
           {/* 右侧：进度和文件 */}
           <div className="space-y-6">
             {/* 手动操作按钮 */}
-            <VideoActions 
-              videoId={video.video_id} 
+            <VideoActions
+              videoId={video.video_id}
               status={video.status}
               onSuccess={handleRefresh}
             />
@@ -282,7 +312,7 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
             {/* 任务进度 */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">处理进度</h3>
-              
+
               <div className="space-y-4">
                 {/* 进度条 */}
                 <div>
@@ -332,7 +362,7 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
             {video.files && video.files.length > 0 && (
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">相关文件</h3>
-                
+
                 <div className="space-y-3">
                   {video.files.map((file, index) => (
                     <div
@@ -350,7 +380,7 @@ export default function VideoDetailPage({ videoId, onBack }: VideoDetailPageProp
                           </p>
                         </div>
                       </div>
-                      
+
                       <button
                         onClick={() => window.open(file.path, '_blank')}
                         className="p-1 text-gray-400 hover:text-blue-600 transition-colors"

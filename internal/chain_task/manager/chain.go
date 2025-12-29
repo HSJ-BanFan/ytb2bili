@@ -17,46 +17,57 @@ type TaskConfig struct {
 }
 
 // 预定义任务配置
-// ┌────┬─────────────┬─────────────────────┬──────┬────────────┐
-// │序号│   任务名    │        依赖         │ 必需 │  失败处理  │
-// ├────┼─────────────┼─────────────────────┼──────┼────────────┤
-// │ 1  │ 获取元数据  │        无           │  是  │  终止链    │
-// │ 2  │ 下载封面    │    获取元数据       │  是  │  终止链    │
-// │ 3  │ 下载字幕    │        无           │  否  │  继续执行  │
-// │ 4  │ 翻译字幕    │      下载字幕       │  否  │    跳过    │
-// │ 5  │ 下载视频    │        无           │  否  │  继续执行  │
-// │ 6  │ 生成元数据  │ 获取元数据,翻译字幕 │  否  │    跳过    │
-// │ 7  │ 上传到B站   │        无           │  否  │    -       │
-// └────┴─────────────┴─────────────────────┴──────┴────────────┘
+// ┌────┬──────────────┬─────────────────────────────┬──────┬────────────┐
+// │序号│    任务名    │           依赖              │ 必需 │  失败处理  │
+// ├────┼──────────────┼─────────────────────────────┼──────┼────────────┤
+// │ 1  │ 获取元数据   │           无                │  是  │  终止链    │
+// │ 2  │ 下载视频     │           无                │  是  │  终止链    │
+// │ 3  │ 下载字幕     │           无                │  否  │  继续执行  │
+// │ 4  │ 下载封面     │       获取元数据            │  是  │  终止链    │
+// │ 5  │ 翻译字幕     │        下载字幕             │  否  │    跳过    │
+// │ 6  │ AI增强元数据 │ 下载视频,翻译字幕           │  否  │    跳过    │
+// │ 7  │ 确认元数据   │       获取元数据            │  是  │  终止链    │
+// │    │  (根据用户设置决定使用原始/AI数据)          │      │            │
+// │ 8  │ 上传到B站    │       确认元数据            │  否  │    -       │
+// │ 9  │ 上传字幕     │       上传到B站             │  否  │  延迟重试  │
+// └────┴──────────────┴─────────────────────────────┴──────┴────────────┘
 var TaskConfigs = map[string]TaskConfig{
-	"获取元数据":       {Name: "获取元数据", Dependencies: nil, Required: true},
-	"下载封面":        {Name: "下载封面", Dependencies: []string{"获取元数据"}, Required: true},
-	"下载字幕":        {Name: "下载字幕", Dependencies: nil, Required: false},
-	"翻译字幕":        {Name: "翻译字幕", Dependencies: []string{"下载字幕"}, Required: false},
-	"下载视频":        {Name: "下载视频", Dependencies: nil, Required: false},
-	"生成元数据":       {Name: "生成元数据", Dependencies: []string{"获取元数据", "翻译字幕"}, Required: false},
-	"上传到Bilibili": {Name: "上传到Bilibili", Dependencies: nil, Required: false},
+	"获取元数据":   {Name: "获取元数据", Dependencies: nil, Required: true},
+	"下载视频":    {Name: "下载视频", Dependencies: nil, Required: true},
+	"下载字幕":    {Name: "下载字幕", Dependencies: nil, Required: false},
+	"下载封面":    {Name: "下载封面", Dependencies: []string{"获取元数据"}, Required: true},
+	"翻译字幕":    {Name: "翻译字幕", Dependencies: []string{"下载字幕"}, Required: false},
+	"AI增强元数据": {Name: "AI增强元数据", Dependencies: []string{"下载视频", "翻译字幕"}, Required: false},
+	// 确认元数据：只依赖获取元数据（确保有基础数据），不依赖 AI增强元数据
+	// 根据用户配置决定使用原始数据还是 AI 生成的数据
+	"确认元数据":         {Name: "确认元数据", Dependencies: []string{"获取元数据"}, Required: true},
+	"上传到Bilibili":   {Name: "上传到Bilibili", Dependencies: []string{"确认元数据"}, Required: false},
+	"上传字幕到Bilibili": {Name: "上传字幕到Bilibili", Dependencies: []string{"上传到Bilibili"}, Required: false},
+	// 兼容旧名称
+	"生成元数据": {Name: "生成元数据", Dependencies: []string{"下载视频", "翻译字幕"}, Required: false},
 }
 
 // TaskChain 任务链
 type TaskChain struct {
-	Tasks          []types.Task
-	Context        map[string]interface{}
-	Logger         *zap.SugaredLogger
-	VideoID        string
-	CompletedTasks map[string]bool // 记录已完成的任务
-	FailedTasks    map[string]bool // 记录失败的任务
-	SkippedTasks   map[string]bool // 记录跳过的任务
+	Tasks            []types.Task
+	Context          map[string]interface{}
+	Logger           *zap.SugaredLogger
+	VideoID          string
+	CompletedTasks   map[string]bool // 记录已完成的任务
+	FailedTasks      map[string]bool // 记录失败的任务
+	SkippedTasks     map[string]bool // 记录硬跳过的任务（依赖未满足）
+	SoftSkippedTasks map[string]bool // 记录软跳过的任务（执行成功但无需处理）
 }
 
 // NewTaskChain 创建任务链
 func NewTaskChain() *TaskChain {
 	return &TaskChain{
-		Tasks:          make([]types.Task, 0),
-		Context:        make(map[string]interface{}),
-		CompletedTasks: make(map[string]bool),
-		FailedTasks:    make(map[string]bool),
-		SkippedTasks:   make(map[string]bool),
+		Tasks:            make([]types.Task, 0),
+		Context:          make(map[string]interface{}),
+		CompletedTasks:   make(map[string]bool),
+		FailedTasks:      make(map[string]bool),
+		SkippedTasks:     make(map[string]bool),
+		SoftSkippedTasks: make(map[string]bool),
 	}
 }
 
@@ -148,8 +159,10 @@ func (c *TaskChain) printChainSummary(totalDuration time.Duration, terminated bo
 	c.log("INFO", "╔══════════════════════════════════════════════════════════════╗")
 	c.log("INFO", "║                    📊 任务链执行摘要                          ║")
 	c.log("INFO", "╠══════════════════════════════════════════════════════════════╣")
+	// 跳过数 = 硬跳过 + 软跳过
+	skippedCount := len(c.SkippedTasks) + len(c.SoftSkippedTasks)
 	c.log("INFO", "║  ✅ 成功: %-3d  ❌ 失败: %-3d  ⏭️  跳过: %-3d                    ║",
-		len(c.CompletedTasks), len(c.FailedTasks), len(c.SkippedTasks))
+		len(c.CompletedTasks), len(c.FailedTasks), skippedCount)
 	c.log("INFO", "║  ⏱️  总耗时: %-48v║", totalDuration.Round(time.Millisecond))
 	if terminated {
 		c.log("INFO", "║  ⚠️  状态: 链已终止 (必需任务失败)                            ║")
@@ -160,6 +173,10 @@ func (c *TaskChain) printChainSummary(totalDuration time.Duration, terminated bo
 }
 
 // checkDependencies 检查任务依赖是否满足
+// 返回：(是否满足, 原因)
+// 注意：区分 "软跳过"（任务执行成功但返回 skipped 标记）和 "硬跳过"（依赖未满足）
+//
+//	软跳过的任务被视为完成，不会阻止后续任务
 func (c *TaskChain) checkDependencies(taskName string) (bool, string) {
 	config, exists := TaskConfigs[taskName]
 	if !exists || len(config.Dependencies) == 0 {
@@ -167,14 +184,22 @@ func (c *TaskChain) checkDependencies(taskName string) (bool, string) {
 	}
 
 	for _, dep := range config.Dependencies {
-		// 如果依赖任务失败或被跳过，则当前任务也应跳过
-		if c.FailedTasks[dep] || c.SkippedTasks[dep] {
-			return false, fmt.Sprintf("依赖任务 [%s] 未成功完成", dep)
+		// 硬失败：依赖任务执行失败（返回 false）
+		if c.FailedTasks[dep] {
+			return false, fmt.Sprintf("依赖任务 [%s] 执行失败", dep)
 		}
-		// 如果依赖任务未完成，也应跳过
-		if !c.CompletedTasks[dep] {
-			return false, fmt.Sprintf("依赖任务 [%s] 未执行", dep)
+		// 完成或软跳过都视为满足依赖
+		// 软跳过：任务执行成功（返回 true）但设置了 skipped 标记
+		// 例如：翻译字幕禁用时返回 true + skipped，后续 AI增强元数据 应继续执行
+		if c.CompletedTasks[dep] || c.SoftSkippedTasks[dep] {
+			continue
 		}
+		// 硬跳过：由于依赖未满足导致的跳过，后续任务也应跳过
+		if c.SkippedTasks[dep] {
+			return false, fmt.Sprintf("依赖任务 [%s] 被跳过", dep)
+		}
+		// 未执行
+		return false, fmt.Sprintf("依赖任务 [%s] 未执行", dep)
 	}
 	return true, ""
 }
@@ -200,6 +225,8 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 		if !depsOK {
 			c.SkippedTasks[taskName] = true
 			c.Context["skipped"] = depReason
+			// 硬跳过：更新数据库中的步骤状态
+			task.UpdateStatus("skipped", "依赖未满足: "+depReason)
 			c.printTaskResult(taskName, false, true, 0, depReason)
 			continue
 		}
@@ -227,9 +254,11 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 			c.Context["error"] = panicMsg
 			c.printTaskResult(taskName, false, false, taskDuration, panicMsg)
 		} else if success {
-			// 检查是否被标记为跳过
+			// 检查是否被标记为跳过（软跳过：任务执行成功但无需处理）
 			if _, skipped := c.Context["skipped"]; skipped {
-				c.SkippedTasks[taskName] = true
+				// 软跳过：任务返回 true 但设置了 skipped 标记
+				// 视为"成功"，不会阻止依赖此任务的后续任务
+				c.SoftSkippedTasks[taskName] = true
 				c.printTaskResult(taskName, false, true, taskDuration, "")
 				delete(c.Context, "skipped")
 			} else {

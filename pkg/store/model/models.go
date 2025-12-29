@@ -56,7 +56,7 @@ type User struct {
 	BiliMid     string     `gorm:"index;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号（允许为空）
 
 	// 权限和角色
-	Role        string     `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user（与会员等级解耦）
+	Role string `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user（与会员等级解耦）
 
 	// 会员系统字段
 	MembershipTier   string     `gorm:"size:20;default:free" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
@@ -88,23 +88,33 @@ type SavedVideoSubtitle struct {
 // SavedVideo 保存的视频信息
 type SavedVideo struct {
 	BaseModel
-	VideoID        string `gorm:"type:varchar(100);uniqueIndex;not null" json:"video_id"` // 视频ID（唯一）
-	URL            string `gorm:"type:varchar(500);not null;index" json:"url"`            // 视频URL
-	Title          string `gorm:"type:varchar(500)" json:"title"`                         // 视频标题
-	Status         string `gorm:"type:varchar(20)" json:"status"`                         // 视频状态
-	Description    string `gorm:"type:text" json:"description"`                           // 视频描述
-	GeneratedTitle string `gorm:"type:varchar(500)" json:"generated_title"`               // AI生成的标题
-	GeneratedDesc  string `gorm:"type:text" json:"generated_desc"`                        // AI生成的描述
-	GeneratedTags  string `gorm:"type:varchar(1000)" json:"generated_tags"`               // AI生成的标签（逗号分隔）
-	BiliBVID       string `gorm:"type:varchar(50)" json:"bili_bvid"`                      // Bilibili BVID (主账号)
-	BiliAID        int64  `gorm:"type:bigint" json:"bili_aid"`                            // Bilibili AID (主账号)
-	BiliMultiBVIDs string `gorm:"type:text" json:"bili_multi_bvids"`                      // 多账号上传的所有BVID (JSON数组)
-	OperationType  string `gorm:"type:varchar(50)" json:"operation_type"`                 // 操作类型 (download/upload等)
-	Subtitles      string `gorm:"type:longtext" json:"subtitles"`                         // 字幕JSON字符串
-	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"`             // 播放列表ID
-	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`                      // 时间戳
-	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`                       // 保存时间
-	UserID         uint   `gorm:"index" json:"user_id"`                                   // 提交用户ID
+	VideoID     string `gorm:"type:varchar(100);uniqueIndex;not null" json:"video_id"` // 视频ID（唯一）
+	URL         string `gorm:"type:varchar(500);not null;index" json:"url"`            // 视频URL
+	Title       string `gorm:"type:varchar(500)" json:"title"`                         // 原始视频标题（YouTube）
+	Status      string `gorm:"type:varchar(20)" json:"status"`                         // 视频状态
+	Description string `gorm:"type:text" json:"description"`                           // 原始视频描述（YouTube）
+
+	// AI 生成的元数据
+	GeneratedTitle string `gorm:"type:varchar(500)" json:"generated_title"` // AI生成的标题
+	GeneratedDesc  string `gorm:"type:text" json:"generated_desc"`          // AI生成的描述
+	GeneratedTags  string `gorm:"type:varchar(1000)" json:"generated_tags"` // AI生成的标签（逗号分隔）
+
+	// 最终上传使用的元数据（新增）
+	UploadTitle        string `gorm:"type:varchar(500)" json:"upload_title"`                     // 实际上传到B站的标题
+	UploadDesc         string `gorm:"type:text" json:"upload_desc"`                              // 实际上传到B站的描述
+	UploadTags         string `gorm:"type:varchar(1000)" json:"upload_tags"`                     // 实际上传到B站的标签
+	MetadataSource     string `gorm:"type:varchar(20);default:original" json:"metadata_source"`  // 元数据来源: original/ai_generated/user_edited
+	MetadataEditStatus string `gorm:"type:varchar(20);default:auto" json:"metadata_edit_status"` // 编辑状态: auto/pending_review/edited
+
+	BiliBVID       string `gorm:"type:varchar(50)" json:"bili_bvid"`          // Bilibili BVID (主账号)
+	BiliAID        int64  `gorm:"type:bigint" json:"bili_aid"`                // Bilibili AID (主账号)
+	BiliMultiBVIDs string `gorm:"type:text" json:"bili_multi_bvids"`          // 多账号上传的所有BVID (JSON数组)
+	OperationType  string `gorm:"type:varchar(50)" json:"operation_type"`     // 操作类型 (download/upload等)
+	Subtitles      string `gorm:"type:longtext" json:"subtitles"`             // 字幕JSON字符串
+	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"` // 播放列表ID
+	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`          // 时间戳
+	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`           // 保存时间
+	UserID         uint   `gorm:"index" json:"user_id"`                       // 提交用户ID
 
 	// 字幕上传调度字段
 	VideoSizeMB           float64    `gorm:"type:decimal(10,2)" json:"video_size_mb"`                  // 视频大小(MB)
@@ -118,6 +128,10 @@ type SavedVideo struct {
 
 	// 下载进度字段
 	DownloadProgress string `gorm:"type:text" json:"download_progress,omitempty"` // JSON格式的下载进度
+
+	// 文件清理字段
+	FilesCleaned   bool       `gorm:"default:false" json:"files_cleaned"` // 是否已清理文件
+	FilesCleanedAt *time.Time `json:"files_cleaned_at,omitempty"`         // 文件清理时间
 }
 
 // TableName 指定表名

@@ -103,6 +103,21 @@ func (s *UploadScheduler) SetUp() {
 	// 启动时显示待上传字幕的视频数量
 	s.showPendingSubtitleInfo()
 
+	// 显示上传模式和延迟信息
+	uploadMode := "immediate"
+	videoDelay := 0
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
+		if s.App.Config.DownloadConfig.AutoUploadMode != "" {
+			uploadMode = s.App.Config.DownloadConfig.AutoUploadMode
+		}
+		videoDelay = s.App.Config.DownloadConfig.VideoUploadDelay
+	}
+	if uploadMode == "delayed" {
+		s.logger.Infof("📤 上传模式: 延迟上传 (视频处理完成后 %d 分钟上传)", videoDelay)
+	} else {
+		s.logger.Infof("📤 上传模式: 立即上传")
+	}
+
 	s.logger.Infof("✓ Upload scheduler started, checking every %d seconds", checkInterval)
 }
 
@@ -169,7 +184,30 @@ func (s *UploadScheduler) uploadNextVideo() error {
 	}
 
 	if len(videos) == 0 {
-		if uploadMode != "delayed" {
+		if uploadMode == "delayed" {
+			// 检查是否有正在等待延迟的视频
+			var pendingVideo struct {
+				VideoID               string
+				Title                 string
+				ProcessingCompletedAt *time.Time
+			}
+			s.Db.Table("cw_saved_videos").
+				Select("video_id, title, processing_completed_at").
+				Where("status = ?", "200").
+				Where("deleted_at IS NULL").
+				Where("processing_completed_at IS NOT NULL").
+				Order("processing_completed_at ASC").
+				Limit(1).
+				Find(&pendingVideo)
+
+			if pendingVideo.ProcessingCompletedAt != nil {
+				uploadAt := pendingVideo.ProcessingCompletedAt.Add(time.Duration(videoUploadDelay) * time.Minute)
+				remaining := uploadAt.Sub(now)
+				if remaining > 0 {
+					smartLogger.Debugf("📤 等待延迟上传: %s (剩余 %s)", pendingVideo.Title, remaining.Round(time.Second))
+				}
+			}
+		} else {
 			smartLogger.Debugf("未找到待上传视频 (模式: %s)", uploadMode)
 		}
 		return nil
@@ -556,6 +594,21 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 
 	// 创建任务链
 	chain := manager.NewTaskChain()
+	chain.SetLogger(s.logger)
+	chain.SetVideoID(videoID)
+
+	// 预填充 CompletedTasks，跳过依赖检查
+	// UploadScheduler 调度的任务已经通过状态检查（status=200）确保前置条件满足
+	chain.SetCompletedTasks([]string{
+		"获取元数据",
+		"下载视频",
+		"下载字幕",
+		"下载封面",
+		"翻译字幕",
+		"AI增强元数据",
+		"确认元数据",
+	})
+
 	var task types.Task
 
 	// 根据任务名称创建对应的任务
@@ -632,7 +685,62 @@ func (s *UploadScheduler) ExecuteManualUpload(videoID, taskType string) error {
 		return fmt.Errorf("未知的任务类型: %s", taskType)
 	}
 
-	return s.executeUploadTask(videoID, taskName)
+	// 执行上传任务
+	err := s.executeUploadTask(videoID, taskName)
+	if err != nil {
+		return err
+	}
+
+	// 上传成功后的处理
+	s.logger.Infof("✅ 手动上传视频成功: %s", videoID)
+
+	// 获取视频信息以决定下一步
+	savedVideo, getErr := s.SavedVideoService.GetVideoByVideoID(videoID)
+	if getErr != nil {
+		s.logger.Warnf("获取视频信息失败: %v", getErr)
+		return nil // 上传已成功，不返回错误
+	}
+
+	// 检查是否有字幕需要上传
+	hasSubtitle := savedVideo.Subtitles != "" && savedVideo.Subtitles != "[]" && savedVideo.Subtitles != "null"
+
+	if taskType == "video" {
+		if hasSubtitle {
+			// 有字幕，更新状态为等待字幕上传
+			subtitleDelay := 5 // 默认 5 分钟
+			if s.App.Config != nil && s.App.Config.DownloadConfig != nil && s.App.Config.DownloadConfig.SubtitleUploadDelay > 0 {
+				subtitleDelay = s.App.Config.DownloadConfig.SubtitleUploadDelay
+			}
+			subtitleScheduledAt := time.Now().Add(time.Duration(subtitleDelay) * time.Minute)
+
+			s.Db.Table("cw_saved_videos").Where("id = ?", savedVideo.ID).Updates(map[string]interface{}{
+				"status":                "300",
+				"video_uploaded_at":     time.Now(),
+				"subtitle_scheduled_at": subtitleScheduledAt,
+			})
+			s.logger.Infof("📝 有字幕待上传，计划时间: %s", subtitleScheduledAt.Format("15:04:05"))
+		} else {
+			// 无字幕，直接标记为完成并触发清理
+			s.Db.Table("cw_saved_videos").Where("id = ?", savedVideo.ID).Updates(map[string]interface{}{
+				"status":            "400",
+				"video_uploaded_at": time.Now(),
+			})
+			s.logger.Infof("✅ 视频无字幕，已标记为完成")
+			// 触发自动清理
+			s.triggerAutoCleanup(videoID)
+		}
+	} else if taskType == "subtitle" {
+		// 字幕上传成功，标记为完成
+		s.Db.Table("cw_saved_videos").Where("id = ?", savedVideo.ID).Updates(map[string]interface{}{
+			"status":                "400",
+			"subtitle_upload_error": "",
+		})
+		s.logger.Infof("✅ 字幕上传成功，已标记为完成")
+		// 触发自动清理
+		s.triggerAutoCleanup(videoID)
+	}
+
+	return nil
 }
 
 // findCoverImage 在指定目录中查找封面图片
