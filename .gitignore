@@ -73,12 +73,9 @@ yt-dlp.exe
 # 编译的前端资源 (运行时嵌入)
 internal/web/bili-up-web/out/
 
-# SQL迁移文件
-migrations/
-internal/db/
-
 # 临时脚本
 *.ps1
 FRONTEND_BUILD_GUIDE.md
 METADATA_REFACTORING.md
 clear_cache_guide.html
+
