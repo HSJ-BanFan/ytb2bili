@@ -1,0 +1,281 @@
+{
+  "info": {
+    "name": "会员系统 API 测试",
+    "description": "会员系统 API 测试集合",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8096"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. 获取所有会员等级",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/tiers",
+        "header": []
+      }
+    },
+    {
+      "name": "2. 免费用户 - 获取会员信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/info",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "3. 基础用户 - 获取会员信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/info",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "4. 专业用户 - 获取会员信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/info",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "5. 企业用户 - 获取会员信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/info",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "6. 免费用户 - 获取配额信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/quota",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "7. 专业用户 - 获取配额信息",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/quota",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "8. 免费用户 - 获取可用功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "9. 基础用户 - 获取可用功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "10. 专业用户 - 获取可用功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "3"
+          }
+        ]
+      }
+    },
+    {
+      "name": "11. 企业用户 - 获取可用功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "12. 免费用户 - 检查AI翻译功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features/ai_translation/check",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "13. 基础用户 - 检查AI翻译功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features/ai_translation/check",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "14. 免费用户 - 检查API访问功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features/api_access/check",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "15. 企业用户 - 检查API访问功能",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/features/api_access/check",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "4"
+          }
+        ]
+      }
+    },
+    {
+      "name": "16. 免费用户 - 获取加油包状态",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/boost-pack",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "17. 管理员 - 设置用户为专业版",
+      "request": {
+        "method": "PUT",
+        "url": "{{baseUrl}}/api/v1/membership/admin/user/1/tier",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tier\": \"pro\",\n  \"valid_days\": 30\n}"
+        }
+      }
+    },
+    {
+      "name": "18. 管理员 - 为用户添加加油包",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/membership/admin/user/1/boost-pack",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"videos\": 50,\n  \"valid_days\": 30\n}"
+        }
+      }
+    },
+    {
+      "name": "19. 用户购买加油包",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/v1/membership/boost-pack/purchase",
+        "header": [
+          {
+            "key": "X-User-ID",
+            "value": "1"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pack_type\": \"medium\"\n}"
+        }
+      }
+    },
+    {
+      "name": "20. 未登录 - 获取会员信息 (应返回401)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/membership/info",
+        "header": []
+      }
+    }
+  ]
+}
