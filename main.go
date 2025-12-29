@@ -250,7 +250,13 @@ func main() {
 			// 注入并发控制器
 			h.ConcurrencyLimiter = limiter
 			// 设置并启动任务消费者（准备阶段：下载、字幕、翻译、元数据）
+			// 设置并启动任务消费者（准备阶段：下载、字幕、翻译、元数据）
 			h.SetUp()
+		}),
+
+		// 提取 CancelManager 供其他组件使用
+		fx.Provide(func(h *chain_task.ChainTaskHandler) *chain_task.TaskCancelManager {
+			return h.CancelManager
 		}),
 
 		// 添加上传调度器
@@ -302,6 +308,7 @@ func main() {
 			authMiddleware *auth.AuthMiddleware,
 			biliAccountService *services.BiliAccountService,
 			userConfigService *services.UserConfigService,
+			cancelManager *chain_task.TaskCancelManager,
 		) {
 			// 初始化服务器
 			server.Init(db)
@@ -313,7 +320,7 @@ func main() {
 			}
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService, cancelManager)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -529,6 +536,7 @@ func registerHandlers(
 	authMiddleware *auth.AuthMiddleware,
 	biliAccountService *services.BiliAccountService,
 	userConfigService *services.UserConfigService,
+	cancelManager *chain_task.TaskCancelManager,
 ) {
 	logger.Info("Registering handlers...")
 
@@ -566,6 +574,8 @@ func registerHandlers(
 	videoHandler.AnalyticsHandler = analyticsHandler
 	// 设置上传调度器（避免循环依赖）
 	videoHandler.SetUploadScheduler(uploadScheduler)
+	// 设置取消管理器
+	videoHandler.SetCancelManager(cancelManager)
 	// 使用带 JWT 认证的路由组
 	videoGroup := server.Engine.Group("/api/v1")
 	videoGroup.Use(authMiddleware.JWTAuth())

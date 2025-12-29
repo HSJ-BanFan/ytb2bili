@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -128,7 +129,7 @@ func (t *DownloadVideo) logDownloadProgressCompact(line string, lastProgressTime
 
 // executeDownloadWithCompactProgress 使用紧凑进度条的下载执行函数
 // 这是 executeDownloadWithAuthMode 的替代版本
-func (t *DownloadVideo) executeDownloadWithCompactProgress(ytdlpPath, videoURL string, useProxy bool, authMode string, context map[string]interface{}) bool {
+func (t *DownloadVideo) executeDownloadWithCompactProgress(ytdlpPath, videoURL string, useProxy bool, authMode string, ctxMap map[string]interface{}) bool {
 	// 创建紧凑进度日志器
 	progressLogger := logger.NewCompactProgressLogger(t.StateManager.VideoID)
 	defer progressLogger.Complete("") // 将在成功时调用 Complete，失败时调用 Error
@@ -136,9 +137,15 @@ func (t *DownloadVideo) executeDownloadWithCompactProgress(ytdlpPath, videoURL s
 	progressLogger.Start()
 	t.App.Logger.Infof("开始下载视频: %s", t.StateManager.VideoID)
 
+	// 从 ctxMap 中提取取消上下文
+	var cancelCtx context.Context = context.Background()
+	if c, ok := ctxMap["__ctx__"].(context.Context); ok {
+		cancelCtx = c
+	}
+
 	// 直接调用现有的 executeDownloadWithAuthMode 而不是重复构建命令
 	// 注意：这个紧凑进度版本尚未完全集成，暂时回退到标准实现
-	return t.executeDownloadWithAuthMode(ytdlpPath, videoURL, useProxy, authMode, context)
+	return t.executeDownloadWithAuthMode(cancelCtx, ytdlpPath, videoURL, useProxy, authMode, ctxMap)
 }
 
 // executeDownloadWithCompactProgressFull 完整版本（未启用）

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -154,6 +155,12 @@ func (t *DownloadVideo) Execute(ctx map[string]interface{}) bool {
 	t.App.Logger.Infof("开始下载视频: %s", t.StateManager.VideoID)
 	t.App.Logger.Info("========================================")
 
+	// 从 context map 中提取取消上下文
+	var cancelCtx context.Context = context.Background()
+	if c, ok := ctx["__ctx__"].(context.Context); ok {
+		cancelCtx = c
+	}
+
 	// 确保下载完成后清除进度
 	defer t.clearDownloadProgress()
 
@@ -230,7 +237,7 @@ func (t *DownloadVideo) Execute(ctx map[string]interface{}) bool {
 
 	for i, attempt := range attempts {
 		t.App.Logger.Infof("🔄 尝试策略 [%d/%d]: %s", i+1, len(attempts), attempt.description)
-		if t.executeDownloadWithAuthMode(ytdlpPath, videoURL, attempt.useProxy, attempt.authMode, ctx) {
+		if t.executeDownloadWithAuthMode(cancelCtx, ytdlpPath, videoURL, attempt.useProxy, attempt.authMode, ctx) {
 			return true
 		}
 		if i < len(attempts)-1 {
@@ -361,7 +368,7 @@ func (t *DownloadVideo) findBackupCookiesFile() string {
 
 // executeDownloadWithAuthMode 使用指定的认证模式执行下载
 // authMode: "oauth2", "cookies_file", "browser"
-func (t *DownloadVideo) executeDownloadWithAuthMode(ytdlpPath, videoURL string, useProxy bool, authMode string, context map[string]interface{}) bool {
+func (t *DownloadVideo) executeDownloadWithAuthMode(cancelCtx context.Context, ytdlpPath, videoURL string, useProxy bool, authMode string, context map[string]interface{}) bool {
 	// 创建紧凑进度日志器
 	progressLogger := logger.NewCompactProgressLogger(t.StateManager.VideoID)
 	defer progressLogger.Complete("")
@@ -478,8 +485,8 @@ func (t *DownloadVideo) executeDownloadWithAuthMode(ytdlpPath, videoURL string, 
 
 	t.App.Logger.Infof("执行命令: %s", strings.Join(command, " "))
 
-	// 执行下载命令
-	cmd := exec.Command(command[0], command[1:]...)
+	// 执行下载命令（使用可取消的 context）
+	cmd := exec.CommandContext(cancelCtx, command[0], command[1:]...)
 	cmd.Dir = t.StateManager.CurrentDir
 
 	stdout, err := cmd.StdoutPipe()
@@ -571,344 +578,6 @@ func (t *DownloadVideo) executeDownloadWithAuthMode(ytdlpPath, videoURL string, 
 	return true
 }
 
-// executeDownload 执行实际的下载操作（兼容旧代码）
-func (t *DownloadVideo) executeDownload(ytdlpPath, videoURL string, useProxy bool, context map[string]interface{}) bool {
-	// 构建下载命令
-	command := []string{
-		ytdlpPath,
-		"-P", t.StateManager.CurrentDir,
-		"-o", "%(id)s.%(ext)s",
-		// 强制使用 H.264(avc1) + AAC 格式，确保 B站兼容
-		"-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[vcodec^=avc1]/best",
-		"--merge-output-format", "mp4",
-		// 网络优化参数
-		"--retries", "10", // 重试次数
-		"--fragment-retries", "10", // 分片重试次数
-		"--socket-timeout", "30", // Socket 超时（秒）
-		"--file-access-retries", "5", // 文件访问重试
-		"--extractor-retries", "5", // 提取器重试
-		// 字幕下载参数（使用通配符匹配所有变体）
-		"--write-subs",                  // 下载字幕
-		"--write-auto-subs",             // 下载自动生成的字幕
-		"--sub-langs", "en.*,zh.*,ja.*", // 匹配所有英文、中文、日文变体
-		"--sub-format", "srt/best", // 字幕格式优先级
-		"--convert-subs", "srt", // 转换为 SRT 格式
-		// 错误处理
-		"--no-abort-on-error", // 字幕下载失败时不中断视频下载
-	}
-
-	// 获取下载配置
-	concurrentFragments, aria2cConnections, httpChunkSize := t.getDownloadConfig()
-
-	// 检查是否启用 aria2c（默认启用）
-	useAria2c := true
-	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
-		useAria2c = t.App.Config.DownloadConfig.UseAria2c
-	}
-
-	// 获取代理配置
-	proxyHost := ""
-	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
-		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != "" {
-		proxyHost = t.App.Config.ProxyConfig.ProxyHost
-	}
-
-	// 检查是否有 aria2c 可用，用于多线程下载加速
-	// 注意：当使用代理时，aria2c 可能会遇到 403 错误，可通过配置 aria2c_with_proxy 强制启用
-	aria2cPath := t.findAria2c()
-	aria2cWithProxy := false
-	if t.App.Config != nil && t.App.Config.DownloadConfig != nil {
-		aria2cWithProxy = t.App.Config.DownloadConfig.Aria2cWithProxy
-	}
-
-	// 判断是否使用 aria2c：启用 && 已安装 && (无代理 || 配置允许代理时使用)
-	canUseAria2c := useAria2c && aria2cPath != "" && (proxyHost == "" || aria2cWithProxy)
-
-	if canUseAria2c {
-		t.App.Logger.Infof("🚀 检测到 aria2c，启用多线程下载加速 (连接数: %d)", aria2cConnections)
-		aria2cArgs := fmt.Sprintf("aria2c:-x %d -s %d -k 1M --file-allocation=none --async-dns=false --check-certificate=false --auto-file-renaming=false --allow-overwrite=true --max-tries=5 --retry-wait=3", aria2cConnections, aria2cConnections)
-		// 如果使用代理，为 aria2c 添加代理参数
-		if proxyHost != "" {
-			aria2cArgs += fmt.Sprintf(" --all-proxy=%s", proxyHost)
-			t.App.Logger.Infof("📡 aria2c 使用代理: %s", proxyHost)
-		}
-		command = append(command,
-			"--downloader", "aria2c",
-			"--downloader-args", aria2cArgs,
-		)
-	} else {
-		if proxyHost != "" && !aria2cWithProxy {
-			t.App.Logger.Info("ℹ️ 使用代理时，采用 yt-dlp 内置并发下载器（避免 aria2c 403 错误）")
-			t.App.Logger.Info("💡 如需使用 aria2c，可在配置中设置 aria2c_with_proxy = true")
-		} else if !useAria2c {
-			t.App.Logger.Info("ℹ️ aria2c 已在配置中禁用，使用 yt-dlp 内置下载器")
-		} else {
-			t.App.Logger.Warn("⚠️ 未检测到 aria2c，使用 yt-dlp 内置下载器")
-			t.App.Logger.Info("💡 建议安装 aria2c 以启用多线程下载加速: https://aria2.github.io/")
-		}
-		// 使用 yt-dlp 内置的并发分片下载
-		t.App.Logger.Infof("📊 使用并发分片数: %d, HTTP分块大小: %s", concurrentFragments, httpChunkSize)
-		command = append(command,
-			"--concurrent-fragments", fmt.Sprintf("%d", concurrentFragments),
-			"--buffer-size", "16K",
-			"--http-chunk-size", httpChunkSize,
-		)
-	}
-
-	// 检查是否存在 cookies.txt
-	// 尝试多个可能的位置
-	var cookiesPath string
-	possiblePaths := []string{}
-
-	// 1. 配置文件目录
-	if t.App.Config != nil && t.App.Config.Path != "" {
-		configDir := filepath.Dir(t.App.Config.Path)
-		possiblePaths = append(possiblePaths, filepath.Join(configDir, "cookies.txt"))
-	}
-
-	// 2. 可执行文件目录
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		possiblePaths = append(possiblePaths, filepath.Join(exeDir, "cookies.txt"))
-	}
-
-	// 3. 当前工作目录
-	if cwd, err := os.Getwd(); err == nil {
-		possiblePaths = append(possiblePaths, filepath.Join(cwd, "cookies.txt"))
-	}
-
-	// 4. 项目根目录（StateManager.CurrentDir 的上级目录）
-	if t.StateManager != nil && t.StateManager.CurrentDir != "" {
-		// 从 data/media/date/videoID 向上找到项目根目录
-		projectRoot := t.StateManager.CurrentDir
-		for i := 0; i < 4; i++ {
-			projectRoot = filepath.Dir(projectRoot)
-		}
-		possiblePaths = append(possiblePaths, filepath.Join(projectRoot, "cookies.txt"))
-	}
-
-	// 5. 相对路径
-	possiblePaths = append(possiblePaths, "cookies.txt")
-
-	// 查找第一个存在的 cookies 文件
-	for _, p := range possiblePaths {
-		if _, err := os.Stat(p); err == nil {
-			cookiesPath = p
-			break
-		}
-	}
-
-	if cookiesPath != "" {
-		absPath, _ := filepath.Abs(cookiesPath)
-		command = append(command, "--cookies", absPath)
-		t.App.Logger.Infof("🍪 使用 Cookies 文件: %s", absPath)
-	} else {
-		// 如果没有 cookies 文件，尝试从浏览器读取
-		browserName := "chrome" // 默认浏览器
-		if t.App.Config != nil && t.App.Config.DownloadConfig != nil &&
-			t.App.Config.DownloadConfig.CookiesFromBrowser != "" {
-			browserName = t.App.Config.DownloadConfig.CookiesFromBrowser
-		}
-
-		// 检查是否明确禁用浏览器 cookies（设置为 "none" 或 "disabled"）
-		if browserName != "none" && browserName != "disabled" {
-			t.App.Logger.Warnf("🍪 未找到 cookies 文件，尝试的路径: %v", possiblePaths)
-			command = append(command, "--cookies-from-browser", browserName)
-			t.App.Logger.Infof("🍪 将从 %s 浏览器读取 cookies", browserName)
-		} else {
-			t.App.Logger.Warn("⚠️ 未配置 cookies，可能会遇到 'Sign in to confirm you're not a bot' 错误")
-		}
-	}
-
-	// 添加代理配置（如果需要）
-	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
-		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != "" {
-		command = append(command, "--proxy", t.App.Config.ProxyConfig.ProxyHost)
-		t.App.Logger.Infof("📡 使用代理: %s", t.App.Config.ProxyConfig.ProxyHost)
-	} else if !useProxy {
-		t.App.Logger.Info("🌐 不使用代理")
-	}
-
-	// 添加视频标识符和URL
-	command = append(command, "--", t.StateManager.VideoID)
-	command = append(command, videoURL)
-
-	t.App.Logger.Infof("执行命令: %s", strings.Join(command, " "))
-	t.App.Logger.Infof("下载目录: %s", t.StateManager.CurrentDir)
-	t.App.Logger.Infof("视频URL: %s", videoURL)
-
-	// 创建命令并设置输出管道
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Dir = t.StateManager.CurrentDir
-
-	// 捕获标准输出和标准错误
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.App.Logger.Errorf("❌ 创建标准输出管道失败: %v", err)
-		context["error"] = err.Error()
-		return false
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		t.App.Logger.Errorf("❌ 创建标准错误管道失败: %v", err)
-		context["error"] = err.Error()
-		return false
-	}
-
-	// 启动命令
-	if err := cmd.Start(); err != nil {
-		t.App.Logger.Errorf("❌ 启动下载命令失败: %v", err)
-		context["error"] = err.Error()
-		return false
-	}
-
-	// 收集错误输出
-	var errorOutput strings.Builder
-	var lastOutput strings.Builder
-	var lastProgressTime int64
-
-	// 自定义分割函数，同时处理 \n 和 \r
-	splitFunc := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
-		}
-		// 查找 \n 或 \r
-		for i := 0; i < len(data); i++ {
-			if data[i] == '\n' || data[i] == '\r' {
-				return i + 1, data[0:i], nil
-			}
-		}
-		if atEOF {
-			return len(data), data, nil
-		}
-		return 0, nil, nil
-	}
-
-	// 实时读取输出并收集错误信息
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		// 增加缓冲区大小到1MB，防止aria2c输出过大导致缓冲区溢出
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		scanner.Split(splitFunc)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				continue
-			}
-			t.logDownloadProgress(line, &lastProgressTime)
-			lastOutput.WriteString(line + "\n")
-		}
-	}()
-
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		// 增加缓冲区大小到1MB
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		scanner.Split(splitFunc)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "" {
-				continue
-			}
-			t.logDownloadProgress(line, &lastProgressTime)
-			errorOutput.WriteString(line + "\n")
-			lastOutput.WriteString(line + "\n")
-		}
-	}()
-
-	// 等待命令完成
-	if err := cmd.Wait(); err != nil {
-		// 构建详细的错误信息
-		errorMsg := fmt.Sprintf("下载失败: %v", err)
-
-		// 添加错误输出的最后几行
-		if errorOutput.Len() > 0 {
-			lines := strings.Split(strings.TrimSpace(errorOutput.String()), "\n")
-			if len(lines) > 0 {
-				// 取最后5行错误信息
-				startIdx := len(lines) - 5
-				if startIdx < 0 {
-					startIdx = 0
-				}
-				relevantErrors := strings.Join(lines[startIdx:], "\n")
-				errorMsg += "\n\n详细错误:\n" + relevantErrors
-			}
-		}
-
-		// 检查常见错误并给出建议
-		if strings.Contains(errorOutput.String(), "Sign in to confirm") ||
-			strings.Contains(errorOutput.String(), "not a bot") {
-			errorMsg += "\n\n💡 建议: 需要 cookies.txt 文件来绕过机器人验证"
-			errorMsg += "\n   请参考文档: docs/setup/cookies-setup.md"
-		} else if strings.Contains(errorOutput.String(), "HTTP Error 403") {
-			errorMsg += "\n\n💡 建议: 访问被拒绝，可能需要配置代理或更新 cookies"
-		} else if strings.Contains(errorOutput.String(), "HTTP Error 404") {
-			errorMsg += "\n\n💡 建议: 视频不存在或已被删除"
-		} else if strings.Contains(errorOutput.String(), "Private video") {
-			errorMsg += "\n\n💡 建议: 这是私有视频，无法下载"
-		} else if strings.Contains(errorOutput.String(), "Video unavailable") {
-			errorMsg += "\n\n💡 建议: 视频不可用，可能已被删除或设为私有"
-		}
-
-		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		t.App.Logger.Errorf("❌ 视频下载失败")
-		t.App.Logger.Errorf("📹 视频ID: %s", t.StateManager.VideoID)
-		t.App.Logger.Errorf("🔗 视频URL: %s", videoURL)
-		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-		t.App.Logger.Error(errorMsg)
-		t.App.Logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-		context["error"] = errorMsg
-		return false
-	}
-
-	// 10. 验证下载的文件
-	downloadedFile := t.findDownloadedFile()
-	if downloadedFile == "" {
-		errMsg := "下载完成但未找到视频文件"
-		t.App.Logger.Error("❌ " + errMsg)
-		context["error"] = errMsg
-		return false
-	}
-
-	// 11. 保存文件信息到 context
-	context["downloaded_file"] = downloadedFile
-	t.App.Logger.Infof("✓ 视频下载成功: %s", downloadedFile)
-
-	// 12. 获取视频元数据（标题、描述等）
-	t.App.Logger.Info("📋 获取视频元数据...")
-	metadata, err := t.getVideoMetadata(ytdlpPath)
-	if err != nil {
-		t.App.Logger.Warnf("⚠️ 获取视频元数据失败: %v，将使用默认值", err)
-	} else {
-		context["original_title"] = metadata.Title
-		context["original_description"] = metadata.Description
-		t.App.Logger.Infof("✓ 原始标题: %s", metadata.Title)
-		if metadata.Description != "" {
-			t.App.Logger.Infof("✓ 原始描述: %s", t.truncateString(metadata.Description, 100))
-		}
-
-		// 保存到数据库
-		if t.SavedVideoService != nil {
-			savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
-			if err == nil {
-				savedVideo.Title = metadata.Title
-				savedVideo.Description = metadata.Description
-				if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
-					t.App.Logger.Errorf("❌ 保存原始元数据到数据库失败: %v", err)
-				} else {
-					t.App.Logger.Info("✅ 原始元数据已保存到数据库")
-				}
-			}
-		}
-	}
-
-	t.App.Logger.Info("========================================")
-
-	return true
-}
-
 // logOutput 实时输出日志
 func (t *DownloadVideo) logOutput(reader io.Reader, level string) {
 	scanner := bufio.NewScanner(reader)
@@ -986,7 +655,7 @@ type VideoMetadataInfo struct {
 }
 
 // getVideoMetadata 使用 yt-dlp 获取视频元数据（带代理回退）
-func (t *DownloadVideo) getVideoMetadata(ytdlpPath string) (*VideoMetadataInfo, error) {
+func (t *DownloadVideo) getVideoMetadata(ctx context.Context, ytdlpPath string) (*VideoMetadataInfo, error) {
 	videoURL := t.getVideoURL()
 
 	// 构建基础命令参数
@@ -1027,15 +696,15 @@ func (t *DownloadVideo) getVideoMetadata(ytdlpPath string) (*VideoMetadataInfo, 
 
 	args = append(args, videoURL)
 
-	// 第一次尝试（可能带代理）
-	cmd := exec.Command(ytdlpPath, args...)
+	// 第一次尝试（可能带代理，使用可取消的 context）
+	cmd := exec.CommandContext(ctx, ytdlpPath, args...)
 	output, err := cmd.Output()
 
 	// 如果使用代理失败，尝试不使用代理
 	if err != nil && useProxy {
 		t.App.Logger.Warnf("⚠️ 使用代理获取元数据失败，尝试不使用代理...")
 		argsNoProxy := []string{"--dump-json", "--no-download", videoURL}
-		cmd = exec.Command(ytdlpPath, argsNoProxy...)
+		cmd = exec.CommandContext(ctx, ytdlpPath, argsNoProxy...)
 		output, err = cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("获取元数据失败: %v", err)

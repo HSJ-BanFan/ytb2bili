@@ -26,6 +26,10 @@ type VideoHandler struct {
 		ExecuteManualUpload(videoID, taskType string) error
 	}
 	AnalyticsHandler *AnalyticsHandler
+	// 任务取消管理器接口
+	CancelManager interface {
+		Cancel(id uint)
+	}
 }
 
 func NewVideoHandler(app *core.AppServer, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService) *VideoHandler {
@@ -42,6 +46,13 @@ func (h *VideoHandler) SetUploadScheduler(scheduler interface {
 	ExecuteManualUpload(videoID, taskType string) error
 }) {
 	h.UploadScheduler = scheduler
+}
+
+// SetCancelManager 设置任务取消管理器
+func (h *VideoHandler) SetCancelManager(cancelManager interface {
+	Cancel(id uint)
+}) {
+	h.CancelManager = cancelManager
 }
 
 // RegisterRoutes 注册视频相关路由
@@ -429,6 +440,12 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 	}
 
 	h.App.Logger.Infof("🗑️ 用户请求删除视频: %s (ID: %d)", savedVideo.VideoID, savedVideo.ID)
+
+	// 0. 取消正在执行的任务（如果有）
+	if h.CancelManager != nil {
+		h.App.Logger.Infof("⛔ 发送取消信号: VideoID=%s, ID=%d", savedVideo.VideoID, savedVideo.ID)
+		h.CancelManager.Cancel(savedVideo.ID)
+	}
 
 	// 1. 删除相关的任务步骤
 	if err := h.TaskStepService.DeleteTaskStepsByVideoID(savedVideo.VideoID); err != nil {

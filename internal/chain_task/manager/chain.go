@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ type TaskChain struct {
 	Context          map[string]interface{}
 	Logger           *zap.SugaredLogger
 	VideoID          string
+	Ctx              context.Context // 用于取消任务的上下文
 	CompletedTasks   map[string]bool // 记录已完成的任务
 	FailedTasks      map[string]bool // 记录失败的任务
 	SkippedTasks     map[string]bool // 记录硬跳过的任务（依赖未满足）
@@ -80,6 +82,12 @@ func (c *TaskChain) SetLogger(logger *zap.SugaredLogger) *TaskChain {
 // SetVideoID 设置视频ID
 func (c *TaskChain) SetVideoID(videoID string) *TaskChain {
 	c.VideoID = videoID
+	return c
+}
+
+// SetContext 设置取消上下文
+func (c *TaskChain) SetContext(ctx context.Context) *TaskChain {
+	c.Ctx = ctx
 	return c
 }
 
@@ -212,6 +220,18 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 	c.printChainHeader()
 
 	for i, task := range c.Tasks {
+		// 检查是否已被取消
+		if c.Ctx != nil {
+			select {
+			case <-c.Ctx.Done():
+				c.log("WARN", "⛔ 任务链被取消: VideoID=%s, Reason=用户删除视频", c.VideoID)
+				c.Context["error"] = "任务被用户取消"
+				c.Context["canceled"] = true
+				return c.Context
+			default:
+			}
+		}
+
 		taskName := task.GetName()
 		config := TaskConfigs[taskName]
 		if config.Name == "" {
@@ -236,6 +256,11 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 		success := false
 		var panicMsg string
 
+		// 将取消上下文放入 context map，供任务内部使用
+		if c.Ctx != nil {
+			c.Context["__ctx__"] = c.Ctx
+		}
+
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -245,6 +270,11 @@ func (c *TaskChain) Run(stopOnRequiredFailure bool) map[string]interface{} {
 			}()
 			success = task.Execute(c.Context)
 		}()
+
+		// 清理 context 中的 ctx，避免影响后续任务
+		if c.Ctx != nil {
+			delete(c.Context, "__ctx__")
+		}
 
 		taskDuration := time.Since(taskStartTime)
 

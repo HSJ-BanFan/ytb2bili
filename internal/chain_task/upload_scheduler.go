@@ -38,6 +38,9 @@ type UploadScheduler struct {
 	lastVideoUploadTime    time.Time // 最后一次视频上传时间
 	lastSubtitleUploadTime time.Time // 最后一次字幕上传时间
 
+	// 任务取消管理器
+	CancelManager *TaskCancelManager
+
 	// 权限服务（可选注入）
 	PermissionService *membership.PermissionService
 }
@@ -50,6 +53,7 @@ func NewUploadScheduler(
 	savedVideoService *services.SavedVideoService,
 	taskStepService *services.TaskStepService,
 	biliAccountService *services.BiliAccountService,
+	cancelManager *TaskCancelManager, // 新增参数
 ) *UploadScheduler {
 	return &UploadScheduler{
 		App:                app,
@@ -59,6 +63,7 @@ func NewUploadScheduler(
 		TaskStepService:    taskStepService,
 		BiliAccountService: biliAccountService,
 		logger:             app.Logger,
+		CancelManager:      cancelManager, // 初始化取消管理器
 	}
 }
 
@@ -296,28 +301,19 @@ func (s *UploadScheduler) uploadNextVideo() error {
 
 	if hasSubtitle || hasScheduledSubtitle {
 		// 有字幕或已有计划，更新状态为 '300'
-		// 如果已有计划时间，保持原样；否则计算默认延迟
+		// 每次视频上传成功，都重新计算字幕上传延迟时间
+		subtitleScheduledAt := now.Add(time.Duration(subtitleUploadDelay) * time.Minute)
 		updates := map[string]interface{}{
-			"status":            "300",
-			"video_uploaded_at": now,
+			"status":                "300",
+			"video_uploaded_at":     now,
+			"subtitle_scheduled_at": subtitleScheduledAt,
 		}
 
-		if !hasScheduledSubtitle {
-			// 只有在没被设置过的情况下才设置默认值
-			subtitleScheduledAt := now.Add(time.Duration(subtitleUploadDelay) * time.Minute)
-			updates["subtitle_scheduled_at"] = subtitleScheduledAt
-			userLogger.TaskLog(video.VideoID, "upload_video", "success",
-				map[string]interface{}{
-					"subtitle_scheduled_at": subtitleScheduledAt.Format("15:04:05"),
-					"note":                  "default_delay",
-				})
-		} else {
-			userLogger.TaskLog(video.VideoID, "upload_video", "success",
-				map[string]interface{}{
-					"subtitle_scheduled_at": updatedVideo.SubtitleScheduledAt.Format("15:04:05"),
-					"note":                  "respected_existing_schedule",
-				})
-		}
+		userLogger.TaskLog(video.VideoID, "upload_video", "success",
+			map[string]interface{}{
+				"subtitle_scheduled_at": subtitleScheduledAt.Format("15:04:05"),
+				"delay_minutes":         subtitleUploadDelay,
+			})
 
 		s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(updates)
 	} else {
@@ -584,6 +580,15 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 		return fmt.Errorf("获取视频信息失败: %v", err)
 	}
 
+	// 检查是否已被取消
+	if s.CancelManager != nil {
+		// 使用 IsCanceled 检查任务是否已被注销
+		if canceled, exists := s.CancelManager.GetCancelFunc(savedVideo.ID); !exists || canceled == nil {
+			s.logger.Infof("⛔ 任务已被取消，跳过上传: VideoID=%s", videoID)
+			return fmt.Errorf("任务已被用户取消")
+		}
+	}
+
 	// 获取当前目录
 	currentDir, err := filepath.Abs(s.App.Config.FileUpDir)
 	if err != nil {
@@ -750,11 +755,15 @@ func (s *UploadScheduler) ExecuteManualUpload(videoID, taskType string) error {
 }
 
 // findCoverImage 在指定目录中查找封面图片
-// 优先查找 maxresdefault.jpg，其次 sddefault.jpg，最后查找任意 jpg 文件
+// 优先查找 cover.webp，然后是 YouTube 缩略图，最后查找任意图片
 func (s *UploadScheduler) findCoverImage(dir string) string {
-	// 优先级列表
+	// 优先级列表（包含 webp 格式）
 	priorityFiles := []string{
-		"maxresdefault.jpg",
+		"cover.webp", // yt-dlp 下载的封面
+		"cover.jpg",
+		"cover.png",
+		"maxresdefault.jpg", // YouTube 高清缩略图
+		"maxresdefault.webp",
 		"sddefault.jpg",
 		"hqdefault.jpg",
 		"mqdefault.jpg",
@@ -769,7 +778,7 @@ func (s *UploadScheduler) findCoverImage(dir string) string {
 		}
 	}
 
-	// 如果都没找到，查找任意 jpg 文件
+	// 如果都没找到，查找任意图片文件（包括 webp）
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -780,7 +789,8 @@ func (s *UploadScheduler) findCoverImage(dir string) string {
 			continue
 		}
 		name := entry.Name()
-		if filepath.Ext(name) == ".jpg" || filepath.Ext(name) == ".jpeg" || filepath.Ext(name) == ".png" {
+		ext := filepath.Ext(name)
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
 			return filepath.Join(dir, name)
 		}
 	}
@@ -810,6 +820,8 @@ func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 	if cleanupDelay <= 0 {
 		cleanupDelay = 60 // 默认60分钟
 	}
+
+	s.logger.Debugf("🔧 清理配置: mode=%s, delay=%d分钟", cleanupMode, cleanupDelay)
 
 	if cleanupMode == "immediate" {
 		// 立即清理（用户可在config.toml中配置）

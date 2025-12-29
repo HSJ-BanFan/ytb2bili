@@ -44,6 +44,9 @@ type ChainTaskHandler struct {
 	Db    *gorm.DB
 	mutex sync.Mutex
 
+	// 任务取消管理器
+	CancelManager *TaskCancelManager
+
 	// 用户级并发控制（可选注入）
 	ConcurrencyLimiter *ConcurrencyLimiter
 }
@@ -73,6 +76,7 @@ func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, save
 		maxWorkers:         maxWorkers,
 		maxDownloads:       maxDownloads,
 		mutex:              sync.Mutex{},
+		CancelManager:      NewTaskCancelManager(), // 初始化取消管理器
 	}
 }
 
@@ -286,6 +290,10 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		return
 	}
 
+	// 注册任务到取消管理器（使用数据库主键 ID）
+	ctx := h.CancelManager.Register(video.Id)
+	defer h.CancelManager.Deregister(video.Id)
+
 	// 创建用户日志助手
 	userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), video.UserID)
 	userLogger.TaskLog(video.VideoId, "task_chain", "started",
@@ -304,10 +312,11 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 
 	stateManager := manager.NewStateManager(video.Id, video.UserID, video.VideoId, currentDir, video.CreatedAt)
 
-	// 创建任务链并设置日志和视频ID
+	// 创建任务链并设置日志、视频ID和取消上下文
 	chain := manager.NewTaskChain().
 		SetLogger(h.App.Logger).
-		SetVideoID(video.VideoId)
+		SetVideoID(video.VideoId).
+		SetContext(ctx) // 设置取消上下文
 
 	// ═══════════════════════════════════════════════════════════════
 	// 任务流程（按依赖关系组织，支持并行执行）:
@@ -375,6 +384,20 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	startTime := time.Now()
 	result := chain.Run(true)
 	duration := time.Since(startTime)
+
+	// 检查是否被取消
+	if canceled, exists := result["canceled"]; exists && canceled.(bool) {
+		userLogger.TaskLog(video.VideoId, "task_chain", "canceled",
+			map[string]interface{}{
+				"duration_seconds": duration.Seconds(),
+				"reason":           "用户删除视频",
+			})
+		// 更新状态为取消（998）
+		if err := h.updateSavedVideoStatus(video.Id, "998"); err != nil {
+			h.App.Logger.Errorf("更新任务状态为取消时出错: %v", err)
+		}
+		return
+	}
 
 	// 检查任务链是否成功执行
 	// 只有必需任务失败才认为整体失败
@@ -444,6 +467,10 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		UpdatedAt: savedVideo.UpdatedAt,
 	}
 
+	// 注册任务到取消管理器（使用数据库主键 ID）
+	ctx := h.CancelManager.Register(video.Id)
+	defer h.CancelManager.Deregister(video.Id)
+
 	// 获取当前目录
 	currentDir, err := filepath.Abs(h.App.Config.FileUpDir)
 	if err != nil {
@@ -492,6 +519,7 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	chain := manager.NewTaskChain().
 		SetLogger(h.App.Logger).
 		SetVideoID(videoID).
+		SetContext(ctx). // 设置取消上下文
 		SetCompletedTasks(completedSteps)
 	var task types.Task
 
@@ -661,11 +689,15 @@ func (h *ChainTaskHandler) updateSavedVideoStatus(id uint, status string) error 
 }
 
 // findCoverImage 在指定目录中查找封面图片
-// 优先查找 maxresdefault.jpg，其次 sddefault.jpg，最后查找任意 jpg 文件
+// 优先查找 cover.webp，然后是 YouTube 缩略图，最后查找任意图片
 func (h *ChainTaskHandler) findCoverImage(dir string) string {
-	// 优先级列表
+	// 优先级列表（包含 webp 格式）
 	priorityFiles := []string{
-		"maxresdefault.jpg",
+		"cover.webp", // yt-dlp 下载的封面
+		"cover.jpg",
+		"cover.png",
+		"maxresdefault.jpg", // YouTube 高清缩略图
+		"maxresdefault.webp",
 		"sddefault.jpg",
 		"hqdefault.jpg",
 		"mqdefault.jpg",
@@ -680,7 +712,7 @@ func (h *ChainTaskHandler) findCoverImage(dir string) string {
 		}
 	}
 
-	// 如果都没找到，查找任意 jpg 文件
+	// 如果都没找到，查找任意图片文件（包括 webp）
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -691,7 +723,8 @@ func (h *ChainTaskHandler) findCoverImage(dir string) string {
 			continue
 		}
 		name := entry.Name()
-		if filepath.Ext(name) == ".jpg" || filepath.Ext(name) == ".jpeg" || filepath.Ext(name) == ".png" {
+		ext := filepath.Ext(name)
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
 			return filepath.Join(dir, name)
 		}
 	}
