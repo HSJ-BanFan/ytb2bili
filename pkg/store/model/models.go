@@ -46,14 +46,18 @@ type VideoProcessingRequest struct {
 // User 用户模型
 type User struct {
 	BaseModel
-	Username    string     `gorm:"uniqueIndex;size:50;not null" json:"username"`
-	Email       string     `gorm:"uniqueIndex;size:100" json:"email"`
+	Username    string     `gorm:"size:50;not null" json:"username"`           // 显示名称（可重复）
+	Email       string     `gorm:"uniqueIndex;size:100;not null" json:"email"` // 邮箱（唯一标识）
 	Phone       string     `gorm:"size:20" json:"phone"`
 	Password    string     `gorm:"size:100" json:"-"` // B站用户可为空
 	Avatar      string     `gorm:"size:255" json:"avatar"`
 	Status      int        `gorm:"default:1" json:"status"` // 1:正常 0:禁用
 	LastLoginAt *time.Time `json:"last_login_at"`
 	BiliMid     string     `gorm:"index;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号（允许为空）
+
+	// 邮箱验证
+	EmailVerified   bool       `gorm:"default:false" json:"email_verified"` // 邮箱是否已验证
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`         // 邮箱验证时间
 
 	// 权限和角色
 	Role string `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user（与会员等级解耦）
@@ -197,4 +201,21 @@ type UserBiliAccount struct {
 // TableName 指定表名
 func (UserBiliAccount) TableName() string {
 	return "cw_user_bili_accounts"
+}
+
+// EmailVerification 邮箱验证码记录
+type EmailVerification struct {
+	BaseModel
+	Email         string     `gorm:"index;not null;size:100" json:"email"` // 邮箱地址
+	Code          string     `gorm:"not null;size:10" json:"-"`            // 验证码（不返回给前端）
+	ExpiresAt     time.Time  `gorm:"not null" json:"expires_at"`           // 过期时间
+	Used          bool       `gorm:"default:false" json:"used"`            // 是否已使用
+	Type          string     `gorm:"size:20;default:register" json:"type"` // 类型: register, login, reset_password
+	AttemptCount  int        `gorm:"default:0" json:"-"`                   // 验证尝试次数（不返回给前端）
+	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`            // 最后尝试时间
+}
+
+// TableName 指定表名
+func (EmailVerification) TableName() string {
+	return "cw_email_verifications"
 }

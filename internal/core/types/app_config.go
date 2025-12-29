@@ -31,6 +31,7 @@ type AppConfig struct {
 	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
 	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
 	MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`       // 会员系统配置
+	SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`             // SMTP邮件服务配置
 
 	// AI服务选择配置
 	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
@@ -269,6 +270,17 @@ type AnalyticsConfig struct {
 	EncryptionKey string `toml:"encryption_key"` // AES加密密钥（可选，16/24/32字节）
 }
 
+// SMTPConfig SMTP邮件服务配置
+type SMTPConfig struct {
+	Enabled  bool   `toml:"enabled"`   // 是否启用邮件服务
+	Host     string `toml:"host"`      // SMTP 主机 (如: smtp.gmail.com:587)
+	From     string `toml:"from"`      // 发件人邮箱
+	FromName string `toml:"from_name"` // 发件人名称
+	Username string `toml:"username"`  // SMTP 用户名
+	Password string `toml:"-"`         // SMTP 密码（从环境变量读取，不写入toml）
+	UseTLS   bool   `toml:"use_tls"`   // 是否使用 TLS
+}
+
 // NewDefaultConfig 创建默认配置
 func NewDefaultConfig() *AppConfig {
 	return &AppConfig{
@@ -396,6 +408,17 @@ func NewDefaultConfig() *AppConfig {
 				DB:       1,
 			},
 		},
+
+		// SMTP 邮件服务配置（默认值，可被 config.toml 覆盖）
+		SMTPConfig: &SMTPConfig{
+			Enabled:  false, // 默认禁用，开发环境验证码打印到日志
+			Host:     "",
+			From:     "",
+			FromName: "YTB2Bili",
+			Username: "",
+			Password: "",
+			UseTLS:   true,
+		},
 	}
 }
 
@@ -430,6 +453,7 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
+		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
 	}
 
 	// 解码TOML配置文件
@@ -473,6 +497,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.MembershipConfig != nil {
 		config.MembershipConfig = fileConfig.MembershipConfig
 	}
+	if fileConfig.SMTPConfig != nil {
+		config.SMTPConfig = fileConfig.SMTPConfig
+	}
 
 	return config, nil
 }
@@ -497,6 +524,7 @@ func SaveConfig(config *AppConfig) error {
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
+		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
 	}{
 		Listen:                 config.Listen,
 		Environment:            config.Environment,
@@ -514,6 +542,7 @@ func SaveConfig(config *AppConfig) error {
 		AnalyticsConfig:        config.AnalyticsConfig,
 		BilibiliConfig:         config.BilibiliConfig,
 		MembershipConfig:       config.MembershipConfig,
+		SMTPConfig:             config.SMTPConfig,
 	}
 
 	buf := new(bytes.Buffer)

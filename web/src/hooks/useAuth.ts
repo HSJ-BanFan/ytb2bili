@@ -83,9 +83,9 @@ export function useAuth() {
     checkAuthStatus();
   }, [checkAuthStatus]);
 
-  // B站扫码登录成功后调用
+  // B站账户绑定成功后调用（刷新用户状态）
   const handleLoginSuccess = async (biliUserData?: UserInfo) => {
-    // 扫码成功后，立即尝试换取 JWT
+    // 绑定成功后，刷新用户状态
     await checkAuthStatus();
   };
 

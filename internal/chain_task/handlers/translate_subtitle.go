@@ -95,6 +95,7 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 		if !t.App.Config.DownloadConfig.SubtitleTranslationEnabled {
 			t.App.Logger.Info("⏭️  字幕翻译已禁用，跳过翻译步骤")
 			t.App.Logger.Info("========================================")
+			context["skipped"] = "字幕翻译已禁用"
 			return true
 		}
 	}
@@ -141,6 +142,7 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 	enSRTPath := t.findEnglishSubtitle()
 	if enSRTPath == "" {
 		t.App.Logger.Warn("⚠️  英文字幕文件不存在，跳过翻译")
+		context["skipped"] = "英文字幕文件不存在"
 		return true // 没有字幕文件不算失败
 	}
 	t.App.Logger.Infof("  │ 📄 使用字幕: %s", filepath.Base(enSRTPath))
@@ -162,6 +164,7 @@ func (t *TranslateSubtitle) Execute(context map[string]interface{}) bool {
 
 	if len(srtEntries) == 0 {
 		t.App.Logger.Warn("⚠️  字幕内容为空，跳过翻译")
+		context["skipped"] = "字幕内容为空"
 		return true
 	}
 

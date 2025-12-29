@@ -14,7 +14,6 @@ func MigrateDatabase(db *gorm.DB) error {
 		return err
 	}
 
-	// GORM 自动迁移（创建表和添加新字段）
 	return db.AutoMigrate(
 		&model.User{},
 		&model.SavedVideo{},
@@ -22,8 +21,9 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.App{},
 		&model.UserToken{},
 		&model.UserBiliAccount{},
-		&model.UserAIConfig{},   // 用户AI配置
-		&model.UserPreference{}, // 用户偏好设置
+		&model.UserAIConfig{},      // 用户AI配置
+		&model.UserPreference{},    // 用户偏好设置
+		&model.EmailVerification{}, // 邮箱验证码
 	)
 }
 

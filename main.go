@@ -153,6 +153,39 @@ func main() {
 		fx.Provide(func() *auth.JWTService {
 			return auth.NewJWTService(auth.DefaultJWTConfig())
 		}),
+		fx.Provide(func(config *types.AppConfig) *services.EmailService {
+			// 无条件调试日志
+			log.Printf("🔧 [EmailService] SMTPConfig: %+v", config.SMTPConfig)
+			if config.SMTPConfig != nil {
+				log.Printf("🔧 [EmailService] Username=%s, Password=%s, Enabled=%v",
+					config.SMTPConfig.Username,
+					func() string {
+						if config.SMTPConfig.Password == "" {
+							return "(empty)"
+						} else {
+							return "(set)"
+						}
+					}(),
+					config.SMTPConfig.Enabled)
+			}
+
+			// 从环境变量读取 SMTP 密码
+			if config.SMTPConfig != nil && config.SMTPConfig.Username != "" && config.SMTPConfig.Password == "" {
+				// 如果配置了用户名但没有密码，尝试从环境变量读取
+				if password := os.Getenv("SMTP_PASSWORD"); password != "" {
+					config.SMTPConfig.Password = password
+					log.Println("✅ SMTP 密码已从环境变量 SMTP_PASSWORD 读取")
+				} else {
+					log.Println("⚠️ 未设置 SMTP_PASSWORD 环境变量，邮件服务将在开发模式运行")
+				}
+			}
+			if config.SMTPConfig != nil && config.SMTPConfig.Enabled && config.SMTPConfig.Password != "" {
+				log.Println("📧 SMTP 邮件服务已启用:", config.SMTPConfig.Host)
+			} else if config.SMTPConfig != nil && config.SMTPConfig.Enabled {
+				log.Println("⚠️ SMTP 已配置但缺少密码，邮件服务将在开发模式运行")
+			}
+			return services.NewEmailService(config.SMTPConfig)
+		}),
 		fx.Provide(auth.NewAuthMiddleware),
 		fx.Provide(auth.NewAuthHandler),
 

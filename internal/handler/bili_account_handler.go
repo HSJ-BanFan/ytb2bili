@@ -36,10 +36,11 @@ func (h *BiliAccountHandler) RegisterRoutes(server *core.AppServer, authMiddlewa
 	biliAccount := api.Group("/bili-accounts")
 	biliAccount.Use(authMiddleware.JWTAuth())
 	{
-		biliAccount.GET("", h.listAccounts)           // 获取用户的所有B站账号
-		biliAccount.POST("/bind", h.bindAccount)      // 绑定新账号
-		biliAccount.DELETE("/:id", h.unbindAccount)   // 解绑账号
-		biliAccount.PUT("/:id/primary", h.setPrimary) // 设置主账号
+		biliAccount.GET("", h.listAccounts)                     // 获取用户的所有B站账号
+		biliAccount.POST("/bind", h.bindAccount)                // 绑定新账号（传入 login_info）
+		biliAccount.POST("/bind-from-qrcode", h.bindFromQRCode) // 从扫码结果绑定
+		biliAccount.DELETE("/:id", h.unbindAccount)             // 解绑账号
+		biliAccount.PUT("/:id/primary", h.setPrimary)           // 设置主账号
 		biliAccount.PUT("/:id/enable", h.enableAccount)
 		biliAccount.PUT("/:id/disable", h.disableAccount)
 	}
@@ -104,6 +105,58 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 
 	// 所有用户都可以绑定多个账号，多账号上传限制在上传环节检查
 	account, err := h.BiliAccountService.BindAccount(userID, req.LoginInfo, req.IsPrimary)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "绑定失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "绑定成功",
+		"data": gin.H{
+			"id":         account.ID,
+			"bili_mid":   account.BiliMid,
+			"bili_name":  account.BiliName,
+			"bili_face":  account.BiliFace,
+			"is_primary": account.IsPrimary,
+		},
+	})
+}
+
+// bindFromQRCode 从B站扫码结果绑定账号（用户登录后扫码绑定）
+func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
+	userID := h.getUserID(c)
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
+		return
+	}
+
+	// 从全局 BiliStore 获取扫码登录信息
+	store := auth.GetBiliStore()
+	if store == nil || !store.IsValid() {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "B站未扫码登录，请先完成扫码",
+		})
+		return
+	}
+
+	// 获取登录信息
+	loginInfo, err := store.Load()
+	if err != nil || loginInfo == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "无法获取B站登录信息: " + err.Error(),
+		})
+		return
+	}
+
+	// 绑定账号到当前用户
+	// 如果用户没有其他账号，设为主账号
+	existingAccounts, _ := h.BiliAccountService.GetUserAccounts(userID)
+	isPrimary := len(existingAccounts) == 0
+
+	account, err := h.BiliAccountService.BindAccount(userID, loginInfo, isPrimary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "绑定失败: " + err.Error()})
 		return

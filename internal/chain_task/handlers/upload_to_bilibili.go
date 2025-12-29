@@ -238,16 +238,6 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 	t.App.Logger.Infof("║  成功: %d/%d 个账号", successCount, len(accounts))
 	t.App.Logger.Info("╚══════════════════════════════════════════════════════════════╝")
 
-	// 5. 保存结果到数据库和context
-	// 构建完整的上传结果JSON
-	uploadResultsJSON, _ := json.Marshal(map[string]interface{}{
-		"total_accounts":  len(accounts),
-		"success_count":   successCount,
-		"primary_bvid":    firstBVID,
-		"primary_aid":     firstAID,
-		"account_results": uploadResults,
-	})
-
 	if successCount > 0 {
 		savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
 		if err == nil {
@@ -294,8 +284,14 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 	}
 
 	// 保存上传结果到context，供任务步骤记录使用
-	context["upload_results"] = string(uploadResultsJSON)
-	context["result_data"] = string(uploadResultsJSON)
+	// 直接存储对象，避免双重JSON序列化
+	context["result_data"] = map[string]interface{}{
+		"total_accounts":  len(accounts),
+		"success_count":   successCount,
+		"primary_bvid":    firstBVID,
+		"primary_aid":     firstAID,
+		"account_results": uploadResults,
+	}
 
 	// 至少有一个账号上传成功就算成功
 	if successCount > 0 {
@@ -607,8 +603,22 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 
 		// 根据配置选择标题来源
 		biliConfig := t.App.Config.BilibiliConfig
-		if biliConfig != nil && biliConfig.CustomTitleTemplate != "" {
-			// 使用自定义标题模板
+
+		// 优先使用 upload_* 字段（由"确认元数据"任务设置）
+		if savedVideo.UploadTitle != "" {
+			title = savedVideo.UploadTitle
+			sourceLabel := ""
+			switch savedVideo.MetadataSource {
+			case "ai_generated":
+				sourceLabel = "✨ AI生成"
+			case "user_edited":
+				sourceLabel = "📝 用户编辑"
+			default:
+				sourceLabel = "📹 原始"
+			}
+			t.App.Logger.Infof("✓ 使用预设标题 [%s]: %s", sourceLabel, title)
+		} else if biliConfig != nil && biliConfig.CustomTitleTemplate != "" {
+			// 回退到旧逻辑：使用自定义标题模板（兼容未执行"确认元数据"的情况）
 			title = biliConfig.CustomTitleTemplate
 			// 清理原标题中的标签
 			cleanedOriginalTitle := cleanTitle(savedVideo.Title)
@@ -665,8 +675,21 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 		}
 
 		// 根据配置选择描述来源
-		if biliConfig != nil && biliConfig.CustomDescTemplate != "" {
-			// 使用自定义模板
+		// 优先使用 upload_desc 字段（由"确认元数据"任务设置）
+		if savedVideo.UploadDesc != "" {
+			desc = savedVideo.UploadDesc
+			sourceLabel := ""
+			switch savedVideo.MetadataSource {
+			case "ai_generated":
+				sourceLabel = "✨ AI生成"
+			case "user_edited":
+				sourceLabel = "📝 用户编辑"
+			default:
+				sourceLabel = "📹 原始"
+			}
+			t.App.Logger.Infof("✓ 使用预设描述 [%s]", sourceLabel)
+		} else if biliConfig != nil && biliConfig.CustomDescTemplate != "" {
+			// 回退到旧逻辑：使用自定义模板（兼容未执行"确认元数据"的情况）
 			desc = biliConfig.CustomDescTemplate
 			desc = strings.ReplaceAll(desc, "{original_desc}", savedVideo.Description)
 			desc = strings.ReplaceAll(desc, "{ai_desc}", savedVideo.GeneratedDesc)
@@ -716,10 +739,13 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 			}
 		}
 
-		// 使用AI生成的标签
-		if savedVideo.GeneratedTags != "" {
+		// 使用标签（优先使用 upload_tags）
+		if savedVideo.UploadTags != "" {
+			tags = savedVideo.UploadTags
+			t.App.Logger.Infof("✓ 使用预设标签: %s", tags)
+		} else if savedVideo.GeneratedTags != "" {
 			tags = savedVideo.GeneratedTags
-			t.App.Logger.Infof("✓ 使用数据库中AI生成的标签: %s", tags)
+			t.App.Logger.Infof("✓ 使用AI生成的标签: %s", tags)
 		}
 
 		// B站简介字数限制（2000字）

@@ -108,7 +108,7 @@ interface JWTLoginResponse {
   user: JWTUser;
 }
 
-// B站认证相关 API（扫码登录）
+// B站认证相关 API（用于扫码绑定B站账户）
 export const authApi = {
   // 获取登录二维码
   getQRCode: (): Promise<ApiResponse<QRCodeResponse>> => {
@@ -135,16 +135,49 @@ export const authApi = {
     username: string;
     email: string;
     password: string;
+    verification_code: string;
   }): Promise<ApiResponse<JWTLoginResponse>> => {
     return api.post("/user/register", data);
   },
 
-  // JWT 用户登录
+  // 发送邮箱验证码
+  sendVerificationCode: (data: {
+    email: string;
+    type: "register" | "login" | "reset_password";
+  }): Promise<ApiResponse<{ email: string; expires_in: number; type: string }>> => {
+    return api.post("/user/send-verification-code", data);
+  },
+
+  // JWT 用户登录（邮箱+密码）
   login: (data: {
-    username: string;
+    email: string;
     password: string;
   }): Promise<ApiResponse<JWTLoginResponse>> => {
     return api.post("/user/login", data);
+  },
+
+  // 验证码登录（邮箱+验证码）
+  loginWithCode: (data: {
+    email: string;
+    verification_code: string;
+  }): Promise<ApiResponse<JWTLoginResponse>> => {
+    return api.post("/user/login-with-code", data);
+  },
+
+  // 忘记密码（发送重置验证码）
+  forgotPassword: (data: {
+    email: string;
+  }): Promise<ApiResponse<{ email: string; expires_in: number }>> => {
+    return api.post("/user/forgot-password", data);
+  },
+
+  // 重置密码
+  resetPassword: (data: {
+    email: string;
+    verification_code: string;
+    new_password: string;
+  }): Promise<ApiResponse> => {
+    return api.post("/user/reset-password", data);
   },
 
   // JWT Token 刷新
@@ -164,47 +197,79 @@ export const authApi = {
     return api.post("/user/logout");
   },
 
-  // ============== 多账号管理 API ==============
+  // ============== B站账号管理 API (新接口) ==============
 
-  // 获取所有 B站账号
+  // 获取用户绑定的所有 B站账号
+  getBiliAccounts: (): Promise<ApiResponse<BiliAccount[]>> => {
+    return api.get("/bili-accounts");
+  },
+
+  // 从扫码结果绑定 B站账号
+  bindBiliAccountFromQRCode: (): Promise<ApiResponse<BiliAccount>> => {
+    return api.post("/bili-accounts/bind-from-qrcode");
+  },
+
+  // 解绑 B站账号
+  unbindBiliAccount: (id: number): Promise<ApiResponse> => {
+    return api.delete(`/bili-accounts/${id}`);
+  },
+
+  // 设置主账号
+  setBiliAccountPrimary: (id: number): Promise<ApiResponse> => {
+    return api.put(`/bili-accounts/${id}/primary`);
+  },
+
+  // 启用账号
+  enableBiliAccount: (id: number): Promise<ApiResponse> => {
+    return api.put(`/bili-accounts/${id}/enable`);
+  },
+
+  // 禁用账号
+  disableBiliAccount: (id: number): Promise<ApiResponse> => {
+    return api.put(`/bili-accounts/${id}/disable`);
+  },
+
+  // ============== 旧接口兼容层 (settings 页面使用) ==============
+
+  // 获取所有 B站账号 (旧接口)
   getAccounts: (): Promise<ApiResponse<{ accounts: BiliAccount[] }>> => {
     return api.get("/auth/accounts");
   },
 
-  // 添加新账号（扫码登录后调用）
-  addAccount: (
-    authCode: string
-  ): Promise<ApiResponse<{ account: BiliAccount }>> => {
-    return api.post("/auth/accounts", { auth_code: authCode });
-  },
-
-  // 删除账号
+  // 删除账号 (旧接口)
   removeAccount: (mid: string): Promise<ApiResponse> => {
     return api.delete(`/auth/accounts/${mid}`);
   },
 
-  // 设置账号启用/禁用状态
+  // 设置账号启用/禁用状态 (旧接口)
   setAccountEnabled: (mid: string, enabled: boolean): Promise<ApiResponse> => {
     return api.put(`/auth/accounts/${mid}/enable`, { enabled });
   },
 
-  // 设置主账号
+  // 设置主账号 (旧接口)
   setPrimaryAccount: (mid: string): Promise<ApiResponse> => {
     return api.put(`/auth/accounts/${mid}/primary`);
   },
 };
 
-// B站账号类型
+// B站账号类型 (兼容新旧字段命名)
 export interface BiliAccount {
-  id: string;
-  mid: number;
-  name: string;
-  face: string;
+  id: number | string;
+  // 新字段
+  bili_mid?: number;
+  bili_name?: string;
+  bili_face?: string;
+  // 旧字段
+  mid?: number;
+  name?: string;
+  face?: string;
+  // 通用字段
   is_enabled: boolean;
   is_primary: boolean;
-  is_expired: boolean;
+  is_expired?: boolean;
+  expires_at?: string | null;
+  last_used_at?: string | null;
   created_at: string;
-  expires_at: string;
 }
 
 // 视频相关 API

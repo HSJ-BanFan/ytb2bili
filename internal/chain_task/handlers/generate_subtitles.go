@@ -94,6 +94,7 @@ func (t *GenerateSubtitles) Execute(context map[string]interface{}) bool {
 	// 2. 检查字幕数据是否存在
 	if savedVideo.Subtitles == "" || savedVideo.Subtitles == "null" || savedVideo.Subtitles == "[]" {
 		t.App.Logger.Warn("⚠️  视频没有字幕数据，跳过字幕生成")
+		context["skipped"] = "视频没有字幕数据"
 		return true // 没有字幕不算错误，继续执行后续任务
 	}
 
@@ -107,6 +108,7 @@ func (t *GenerateSubtitles) Execute(context map[string]interface{}) bool {
 
 	if len(subtitles) == 0 {
 		t.App.Logger.Warn("⚠️  字幕数据为空，跳过字幕生成")
+		context["skipped"] = "字幕数据为空"
 		return true
 	}
 
