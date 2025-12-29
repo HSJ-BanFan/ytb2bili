@@ -1,0 +1,81 @@
+# 数据库文件
+*.db 
+
+# 配置文件 (保留示例文件)
+config.toml
+!config.toml.example
+!config.mysql.toml.example
+!config.postgres.toml.example
+
+# IDE 文件
+.idea/
+.vscode/
+*.swp
+*.swo
+node_modules
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.toml
+# 日志文件
+logs/
+*.log
+
+# 构建产物
+ytb2bili-*
+bili-up-api-server
+bili_up_backend
+dist/
+build/
+# Next.js 构建产物
+.next/
+*/_next/
+web/output/
+web/out/
+internal/web/bili-up-web/_next/
+
+# 编译产物
+*.exe
+*.exe~
+
+# 依赖
+node_modules/
+vendor/
+
+# local demos (keep private)
+nextjs-learn-demos/
+xianyu-auto-reply/
+
+output/
+# 临时文件
+*.tmp
+*.temp
+.env
+.env.local
+
+# 上传文件
+uploads/
+media/
+data/
+
+# 测试覆盖率
+*.out
+coverage.html
+
+# Docker
+.dockerignore
+config.toml.backup
+cookies.txt
+ytb2bili.exe
+yt-dlp.exe
+
+# 编译的前端资源 (运行时嵌入)
+internal/web/bili-up-web/out/
+
+# 临时脚本
+*.ps1
+FRONTEND_BUILD_GUIDE.md
+METADATA_REFACTORING.md
+clear_cache_guide.html
+
