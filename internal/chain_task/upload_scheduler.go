@@ -789,6 +789,7 @@ func (s *UploadScheduler) findCoverImage(dir string) string {
 }
 
 // triggerAutoCleanup 触发自动清理（如果启用）
+// 清理模式由配置决定：immediate=立即清理，delayed=延迟清理（默认60分钟）
 func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 	// 检查是否启用自动清理
 	if s.App.Config == nil || s.App.Config.DownloadConfig == nil {
@@ -803,7 +804,7 @@ func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 	// 获取清理模式和延迟时间
 	cleanupMode := config.AutoCleanupMode
 	if cleanupMode == "" {
-		cleanupMode = "delayed"
+		cleanupMode = "delayed" // 默认延迟清理
 	}
 	cleanupDelay := config.AutoCleanupDelay
 	if cleanupDelay <= 0 {
@@ -811,12 +812,12 @@ func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 	}
 
 	if cleanupMode == "immediate" {
-		// 立即清理
-		s.logger.Infof("🧹 自动清理模式: 立即清理 - VideoID: %s", videoID)
+		// 立即清理（用户可在config.toml中配置）
+		s.logger.Infof("🧹 自动清理: 立即清理 - VideoID: %s", videoID)
 		go s.cleanupVideoFiles(videoID)
 	} else {
-		// 延迟清理
-		s.logger.Infof("🧹 自动清理模式: 延迟%d分钟 - VideoID: %s", cleanupDelay, videoID)
+		// 延迟清理（默认）
+		s.logger.Infof("🧹 自动清理: 将在%d分钟后清理 - VideoID: %s", cleanupDelay, videoID)
 		go func(vid string, delay int) {
 			time.Sleep(time.Duration(delay) * time.Minute)
 			s.cleanupVideoFiles(vid)
