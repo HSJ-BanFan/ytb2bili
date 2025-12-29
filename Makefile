@@ -6,7 +6,8 @@ all: build
 # 项目路径
 ROOT_DIR := $(shell pwd)
 WEB_DIR := $(ROOT_DIR)/web
-OUT_DIR := $(WEB_DIR)/output
+# Next.js 配置了 distDir: '../internal/web/bili-up-web'
+# 所以构建输出直接到目标目录，不需要复制
 TARGET_DIR := $(ROOT_DIR)/internal/web/bili-up-web
 BINARY_NAME := bili-up-api-server
 
@@ -71,34 +72,16 @@ build-web:
 	@cd $(WEB_DIR) && \
 	export BACKEND_URL=$${BACKEND_URL:-http://localhost:8096} && \
 	npm run build
-	
-	@# Next.js 15+ 使用 output: 'export' 配置后，build 命令会自动导出到 out 目录
-	@# 检查导出结果
-	@if [ ! -d "$(OUT_DIR)" ]; then \
-		echo "❌ 导出失败: 找不到输出目录 $(OUT_DIR)"; \
-		echo "   请确认 next.config.js 中已配置 output: 'export' 和 distDir: 'out'"; \
+
+	@# Next.js 已配置 distDir: '../internal/web/bili-up-web'
+	@# 所以构建产物直接输出到目标目录，不需要复制
+	@# 检查构建结果
+	@if [ ! -d "$(TARGET_DIR)" ] || [ -z "$$(ls -A $(TARGET_DIR) 2>/dev/null)" ]; then \
+		echo "❌ 构建失败: 找不到输出目录 $(TARGET_DIR)"; \
+		echo "   请检查 Next.js 构建日志"; \
 		exit 1; \
 	fi
-	
-	@# 复制到目标目录
-	@echo "📋 复制静态文件到 Go 项目..."
-	@rm -rf $(TARGET_DIR)
-	@mkdir -p $(TARGET_DIR)
-	@cp -a $(OUT_DIR)/. $(TARGET_DIR)/
-	
-	@# 复制 public 资源（如果存在）
-	@if [ -d "$(WEB_DIR)/public" ]; then \
-		echo "📋 复制 public 资源..."; \
-		cp -a $(WEB_DIR)/public/. $(TARGET_DIR)/ 2>/dev/null || true; \
-	fi
-	
-	@# 复制 _next/static（如果需要）
-	@if [ -d "$(WEB_DIR)/.next/static" ]; then \
-		echo "📋 复制 _next/static..."; \
-		mkdir -p $(TARGET_DIR)/_next; \
-		cp -a $(WEB_DIR)/.next/static $(TARGET_DIR)/_next/ 2>/dev/null || true; \
-	fi
-	
+
 	@echo "✅ 前端构建完成"
 	@echo "📂 静态文件位置: $(TARGET_DIR)"
 
@@ -137,12 +120,8 @@ clean:
 	@echo "🧹 清理构建产物..."
 	@rm -f $(BINARY_NAME)
 	@rm -rf $(TARGET_DIR)
-	@rm -rf $(OUT_DIR)
 	@if [ -d "$(WEB_DIR)/.next" ]; then \
 		rm -rf $(WEB_DIR)/.next; \
-	fi
-	@if [ -d "$(WEB_DIR)/out" ]; then \
-		rm -rf $(WEB_DIR)/out; \
 	fi
 	@$(GOCLEAN)
 	@echo "✅ 清理完成"
