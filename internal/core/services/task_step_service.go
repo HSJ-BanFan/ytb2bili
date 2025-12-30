@@ -230,6 +230,9 @@ func (s *TaskStepService) GetTaskProgress(videoID string) (map[string]interface{
 func (s *TaskStepService) ResetAllRunningTasks() error {
 	// 开始事务
 	tx := s.DB.Begin()
+	// 确保事务在任何情况下都能正确回滚（包括 panic）
+	// 注意：如果 Commit() 成功，后续的 Rollback() 是 no-op
+	defer tx.Rollback()
 
 	// 重置所有状态为 Running 的任务步骤为 Pending
 	result := tx.Model(&model.TaskStep{}).
@@ -237,7 +240,6 @@ func (s *TaskStepService) ResetAllRunningTasks() error {
 		Update("status", model.TaskStepStatusPending)
 
 	if result.Error != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to reset running task steps: %v", result.Error)
 	}
 
@@ -250,7 +252,6 @@ func (s *TaskStepService) ResetAllRunningTasks() error {
 		Update("status", "001")
 
 	if videoResult.Error != nil {
-		tx.Rollback()
 		return fmt.Errorf("failed to reset running video status: %v", videoResult.Error)
 	}
 

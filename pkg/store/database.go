@@ -70,9 +70,22 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 
 	// 设置连接池参数（SQLite 不需要连接池，但设置也不会有问题）
 	if config.Database.Type != "sqlite" && config.Database.Type != "sqlite3" {
+		// 最大打开连接数：根据细粒度锁的并发需求调整
+		// 支持 max_concurrent_uploads（默认5）+ 常规查询 + 预留
+		sqlDB.SetMaxOpenConns(100)  // 支持高并发场景
+
+		// 最大空闲连接数：保持 10% 的 MaxOpenConns
+		// 平衡连接复用和资源占用
 		sqlDB.SetMaxIdleConns(10)
-		sqlDB.SetMaxOpenConns(100)
+
+		// 连接最大生命周期：1小时
+		// 防止长期连接导致的数据库端问题（超时、连接泄漏等）
 		sqlDB.SetConnMaxLifetime(time.Hour)
+
+		// 连接最大空闲时间：10分钟（新增）
+		// 空闲连接超过10分钟会被回收，释放资源
+		// 与 MaxIdleConns 配合，避免连接池膨胀
+		sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 	} else {
 		// SQLite 使用单个连接
 		sqlDB.SetMaxOpenConns(1)

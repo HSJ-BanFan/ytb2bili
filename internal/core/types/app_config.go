@@ -251,6 +251,10 @@ type DownloadConfig struct {
 	SubtitleUploadDelay int    `toml:"subtitle_upload_delay"` // 视频上传后字幕延迟上传时间（分钟，默认10）
 	UploadCheckInterval int    `toml:"upload_check_interval"` // 上传调度器检查间隔（秒，默认10）
 
+	// 并发上传配置（功能开关）
+	EnableFineGrainedLock bool `toml:"enable_fine_grained_lock"` // 是否启用细粒度锁（默认true）- true=使用事务锁，false=使用全局锁（兼容模式）
+	MaxConcurrentUploads  int  `toml:"max_concurrent_uploads"`   // 最大并发上传数（默认5，防止资源耗尽）
+
 	// 自动清理配置
 	AutoCleanupEnabled bool   `toml:"auto_cleanup_enabled"` // 是否启用自动清理（默认false）
 	AutoCleanupMode    string `toml:"auto_cleanup_mode"`    // 清理模式: immediate=立即, delayed=延迟（默认delayed）

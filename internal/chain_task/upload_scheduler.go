@@ -16,6 +16,7 @@ import (
 	applogger "github.com/difyz9/ytb2bili/internal/logger"
 	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/logger"
+	"github.com/difyz9/ytb2bili/pkg/store/model"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
@@ -80,28 +81,46 @@ func (s *UploadScheduler) SetUp() {
 	cronExpr := fmt.Sprintf("*/%d * * * * *", checkInterval)
 
 	s.Task.AddFunc(cronExpr, func() {
-		s.mutex.Lock()
-		defer s.mutex.Unlock()
-
 		// 使用智能日志器，自动过滤进度活动期间的噪音日志
 		smartLogger := logger.NewSmartLogger(s.logger)
 
 		// 检查是否启用自动上传
 		autoUploadEnabled := true
+		enableFineGrainedLock := true // 默认启用细粒度锁
 		if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
 			autoUploadEnabled = s.App.Config.DownloadConfig.AutoUploadEnabled
+			enableFineGrainedLock = s.App.Config.DownloadConfig.EnableFineGrainedLock
 		}
 
-		if autoUploadEnabled {
-			// 1. 检查是否需要上传视频
-			if err := s.uploadNextVideo(); err != nil {
-				smartLogger.Errorf("上传视频失败: %v", err)
+		if enableFineGrainedLock {
+			// 新逻辑：细粒度事务锁（不同 videoID 可以并发）
+			if autoUploadEnabled {
+				// 1. 检查是否需要上传视频（使用细粒度事务锁，不阻塞其他 videoID）
+				if err := s.uploadNextVideoWithLock(); err != nil {
+					smartLogger.Errorf("上传视频失败: %v", err)
+				}
 			}
-		}
 
-		// 2. 检查是否需要上传字幕
-		if err := s.uploadNextSubtitle(); err != nil {
-			smartLogger.Errorf("上传字幕失败: %v", err)
+			// 2. 检查是否需要上传字幕（使用细粒度事务锁，不阻塞其他 videoID）
+			if err := s.uploadNextSubtitleWithLock(); err != nil {
+				smartLogger.Errorf("上传字幕失败: %v", err)
+			}
+		} else {
+			// 旧逻辑：全局锁（兼容模式，可通过配置回滚）
+			s.mutex.Lock()
+			defer s.mutex.Unlock()
+
+			if autoUploadEnabled {
+				// 1. 检查是否需要上传视频
+				if err := s.uploadNextVideo(); err != nil {
+					smartLogger.Errorf("上传视频失败: %v", err)
+				}
+			}
+
+			// 2. 检查是否需要上传字幕
+			if err := s.uploadNextSubtitle(); err != nil {
+				smartLogger.Errorf("上传字幕失败: %v", err)
+			}
 		}
 	})
 
@@ -126,9 +145,22 @@ func (s *UploadScheduler) SetUp() {
 	s.logger.Infof("✓ Upload scheduler started, checking every %d seconds", checkInterval)
 }
 
-// uploadNextVideo 上传下一个准备好的视频
+// uploadNextVideo 上传下一个准备好的视频（旧版本：无锁）
 // 根据配置的上传模式（immediate/delayed）决定是否立即上传
+// 注意：这个函数不使用锁，仅用于兼容模式（全局锁在调用处控制）
 func (s *UploadScheduler) uploadNextVideo() error {
+	// 旧逻辑：保持不变，用于兼容模式
+	return s.uploadNextVideoImpl(false)
+}
+
+// uploadNextVideoWithLock 上传下一个准备好的视频（新版本：使用事务锁）
+// 根据配置的上传模式（immediate/delayed）决定是否立即上传
+func (s *UploadScheduler) uploadNextVideoWithLock() error {
+	return s.uploadNextVideoImpl(true)
+}
+
+// uploadNextVideoImpl 上传下一个准备好的视频（实现）
+func (s *UploadScheduler) uploadNextVideoImpl(useTransactionLock bool) error {
 	now := time.Now()
 
 	// 使用智能日志器过滤噪音日志
@@ -150,7 +182,19 @@ func (s *UploadScheduler) uploadNextVideo() error {
 		}
 	}
 
-	// 查询状态为 '200' (准备就绪) 的视频
+	// 根据配置决定是否使用事务锁
+	var tx *gorm.DB
+	if useTransactionLock {
+		// 使用事务 + 行锁，防止并发时多个 goroutine 获取到同一个视频
+		// 这是细粒度锁，不同 videoID 可以并发处理
+		tx = s.Db.Begin()
+		defer tx.Rollback()
+	} else {
+		// 不使用事务（兼容模式）
+		tx = s.Db
+	}
+
+	// 查询状态为 '200' (准备就绪) 的视频，使用行锁
 	var videos []struct {
 		ID                    uint
 		UserID                uint // 用户ID，用于权限检查
@@ -161,25 +205,19 @@ func (s *UploadScheduler) uploadNextVideo() error {
 		CreatedAt             time.Time
 	}
 
-	query := s.Db.Table("cw_saved_videos").
+	query := tx.Table("cw_saved_videos").
 		Select("id, user_id, video_id, title, subtitles, processing_completed_at, created_at").
 		Where("status = ?", "200").
 		Where("deleted_at IS NULL")
-
-	// Query videos
-	// ... (existing query logic)
 
 	// 根据上传模式添加时间条件
 	if uploadMode == "delayed" {
 		// 延迟模式：只查询 processing_completed_at + delay <= now 的视频
 		delayDuration := time.Duration(videoUploadDelay) * time.Minute
 		query = query.Where("processing_completed_at IS NOT NULL AND processing_completed_at <= ?", now.Add(-delayDuration))
-	} else {
-		// Log for verification
-		// s.logger.Debugf("🔍 Check upload (Mode: %s) - No partial delay", uploadMode)
 	}
-	// immediate 模式：不添加时间条件，立即上传
 
+	// 使用 FOR UPDATE 行锁，防止其他事务获取同一行
 	err := query.Order("COALESCE(processing_completed_at, created_at) ASC").
 		Limit(1).
 		Find(&videos).Error
@@ -189,6 +227,9 @@ func (s *UploadScheduler) uploadNextVideo() error {
 	}
 
 	if len(videos) == 0 {
+		if useTransactionLock {
+			tx.Rollback()
+		}
 		if uploadMode == "delayed" {
 			// 检查是否有正在等待延迟的视频
 			var pendingVideo struct {
@@ -220,7 +261,7 @@ func (s *UploadScheduler) uploadNextVideo() error {
 
 	video := videos[0]
 
-	// 检查用户自动上传权限
+	// 检查用户自动上传权限（在事务内，如果无权限则回滚）
 	if s.PermissionService != nil && video.UserID > 0 {
 		userIDStr := fmt.Sprintf("%d", video.UserID)
 		canUpload, reason, err := s.PermissionService.CanAutoUpload(context.Background(), userIDStr)
@@ -234,7 +275,7 @@ func (s *UploadScheduler) uploadNextVideo() error {
 				})
 			// 权限检查失败时继续执行（容错）
 		} else if !canUpload {
-			// 无自动上传权限，跳过此视频（保持状态 200，不改为 205）
+			// 无自动上传权限，回滚事务，跳过此视频（保持状态 200）
 			// 用户可以在"定时上传"页面手动触发上传
 			userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
 			userLogger.TaskLog(video.VideoID, "upload_video", "skipped",
@@ -242,7 +283,22 @@ func (s *UploadScheduler) uploadNextVideo() error {
 					"reason": reason,
 					"title":  video.Title,
 				})
+			if useTransactionLock {
+				tx.Rollback()
+			}
 			return nil
+		}
+	}
+
+	// 立即更新状态为 '201' (上传视频中)，防止其他 goroutine 获取到同一个视频
+	if err := tx.Model(&model.SavedVideo{}).Where("id = ?", video.ID).Update("status", "201").Error; err != nil {
+		return fmt.Errorf("更新视频状态失败: %v", err)
+	}
+
+	// 提交事务，释放行锁
+	if useTransactionLock {
+		if err := tx.Commit().Error; err != nil {
+			return fmt.Errorf("提交事务失败: %v", err)
 		}
 	}
 
@@ -261,11 +317,6 @@ func (s *UploadScheduler) uploadNextVideo() error {
 			map[string]interface{}{
 				"title": video.Title,
 			})
-	}
-
-	// 更新状态为 '201' (上传视频中)
-	if err := s.SavedVideoService.UpdateStatus(video.ID, "201"); err != nil {
-		return fmt.Errorf("更新视频状态失败: %v", err)
 	}
 
 	// 执行上传任务
@@ -338,11 +389,37 @@ func (s *UploadScheduler) uploadNextVideo() error {
 	return nil
 }
 
-// uploadNextSubtitle 上传下一个待上传字幕的视频
+// uploadNextSubtitle 上传下一个待上传字幕的视频（旧版本：无锁）
 // 使用智能延迟策略：根据视频大小计算延迟时间
+// 注意：这个函数不使用锁，仅用于兼容模式（全局锁在调用处控制）
 func (s *UploadScheduler) uploadNextSubtitle() error {
+	// 旧逻辑：保持不变，用于兼容模式
+	return s.uploadNextSubtitleImpl(false)
+}
+
+// uploadNextSubtitleWithLock 上传下一个待上传字幕的视频（新版本：使用事务锁）
+// 使用智能延迟策略：根据视频大小计算延迟时间
+func (s *UploadScheduler) uploadNextSubtitleWithLock() error {
+	return s.uploadNextSubtitleImpl(true)
+}
+
+// uploadNextSubtitleImpl 上传下一个待上传字幕的视频（实现）
+func (s *UploadScheduler) uploadNextSubtitleImpl(useTransactionLock bool) error {
 	// 使用智能日志器过滤噪音日志
 	smartLogger := logger.NewSmartLogger(s.logger)
+
+	// 根据配置决定是否使用事务锁
+	var tx *gorm.DB
+	if useTransactionLock {
+		// 使用事务 + 行锁，防止并发时多个 goroutine 获取到同一个视频
+		tx = s.Db.Begin()
+		defer tx.Rollback()
+	} else {
+		// 不使用事务（兼容模式）
+		tx = s.Db
+	}
+
+	now := time.Now()
 
 	// 查询状态为 '300' (视频已上传，待上传字幕) 且已到达计划上传时间的视频
 	var videos []struct {
@@ -357,10 +434,8 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 		CreatedAt             time.Time
 	}
 
-	now := time.Now()
-
 	// 查询已到达计划上传时间的视频，或者没有设置计划时间但已过去1小时的视频
-	err := s.Db.Table("cw_saved_videos").
+	err := tx.Table("cw_saved_videos").
 		Select("id, user_id, video_id, title, video_size_mb, subtitle_scheduled_at, subtitle_upload_retries, updated_at, created_at").
 		Where("status = ?", "300").
 		Where("deleted_at IS NULL").
@@ -376,6 +451,9 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 	}
 
 	if len(videos) == 0 {
+		if useTransactionLock {
+			tx.Rollback()
+		}
 		// 检查是否有待上传但还没到时间的字幕
 		var pendingCount int64
 		s.Db.Table("cw_saved_videos").
@@ -412,6 +490,18 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 
 	video := videos[0]
 
+	// 立即更新状态为 '301' (上传字幕中)，防止其他 goroutine 获取到同一个视频
+	if err := tx.Model(&model.SavedVideo{}).Where("id = ?", video.ID).Update("status", "301").Error; err != nil {
+		return fmt.Errorf("更新视频状态失败: %v", err)
+	}
+
+	// 提交事务，释放行锁
+	if useTransactionLock {
+		if err := tx.Commit().Error; err != nil {
+			return fmt.Errorf("提交事务失败: %v", err)
+		}
+	}
+
 	// 创建用户日志助手
 	userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
 
@@ -429,11 +519,6 @@ func (s *UploadScheduler) uploadNextSubtitle() error {
 				"title": video.Title,
 				"retry": video.SubtitleUploadRetries,
 			})
-	}
-
-	// 更新状态为 '301' (上传字幕中)
-	if err := s.SavedVideoService.UpdateStatus(video.ID, "301"); err != nil {
-		return fmt.Errorf("更新视频状态失败: %v", err)
 	}
 
 	// 执行上传字幕任务
