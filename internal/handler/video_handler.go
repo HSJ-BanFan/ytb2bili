@@ -29,6 +29,7 @@ type VideoHandler struct {
 	// 任务取消管理器接口
 	CancelManager interface {
 		Cancel(id uint)
+		ClearCancel(id uint)
 	}
 }
 
@@ -51,6 +52,7 @@ func (h *VideoHandler) SetUploadScheduler(scheduler interface {
 // SetCancelManager 设置任务取消管理器
 func (h *VideoHandler) SetCancelManager(cancelManager interface {
 	Cancel(id uint)
+	ClearCancel(id uint)
 }) {
 	h.CancelManager = cancelManager
 }
@@ -389,6 +391,21 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 			h.App.Logger.Warnf("更新视频状态失败: %v", err)
 		} else {
 			h.App.Logger.Infof("✅ 视频状态已更新为 200（准备上传）")
+		}
+
+		// 清除取消状态，允许 UploadScheduler 重新处理该任务
+		if h.CancelManager != nil {
+			h.CancelManager.ClearCancel(savedVideo.ID)
+			h.App.Logger.Infof("✅ 已清除任务的取消状态，允许重新上传")
+		}
+	}
+
+	// 如果重试的是字幕上传步骤，需要同时清除取消状态
+	if stepName == "上传字幕到Bilibili" {
+		// 清除取消状态，允许 UploadScheduler 重新处理该任务
+		if h.CancelManager != nil {
+			h.CancelManager.ClearCancel(savedVideo.ID)
+			h.App.Logger.Infof("✅ 已清除任务的取消状态，允许重新上传字幕")
 		}
 	}
 

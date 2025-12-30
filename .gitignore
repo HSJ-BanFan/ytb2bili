@@ -21,8 +21,8 @@ config.toml
 # ============================================
 # 运行时生成的文件（保留在根目录，但不提交到git）
 # ============================================
-cookies.txt           # YouTube cookies（运行时需要）
-cookies_backup.txt    # Cookies 备份
+cookies.txt
+cookies_backup.txt
 *.log
 server.log
 upload_test.log
@@ -68,9 +68,9 @@ internal/web/bili-up-web/_next/
 # ============================================
 # 编译产物（保留在根目录，但不提交到git）
 # ============================================
-*.exe              # 可执行文件（运行时需要）
+*.exe
 *.exe~
-yt-dlp.exe         # yt-dlp 二进制文件
+yt-dlp.exe
 *.dll
 *.so
 *.dylib

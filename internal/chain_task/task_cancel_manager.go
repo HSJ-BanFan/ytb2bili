@@ -89,3 +89,13 @@ func (m *TaskCancelManager) Count() int {
 
 	return len(m.cancels)
 }
+
+// ClearCancel 清除指定 ID 的取消状态（用于任务重试时重置）
+// 这将删除旧的 cancel 函数，允许任务被重新注册
+func (m *TaskCancelManager) ClearCancel(id uint) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := fmt.Sprintf("%d", id)
+	delete(m.cancels, key)
+}

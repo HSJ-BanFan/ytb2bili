@@ -190,8 +190,10 @@ func (m *AuthMiddleware) JWTAuth() gin.HandlerFunc {
 
 		// 检查 Token 是否被撤销
 		tokenHash := HashToken(tokenString)
-		var userToken model.UserToken
-		if err := m.db.Where("token_hash = ? AND is_revoked = ?", tokenHash, true).First(&userToken).Error; err == nil {
+		var userTokens []model.UserToken
+		// 使用 Find 而不是 First，避免 record not found 错误日志
+		m.db.Where("token_hash = ? AND is_revoked = ?", tokenHash, true).Limit(1).Find(&userTokens)
+		if len(userTokens) > 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"code":    401,
 				"message": "登录已失效，请重新登录",

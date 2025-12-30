@@ -665,13 +665,12 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 		return fmt.Errorf("获取视频信息失败: %v", err)
 	}
 
-	// 检查是否已被取消
+	// 注册任务到取消管理器，获取可取消的 context
+	var ctx context.Context
 	if s.CancelManager != nil {
-		// 使用 IsCanceled 检查任务是否已被注销
-		if canceled, exists := s.CancelManager.GetCancelFunc(savedVideo.ID); !exists || canceled == nil {
-			s.logger.Infof("⛔ 任务已被取消，跳过上传: VideoID=%s", videoID)
-			return fmt.Errorf("任务已被用户取消")
-		}
+		// 注册任务
+		ctx = s.CancelManager.Register(savedVideo.ID)
+		defer s.CancelManager.Deregister(savedVideo.ID)
 	}
 
 	// 获取当前目录
@@ -692,6 +691,9 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	chain := manager.NewTaskChain()
 	chain.SetLogger(s.logger)
 	chain.SetVideoID(videoID)
+	if ctx != nil {
+		chain.SetContext(ctx)
+	}
 
 	// 预填充 CompletedTasks，跳过依赖检查
 	// UploadScheduler 调度的任务已经通过状态检查（status=200）确保前置条件满足
