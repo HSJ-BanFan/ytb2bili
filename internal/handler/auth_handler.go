@@ -243,6 +243,7 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 	}
 
 	if err != nil {
+		log.Printf("[pollQRCode] PollQRCode 失败: %v, auth_code=%s", err, req.AuthCode)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "Login failed: " + err.Error(),

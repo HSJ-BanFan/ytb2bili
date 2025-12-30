@@ -3,9 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
-	"time"
 
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/difyz9/ytb2bili/pkg/cos"
@@ -29,10 +27,10 @@ type AppServer struct {
 func NewServer(config *types.AppConfig, logger *zap.SugaredLogger) *AppServer {
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
-	gin.DefaultWriter = io.Discard
+	// gin.DefaultWriter = io.Discard // 不要丢弃日志，我们需要看到它！
 	return &AppServer{
 		Config: config,
-		Engine: gin.Default(),
+		Engine: gin.New(), // 使用 New() 而不是 Default()，避免并在下面手动添加必要的中间件
 		Logger: logger,
 	}
 }
@@ -40,6 +38,12 @@ func NewServer(config *types.AppConfig, logger *zap.SugaredLogger) *AppServer {
 // Init 初始化服务器
 func (s *AppServer) Init(db *gorm.DB) {
 	s.DB = db
+
+	// 必须首先添加 Recovery 中间件，以防 panic
+	s.Engine.Use(gin.Recovery())
+
+	// 还有默认的 Logger
+	s.Engine.Use(gin.Logger())
 
 	// 设置中间件
 	s.setupMiddleware()
@@ -57,54 +61,21 @@ func (s *AppServer) setupMiddleware() {
 		if origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, UPDATE")
-			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Accept, Cache-Control, X-Requested-With, X-User-Id")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Accept, Cache-Control, X-Requested-With, X-User-Id, X-Device-Id") // 添加 X-Device-Id
 			c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
 			c.Header("Access-Control-Max-Age", "172800")
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
 
 		if method == http.MethodOptions {
-			c.JSON(http.StatusOK, "ok!")
+			c.AbortWithStatus(http.StatusNoContent)
+			return
 		}
 
-		defer func() {
-			if err := recover(); err != nil {
-				s.Logger.Infof("Panic info is: %v", err)
-			}
-		}()
-
 		c.Next()
 	})
 
-	// 日志中间件
-	s.Engine.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("%s - [%s] \"%s %s %s %d %s \"%s\" %s\"\n",
-			param.ClientIP,
-			param.TimeStamp.Format(time.RFC1123),
-			param.Method,
-			param.Path,
-			param.Request.Proto,
-			param.StatusCode,
-			param.Latency,
-			param.Request.UserAgent(),
-			param.ErrorMessage,
-		)
-	}))
-
-	// 错误处理中间件
-	s.Engine.Use(func(c *gin.Context) {
-		defer func() {
-			if r := recover(); r != nil {
-				s.Logger.Errorf("Handler Panic: %v", r)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"code":    500,
-					"message": "Internal server error",
-				})
-				c.Abort()
-			}
-		}()
-		c.Next()
-	})
+	// 移除重复的 Logger 和 Recovery 配置
 }
 
 // Run 启动服务器

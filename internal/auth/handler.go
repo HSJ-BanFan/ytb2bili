@@ -48,9 +48,9 @@ func (h *AuthHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		userAuth.POST("/login", h.Login)
 		userAuth.POST("/login-with-code", h.LoginWithCode) // 验证码登录
 		userAuth.POST("/refresh", h.RefreshToken)
-		userAuth.POST("/forgot-password", h.ForgotPassword)     // 发送重置密码验证码
-		userAuth.POST("/reset-password", h.ResetPassword)       // 验证码重置密码
-		userAuth.GET("/bili-userinfo", h.GetBiliUserInfo)       // 获取B站用户信息（用于绑定）
+		userAuth.POST("/forgot-password", h.ForgotPassword) // 发送重置密码验证码
+		userAuth.POST("/reset-password", h.ResetPassword)   // 验证码重置密码
+		userAuth.GET("/bili-userinfo", h.GetBiliUserInfo)   // 获取B站用户信息（用于绑定）
 	}
 
 	// 需要认证的路由

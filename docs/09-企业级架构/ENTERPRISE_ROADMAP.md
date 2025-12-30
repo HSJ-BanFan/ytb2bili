@@ -63,10 +63,12 @@
 
 | 任务 | 优先级 | 参考文档 | 预估工时 | 状态 |
 |------|--------|----------|----------|------|
-| 修复 `ResetAllRunningTasks` 事务安全 | P0 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#风险评估与应对措施) | 2h | ⬜ |
-| 修复 `UploadScheduler` 全局锁问题 | P0 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#性能瓶颈分析) | 4h | ⬜ |
-| 添加数据库复合索引 | P1 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#实施路线图) | 1h | ⬜ |
-| 验证数据库连接池配置 | P1 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#方案3-读写分离--连接池) | 1h | ⬜ |
+| 修复 `ResetAllRunningTasks` 事务安全 | P0 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#风险评估与应对措施) | 2h | ✅ |
+| 修复 `UploadScheduler` 全局锁问题 | P0 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#性能瓶颈分析) | 4h | ✅ |
+| 添加数据库复合索引 | P1 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#实施路线图) | 1h | ✅ |
+| 验证数据库连接池配置 | P1 | [SCALABILITY_AND_HA.md](./SCALABILITY_AND_HA.md#方案3-读写分离--连接池) | 1h | ✅ |
+
+> 📋 **Week 1 完成报告**: [WEEK1_COMPLETION_REPORT.md](./WEEK1_COMPLETION_REPORT.md)
 
 ```sql
 -- 数据库索引优化

@@ -76,11 +76,30 @@ func (s *EmailService) SendVerificationEmail(to, code, codeType string) error {
 	m.SetBody("text/html", body)
 
 	d := gomail.NewDialer(smtpHost, smtpPort, s.config.Username, s.config.Password)
+
+	// 设置 LocalName 防止 HELO 命令因 DNS 反向解析而阻塞
+	d.LocalName = "localhost"
+
 	if s.config.UseTLS {
 		d.TLSConfig = &tls.Config{ServerName: smtpHost, InsecureSkipVerify: false}
 	}
 
-	return d.DialAndSend(m)
+	// gomail v2 不支持超时字段，使用 goroutine + channel 实现超时
+	// 注意：超时后底层连接可能仍在阻塞，但会快速返回错误给调用者
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		done <- result{err: d.DialAndSend(m)}
+	}()
+
+	select {
+	case r := <-done:
+		return r.err
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("SMTP 连接超时（10秒），请检查网络或 SMTP 配置")
+	}
 }
 
 // buildRegisterEmailBody 构建注册验证码邮件内容

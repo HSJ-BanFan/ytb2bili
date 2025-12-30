@@ -213,6 +213,8 @@ func main() {
 		}),
 
 		fx.Provide(handler.NewCronHandler),
+		fx.Provide(handler.NewBiliAccountHandler),
+		fx.Provide(handler.NewUserConfigHandler),
 		fx.Invoke(func(h *handler.CronHandler) {
 			h.SetUp()
 		}),
@@ -249,7 +251,6 @@ func main() {
 		fx.Invoke(func(h *chain_task.ChainTaskHandler, limiter *chain_task.ConcurrencyLimiter) {
 			// 注入并发控制器
 			h.ConcurrencyLimiter = limiter
-			// 设置并启动任务消费者（准备阶段：下载、字幕、翻译、元数据）
 			// 设置并启动任务消费者（准备阶段：下载、字幕、翻译、元数据）
 			h.SetUp()
 		}),
@@ -309,18 +310,30 @@ func main() {
 			biliAccountService *services.BiliAccountService,
 			userConfigService *services.UserConfigService,
 			cancelManager *chain_task.TaskCancelManager,
+			biliAccountHandler *handler.BiliAccountHandler,
+			userConfigHandler *handler.UserConfigHandler,
 		) {
 			// 初始化服务器
 			server.Init(db)
 
-			// 添加分析中间件
-			if analyticsMiddleware != nil {
-				server.Engine.Use(analyticsMiddleware.Handler())
-				logger.Info("Analytics middleware registered")
-			}
+			// DEBUG: 全局请求日志中间件 - 必须是第一个!
+			// 已验证问题解决，注释掉日志中间件以保持整洁
+			// server.Engine.Use(func(c *gin.Context) {
+			//     fmt.Println("👉 [Global Middleware] Request received:", c.Request.Method, c.Request.URL.Path)
+			// 	// 打印 Header 看看是否正常
+			// 	// fmt.Println("Headers:", c.Request.Header)
+			//     c.Next()
+			//     fmt.Println("👈 [Global Middleware] Request completed:", c.Request.Method, c.Request.URL.Path, c.Writer.Status())
+			// })
+
+			// 暂时完全禁用分析中间件，排除干扰
+			// if analyticsMiddleware != nil {
+			// 	server.Engine.Use(analyticsMiddleware.Handler())
+			// 	logger.Info("Analytics middleware registered")
+			// }
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService, cancelManager)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService, cancelManager, biliAccountHandler, userConfigHandler)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -537,8 +550,18 @@ func registerHandlers(
 	biliAccountService *services.BiliAccountService,
 	userConfigService *services.UserConfigService,
 	cancelManager *chain_task.TaskCancelManager,
+	biliAccountHandler *handler.BiliAccountHandler,
+	userConfigHandler *handler.UserConfigHandler,
 ) {
 	logger.Info("Registering handlers...")
+
+	// 注册 B站账号管理 Handler
+	biliAccountHandler.RegisterRoutes(server, authMiddleware)
+	logger.Info("✓ Bilibili Account routes registered (New)")
+
+	// 注册用户配置 Handler
+	userConfigHandler.RegisterRoutes(server, authMiddleware)
+	logger.Info("✓ User Config routes registered")
 
 	// 旧的认证 Handler (B站扫码登录)
 	oldFeatureChecker := membership.NewFeatureChecker(membershipStore)
@@ -594,22 +617,11 @@ func registerHandlers(
 	configHandler.RegisterRoutes(server, authMiddleware)
 	logger.Info("✓ Config routes registered")
 
-	// 用户配置 Handler
-	userConfigHandler := handler.NewUserConfigHandler(server, userConfigService)
-	userConfigHandler.RegisterRoutes(server, authMiddleware)
-	logger.Info("✓ User Config routes registered")
-
 	// 会员 Handler（使用可选 JWT 中间件获取用户 ID）
 	membershipGroup := server.Engine.Group("/api/v1")
 	membershipGroup.Use(authMiddleware.OptionalJWTAuth())
 	membershipHandler.RegisterRoutes(membershipGroup)
 	logger.Info("✓ Membership routes registered")
-
-	// B站账号管理 Handler
-	featureChecker := membership.NewFeatureChecker(membershipStore)
-	biliAccountHandler := handler.NewBiliAccountHandler(server, biliAccountService, featureChecker)
-	biliAccountHandler.RegisterRoutes(server, authMiddleware)
-	logger.Info("✓ Bili Account routes registered")
 
 	logger.Info("All handlers registered successfully")
 }

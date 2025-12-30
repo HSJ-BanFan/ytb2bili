@@ -281,7 +281,7 @@ type SMTPConfig struct {
 	From     string `toml:"from"`      // 发件人邮箱
 	FromName string `toml:"from_name"` // 发件人名称
 	Username string `toml:"username"`  // SMTP 用户名
-	Password string `toml:"-"`         // SMTP 密码（从环境变量读取，不写入toml）
+	Password string `toml:"password"`  // SMTP 密码（优先从环境变量读取）
 	UseTLS   bool   `toml:"use_tls"`   // 是否使用 TLS
 }
 

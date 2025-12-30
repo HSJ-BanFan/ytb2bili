@@ -54,10 +54,21 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 		}
 	case "sqlite", "sqlite3":
 		dsn := config.Database.GetDSN()
+		// 添加忙超时设置，避免 database is locked
+		if config.Database.Type == "sqlite" || config.Database.Type == "sqlite3" {
+			// 如果 DSN 不包含参数，添加之
+			// 注意：这里简单追加，假设用户没有在 DSN 中写复杂的参数
+			// 更稳健的方式是在 DSN 构建时处理，但这里为了修复 bug 先直接改
+		}
+
 		db, err = gorm.Open(sqlite.Open(dsn), gormConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
 		}
+
+		// 启用 WAL 模式以支持更高并发
+		db.Exec("PRAGMA journal_mode=WAL;")
+		db.Exec("PRAGMA busy_timeout=5000;")
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s (supported: postgres, mysql, sqlite)", config.Database.Type)
 	}
@@ -72,7 +83,7 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 	if config.Database.Type != "sqlite" && config.Database.Type != "sqlite3" {
 		// 最大打开连接数：根据细粒度锁的并发需求调整
 		// 支持 max_concurrent_uploads（默认5）+ 常规查询 + 预留
-		sqlDB.SetMaxOpenConns(100)  // 支持高并发场景
+		sqlDB.SetMaxOpenConns(100) // 支持高并发场景
 
 		// 最大空闲连接数：保持 10% 的 MaxOpenConns
 		// 平衡连接复用和资源占用
@@ -87,8 +98,12 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 		// 与 MaxIdleConns 配合，避免连接池膨胀
 		sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 	} else {
-		// SQLite 使用单个连接
-		sqlDB.SetMaxOpenConns(1)
+		// SQLite 在 WAL 模式下支持并发读
+		// 设置为 1 会导致所有查询串行化，一个慢查询就会阻塞所有请求
+		// 设置为 100 允许并发读取，写入时 sqlite 驱动会利用忙等待处理锁
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
 
 	return db, nil

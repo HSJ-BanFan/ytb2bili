@@ -236,10 +236,27 @@ func (t *DownloadVideo) Execute(ctx map[string]interface{}) bool {
 	attempts = append(attempts, downloadAttempt{false, "browser", "无代理 + 浏览器cookies"})
 
 	for i, attempt := range attempts {
+		// 检查任务是否已取消
+		select {
+		case <-cancelCtx.Done():
+			t.App.Logger.Warn("⛔ 任务已取消，停止重试")
+			return false
+		default:
+		}
+
 		t.App.Logger.Infof("🔄 尝试策略 [%d/%d]: %s", i+1, len(attempts), attempt.description)
 		if t.executeDownloadWithAuthMode(cancelCtx, ytdlpPath, videoURL, attempt.useProxy, attempt.authMode, ctx) {
 			return true
 		}
+
+		// 再次检查任务是否已取消（防止在由于取消导致的失败后继续重试）
+		select {
+		case <-cancelCtx.Done():
+			t.App.Logger.Warn("⛔ 任务已取消，停止后续策略尝试")
+			return false
+		default:
+		}
+
 		if i < len(attempts)-1 {
 			t.App.Logger.Warn("⚠️ 下载失败，尝试下一策略...")
 		}

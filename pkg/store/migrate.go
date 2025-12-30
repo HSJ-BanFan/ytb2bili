@@ -9,12 +9,8 @@ import (
 
 // MigrateDatabase 自动迁移数据库表
 func MigrateDatabase(db *gorm.DB) error {
-	// 运行自定义迁移（添加 role 字段等）
-	if err := runCustomMigrations(db); err != nil {
-		return err
-	}
-
-	return db.AutoMigrate(
+	// 1. 先运行 AutoMigrate 创建表
+	if err := db.AutoMigrate(
 		&model.User{},
 		&model.SavedVideo{},
 		&model.TaskStep{},
@@ -24,7 +20,45 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.UserAIConfig{},      // 用户AI配置
 		&model.UserPreference{},    // 用户偏好设置
 		&model.EmailVerification{}, // 邮箱验证码
-	)
+	); err != nil {
+		return err
+	}
+
+	// 2. 运行自定义迁移（添加 role 字段等）
+	// 注意：由于 AutoMigrate 已经创建了表结构（包括 role 字段），这里主要用于数据修正和索引创建
+	if err := runCustomMigrations(db); err != nil {
+		return err
+	}
+
+	// 3. 初始化种子数据（如初始用户）
+	return seedInitialData(db)
+}
+
+// seedInitialData 初始化种子数据
+func seedInitialData(db *gorm.DB) error {
+	// 检查是否有用户
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("检查用户数量失败: %w", err)
+	}
+
+	if count == 0 {
+		fmt.Println("🌟 数据库为空，正在创建初始管理员用户...")
+		user := model.User{
+			Username:       "Admin",
+			Email:          "3330876408@qq.com",
+			Password:       "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
+			Role:           "admin",
+			Status:         1,
+			EmailVerified:  true,
+			MembershipTier: "enterprise", // 给个最高等级方便测试
+		}
+		if err := db.Create(&user).Error; err != nil {
+			return fmt.Errorf("创建初始用户失败: %w", err)
+		}
+		fmt.Println("✅ 初始管理员创建成功: 3330876408@qq.com / 123456")
+	}
+	return nil
 }
 
 // runCustomMigrations 运行需要手动处理的迁移

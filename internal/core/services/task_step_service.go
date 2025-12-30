@@ -303,7 +303,7 @@ func (s *TaskStepService) ResetFailedStepsToPending() error {
 			"status":     "failed_permanent",
 			"can_retry":  false,
 			"updated_at": now,
-			"error":      fmt.Sprintf("超过最大重试次数(%d次)，已停止重试", maxRetryCount),
+			"error_msg":  fmt.Sprintf("超过最大重试次数(%d次)，已停止重试", maxRetryCount),
 		})
 
 	if permanentFailResult.Error != nil {

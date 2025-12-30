@@ -72,6 +72,11 @@ type User struct {
 	DailyUsageDate   string     `gorm:"size:10" json:"daily_usage_date"`             // 使用量统计日期 (YYYY-MM-DD)
 }
 
+// TableName 指定表名
+func (User) TableName() string {
+	return "cw_users"
+}
+
 type SubtitleItem struct {
 	SID      int     `json:"sid" gorm:"column:sid"`           // 字幕ID
 	From     float64 `json:"from" gorm:"column:from_time"`    // 开始时间
