@@ -94,6 +94,30 @@ func (t *UploadSubtitleToBilibili) Execute(context map[string]interface{}) bool 
 	// 4. 创建自定义字幕上传器（包含 lan_doc 参数支持）
 	uploader := NewCustomSubtitleUploader(loginInfo)
 
+	// 🔍 新增: 检查视频状态（避免转码中/审核中时假成功）
+	state, err := uploader.CheckVideoState(bvid)
+	if err != nil {
+		t.App.Logger.Warnf("⚠️ 无法获取视频状态: %v，将尝试直接上传", err)
+	} else {
+		t.App.Logger.Infof("📊 视频当前状态: %d", state)
+		// 状态码：0=正常, -30=转码中, -4=审核中 (需根据实际调整)
+		// 严谨起见，只要 state < 0 且不是 -2(被删除)，都视为不可用
+		// 或者 state > 0 (1=橙色通过?)
+		// 这里暂定: 如果 state < 0，则认为视频未就绪
+		if state < 0 {
+			// 视频未就绪，返回特殊错误码触发智能重试
+			t.App.Logger.Warnf("⏳ 视频未就绪 (状态码: %d)，推迟字幕上传", state)
+			if state == -4 || state == -30 {
+				// 审核中或转码中，使用特殊错误码触发长重试（最多30次，每次10分钟）
+				context["error"] = "ERR_VIDEO_UNDER_REVIEW: 视频审核中或转码中"
+			} else {
+				// 其他错误（如被删除），使用普通错误
+				context["error"] = fmt.Sprintf("视频不可用(state=%d)", state)
+			}
+			return false // 返回失败，触发重试
+		}
+	}
+
 	// 5. 上传字幕文件
 	uploadedCount := 0
 	for _, subtitleFile := range subtitleFiles {
@@ -138,6 +162,7 @@ type SubtitleFileInfo struct {
 }
 
 // findSubtitleFiles 查找字幕文件
+// 优先级：标准命名 > VideoID.语言.srt > 任意 .srt 文件
 func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 	var subtitleFiles []SubtitleFileInfo
 
@@ -153,7 +178,13 @@ func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 
 	for _, item := range subtitleFilesToCheck {
 		fullPath := filepath.Join(t.StateManager.CurrentDir, item.filename)
-		if _, err := os.Stat(fullPath); err == nil {
+		info, err := os.Stat(fullPath)
+		if err == nil {
+			// 检测空文件（小于100字节视为无效）
+			if info.Size() < 100 {
+				t.App.Logger.Warnf("⚠️ 跳过空字幕文件: %s (大小: %d 字节)", item.filename, info.Size())
+				continue
+			}
 			subtitleFiles = append(subtitleFiles, SubtitleFileInfo{
 				Path:     fullPath,
 				Language: item.language,
@@ -166,6 +197,39 @@ func (t *UploadSubtitleToBilibili) findSubtitleFiles() []SubtitleFileInfo {
 	if len(subtitleFiles) == 0 {
 		t.App.Logger.Info("📂 未找到标准命名字幕，搜索 VideoID.语言.srt 格式...")
 		subtitleFiles = t.findSubtitleFilesByPattern()
+	}
+
+	// 3. 如果仍未找到，遍历目录查找任意 .srt 文件作为备选
+	if len(subtitleFiles) == 0 {
+		t.App.Logger.Info("📂 未找到模式匹配字幕，搜索任意 .srt 文件...")
+		entries, err := os.ReadDir(t.StateManager.CurrentDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if filepath.Ext(name) != ".srt" {
+					continue
+				}
+				fullPath := filepath.Join(t.StateManager.CurrentDir, name)
+				info, err := os.Stat(fullPath)
+				if err != nil {
+					continue
+				}
+				// 检测空文件
+				if info.Size() < 100 {
+					t.App.Logger.Warnf("⚠️ 跳过空字幕文件: %s (大小: %d 字节)", name, info.Size())
+					continue
+				}
+				// 非标准命名，默认使用中文
+				t.App.Logger.Warnf("⚠️ 发现非标准命名字幕: %s (将作为中文字幕上传)", name)
+				subtitleFiles = append(subtitleFiles, SubtitleFileInfo{
+					Path:     fullPath,
+					Language: "zh-Hans",
+				})
+			}
+		}
 	}
 
 	return subtitleFiles

@@ -637,6 +637,21 @@ func (g *GenerateMetadata) findSubtitleForMetadata() string {
 		}
 	}
 
+	// 未找到字幕，输出诊断日志
+	g.App.Logger.Warnf("❌ 未找到字幕文件，目录: %s", currentDir)
+	if err == nil && len(entries) > 0 {
+		var fileList []string
+		for _, e := range entries {
+			if !e.IsDir() {
+				fileList = append(fileList, e.Name())
+			}
+		}
+		g.App.Logger.Warnf("   目录中有 %d 个文件: %v", len(fileList), fileList)
+		g.App.Logger.Warnf("   期望文件: zh.srt, en.srt, %s.zh-Hans.srt, %s.en.srt", videoID, videoID)
+	} else if err != nil {
+		g.App.Logger.Warnf("   读取目录失败: %v", err)
+	}
+
 	return ""
 }
 

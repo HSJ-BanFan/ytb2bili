@@ -259,6 +259,8 @@ type DownloadConfig struct {
 	AutoCleanupEnabled bool   `toml:"auto_cleanup_enabled"` // 是否启用自动清理（默认false）
 	AutoCleanupMode    string `toml:"auto_cleanup_mode"`    // 清理模式: immediate=立即, delayed=延迟（默认delayed）
 	AutoCleanupDelay   int    `toml:"auto_cleanup_delay"`   // 延迟清理时间（分钟，默认60）
+	SoftDelete         bool   `toml:"soft_delete"`          // 软删除模式（移动到回收站而非永久删除），默认 true
+	CleanupDir         string `toml:"cleanup_dir"`          // 回收站目录，默认为 {fileUpDir}/.cleanup
 
 	// 字幕翻译配置
 	SubtitleTranslationEnabled bool `toml:"subtitle_translation_enabled"` // 是否启用字幕翻译（默认true）
@@ -374,6 +376,8 @@ func NewDefaultConfig() *AppConfig {
 			AutoCleanupEnabled:         false,     // 默认不启用自动清理
 			AutoCleanupMode:            "delayed", // 默认延迟清理
 			AutoCleanupDelay:           60,        // 默认延迟60分钟
+			SoftDelete:                 true,      // 默认启用软删除
+			CleanupDir:                 "",        // 默认为空，使用 {fileUpDir}/.cleanup
 			SubtitleTranslationEnabled: true,      // 默认启用字幕翻译
 		},
 

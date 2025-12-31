@@ -113,6 +113,71 @@ func (s *CustomSubtitleUploader) GetVideoInfo(bvid string) (*SubtitleVideoInfo, 
 	}, nil
 }
 
+// CheckVideoState 检查视频状态（是否允许上传字幕）
+// 返回: state, error
+// state: 0 (正常/允许上传), -1 (审核/转码中/不可用), 其他值
+func (s *CustomSubtitleUploader) CheckVideoState(bvid string) (int, error) {
+	url := fmt.Sprintf("https://member.bilibili.com/x/vupre/web/archive/view?bvid=%s", bvid)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return -1, fmt.Errorf("create request failed: %w", err)
+	}
+
+	req.Header.Set("Cookie", s.loginInfo.GetCookieString())
+	req.Header.Set("User-Agent", s.userAgent)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return -1, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return -1, fmt.Errorf("read response failed: %w", err)
+	}
+
+	var response struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Archive struct {
+				State int    `json:"state"` // 视频状态
+				Note  string `json:"note"`  // 状态备注（如"转码中"）
+			} `json:"archive"`
+			Videos []struct {
+				CID      int64  `json:"cid"`
+				Status   int    `json:"status"` // 分P状态
+				FailDesc string `json:"fail_desc"`
+			} `json:"videos"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return -1, fmt.Errorf("unmarshal response failed: %w", err)
+	}
+
+	if response.Code != 0 {
+		return -1, fmt.Errorf("get video state failed: code=%d, message=%s", response.Code, response.Message)
+	}
+
+	// 检查主稿件状态
+	// State: 0=开放浏览, -30=转码中, -4=审核中 (需根据实际抓包确认，这里假设非0和非1即为不可用)
+	// 通常 0=Open, 1=Orange(Pass?), -4=Reviewing
+	state := response.Data.Archive.State
+
+	// 如果 video 列表中有特定分P的状态异常，也视为不可用
+	if len(response.Data.Videos) > 0 {
+		// 检查第一个分P
+		if response.Data.Videos[0].Status < 0 {
+			state = response.Data.Videos[0].Status
+		}
+	}
+
+	return state, nil
+}
+
 // UploadSubtitleFile 上传字幕文件到Bilibili存储 (.srt)
 func (s *CustomSubtitleUploader) UploadSubtitleFile(subtitlePath string) (string, string, error) {
 	// 获取CSRF Token

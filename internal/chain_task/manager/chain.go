@@ -26,9 +26,9 @@ type TaskConfig struct {
 // │ 3  │ 下载字幕     │           无                │  否  │  继续执行  │
 // │ 4  │ 下载封面     │       获取元数据            │  是  │  终止链    │
 // │ 5  │ 翻译字幕     │        下载字幕             │  否  │    跳过    │
-// │ 6  │ AI增强元数据 │ 下载视频,翻译字幕           │  否  │    跳过    │
-// │ 7  │ 确认元数据   │       获取元数据            │  是  │  终止链    │
-// │    │  (根据用户设置决定使用原始/AI数据)          │      │            │
+// │ 6  │ AI增强元数据 │      下载视频               │  否  │    跳过    │
+// │ 7  │ 确认元数据   │       AI增强元数据          │  否  │  使用默认  │
+// │    │  (等待AI完成，决定使用原始/AI数据)            │      │            │
 // │ 8  │ 上传到B站    │       确认元数据            │  否  │    -       │
 // │ 9  │ 上传字幕     │       上传到B站             │  否  │  延迟重试  │
 // └────┴──────────────┴─────────────────────────────┴──────┴────────────┘
@@ -38,14 +38,16 @@ var TaskConfigs = map[string]TaskConfig{
 	"下载字幕":    {Name: "下载字幕", Dependencies: nil, Required: false},
 	"下载封面":    {Name: "下载封面", Dependencies: []string{"获取元数据"}, Required: true},
 	"翻译字幕":    {Name: "翻译字幕", Dependencies: []string{"下载字幕"}, Required: false},
-	"AI增强元数据": {Name: "AI增强元数据", Dependencies: []string{"下载视频", "翻译字幕"}, Required: false},
-	// 确认元数据：只依赖获取元数据（确保有基础数据），不依赖 AI增强元数据
-	// 根据用户配置决定使用原始数据还是 AI 生成的数据
-	"确认元数据":         {Name: "确认元数据", Dependencies: []string{"获取元数据"}, Required: true},
+	// AI增强元数据：仅依赖下载视频（不强制依赖翻译字幕）
+	// 说明：优先使用中文字幕，如不存在则使用英文字幕
+	"AI增强元数据": {Name: "AI增强元数据", Dependencies: []string{"下载视频"}, Required: false},
+	// 确认元数据：依赖 AI增强元数据
+	// 说明：等待AI增强元数据完成，根据用户配置决定使用原始数据还是AI生成的数据
+	"确认元数据":         {Name: "确认元数据", Dependencies: []string{"AI增强元数据"}, Required: false},
 	"上传到Bilibili":   {Name: "上传到Bilibili", Dependencies: []string{"确认元数据"}, Required: false},
 	"上传字幕到Bilibili": {Name: "上传字幕到Bilibili", Dependencies: []string{"上传到Bilibili"}, Required: false},
 	// 兼容旧名称
-	"生成元数据": {Name: "生成元数据", Dependencies: []string{"下载视频", "翻译字幕"}, Required: false},
+	"生成元数据": {Name: "生成元数据", Dependencies: []string{"下载视频"}, Required: false},
 }
 
 // TaskChain 任务链
@@ -191,6 +193,13 @@ func (c *TaskChain) checkDependencies(taskName string) (bool, string) {
 		return true, ""
 	}
 
+	// 添加调试日志：输出已完成任务列表
+	completedList := make([]string, 0, len(c.CompletedTasks))
+	for task := range c.CompletedTasks {
+		completedList = append(completedList, task)
+	}
+	c.log("DEBUG", "🔍 检查依赖: 任务=%s, 已完成任务=%v", taskName, completedList)
+
 	for _, dep := range config.Dependencies {
 		// 硬失败：依赖任务执行失败（返回 false）
 		if c.FailedTasks[dep] {
@@ -200,6 +209,7 @@ func (c *TaskChain) checkDependencies(taskName string) (bool, string) {
 		// 软跳过：任务执行成功（返回 true）但设置了 skipped 标记
 		// 例如：翻译字幕禁用时返回 true + skipped，后续 AI增强元数据 应继续执行
 		if c.CompletedTasks[dep] || c.SoftSkippedTasks[dep] {
+			c.log("DEBUG", "✅ 依赖 [%s] 已满足 (Completed=%v, SoftSkipped=%v)", dep, c.CompletedTasks[dep], c.SoftSkippedTasks[dep])
 			continue
 		}
 		// 硬跳过：由于依赖未满足导致的跳过，后续任务也应跳过
@@ -207,6 +217,7 @@ func (c *TaskChain) checkDependencies(taskName string) (bool, string) {
 			return false, fmt.Sprintf("依赖任务 [%s] 被跳过", dep)
 		}
 		// 未执行
+		c.log("DEBUG", "❌ 依赖 [%s] 未满足: 未在已完成列表中", dep)
 		return false, fmt.Sprintf("依赖任务 [%s] 未执行", dep)
 	}
 	return true, ""

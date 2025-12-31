@@ -290,9 +290,19 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		return
 	}
 
-	// 注册任务到取消管理器（使用数据库主键 ID）
-	ctx := h.CancelManager.Register(video.Id)
-	defer h.CancelManager.Deregister(video.Id)
+	// 注册任务到取消管理器（使用数据库主键 ID + 任务类型标识）
+	// 全链任务使用固定标识 "chain_full"
+	runID := "chain_full"
+	ctx, allowed := h.CancelManager.Register(video.Id, runID)
+	if !allowed {
+		h.App.Logger.Warnf("⛔ 任务链启动被拒绝（任务已被取消）: VideoID=%s", video.VideoId)
+		// 更新状态为取消（998）
+		if err := h.updateSavedVideoStatus(video.Id, "998"); err != nil {
+			h.App.Logger.Errorf("更新任务状态为取消时出错: %v", err)
+		}
+		return
+	}
+	defer h.CancelManager.Deregister(video.Id, runID)
 
 	// 创建用户日志助手
 	userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), video.UserID)
@@ -351,7 +361,9 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	// 3. 下载字幕   (无依赖)
 	// 4. 下载封面   (依赖: 获取元数据)
 	// 5. 翻译字幕   (依赖: 下载字幕)
-	// 6. AI增强元数据 (依赖: 下载视频, 翻译字幕)  ← 必须在翻译字幕之后
+	// 6. AI增强元数据 (依赖: 下载视频)
+	//    说明: 优先使用中文字幕(zh.srt)，如不存在则使用英文字幕(en.srt)
+	//    不强制依赖翻译字幕，即使用户禁用翻译也能正常工作
 	// 7. 确认元数据   (依赖: AI增强元数据)
 	// ═══════════════════════════════════════════════════════════════
 
@@ -372,7 +384,8 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	translateTask := handlers.NewTranslateSubtitle("翻译字幕", h.App, stateManager, h.App.CosClient, h.Db, "")
 	chain.AddTask(h.wrapTaskWithStepTracking(translateTask, video.VideoId))
 
-	// Group 3: AI增强元数据（依赖下载视频和翻译字幕） ← 必须在翻译字幕之后
+	// Group 3: AI增强元数据（仅依赖下载视频）
+	// 说明: 可以与翻译字幕并行执行，优先使用中文字幕，无中文则用英文字幕
 	metadataTask := handlers.NewGenerateMetadata("AI增强元数据", h.App, stateManager, h.App.CosClient, "", h.Db, h.SavedVideoService)
 	chain.AddTask(h.wrapTaskWithStepTracking(metadataTask, video.VideoId))
 
@@ -467,9 +480,15 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		UpdatedAt: savedVideo.UpdatedAt,
 	}
 
-	// 注册任务到取消管理器（使用数据库主键 ID）
-	ctx := h.CancelManager.Register(video.Id)
-	defer h.CancelManager.Deregister(video.Id)
+	// 注册任务到取消管理器（使用数据库主键 ID + 步骤名称）
+	// 单步任务使用 "step_" + stepName 作为标识
+	runID := "step_" + stepName
+	ctx, allowed := h.CancelManager.Register(video.Id, runID)
+	if !allowed {
+		h.App.Logger.Warnf("⛔ 任务步骤启动被拒绝（任务已被取消）: %s - %s", video.VideoId, stepName)
+		return nil // 已取消，直接返回
+	}
+	defer h.CancelManager.Deregister(video.Id, runID)
 
 	// 获取当前目录
 	currentDir, err := filepath.Abs(h.App.Config.FileUpDir)
@@ -497,7 +516,31 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		completedSteps = []string{}
 	}
 
-	// 智能依赖检查：如果视频文件存在，自动将"下载视频"标记为完成
+	// 获取正在运行的任务步骤，将它们也视为已完成（避免并发竞态条件）
+	// 原因：当单步重试时，可能有其他步骤正在并发执行，如果不将它们计入已完成列表，
+	// 会导致依赖检查失败（如：下载封面依赖获取元数据，但获取元数据正在运行中）
+	runningSteps, err := h.TaskStepService.GetRunningStepNames(videoID)
+	if err == nil && len(runningSteps) > 0 {
+		h.App.Logger.Debugf("🔄 检测到 %d 个正在运行的步骤，将它们计入依赖检查", len(runningSteps))
+		for _, runningStep := range runningSteps {
+			// 如果某个步骤正在运行，且它不是当前要执行的步骤，则视为已完成
+			if runningStep != stepName {
+				alreadyExists := false
+				for _, s := range completedSteps {
+					if s == runningStep {
+						alreadyExists = true
+						break
+					}
+				}
+				if !alreadyExists {
+					completedSteps = append(completedSteps, runningStep)
+					h.App.Logger.Debugf("🔄 步骤 '%s' 正在运行，依赖检查视为已完成", runningStep)
+				}
+			}
+		}
+	}
+
+	// 智能依赖检查：如果视频文件存在，自动将"下载视频"标记为完成（仅用于依赖判断，不更新数据库）
 	videoFilePath := filepath.Join(stateManager.CurrentDir, videoID+".mp4")
 	if _, err := os.Stat(videoFilePath); err == nil {
 		hasDownloadVideo := false
@@ -509,9 +552,63 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 		}
 		if !hasDownloadVideo {
 			completedSteps = append(completedSteps, "下载视频")
-			h.App.Logger.Infof("📁 检测到视频文件存在，自动标记'下载视频'为完成")
-			// 同时更新数据库状态
-			_ = h.TaskStepService.UpdateTaskStepStatus(videoID, "下载视频", "completed")
+			h.App.Logger.Debugf("📁 检测到视频文件存在，依赖检查视为'下载视频'已完成")
+			// 注意：不更新数据库状态，仅用于本次依赖检查
+		}
+	}
+
+	// 智能依赖检查：如果字幕文件存在，自动将"下载字幕"标记为完成（仅用于依赖判断）
+	subtitlePatterns := []string{
+		filepath.Join(stateManager.CurrentDir, "zh.srt"),
+		filepath.Join(stateManager.CurrentDir, "en.srt"),
+		filepath.Join(stateManager.CurrentDir, videoID+".*.srt"),
+	}
+	hasSubtitleFile := false
+	for _, pattern := range subtitlePatterns {
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) > 0 {
+			hasSubtitleFile = true
+			break
+		}
+	}
+	if hasSubtitleFile {
+		hasDownloadSubtitle := false
+		for _, s := range completedSteps {
+			if s == "下载字幕" || s == "生成字幕" {
+				hasDownloadSubtitle = true
+				break
+			}
+		}
+		if !hasDownloadSubtitle {
+			completedSteps = append(completedSteps, "下载字幕")
+			h.App.Logger.Debugf("📁 检测到字幕文件存在，依赖检查视为'下载字幕'已完成")
+		}
+	}
+
+	// 智能依赖检查：如果封面文件存在，自动将"下载封面"标记为完成（仅用于依赖判断）
+	coverPatterns := []string{
+		filepath.Join(stateManager.CurrentDir, "cover.jpg"),
+		filepath.Join(stateManager.CurrentDir, "cover.webp"),
+		filepath.Join(stateManager.CurrentDir, "cover.png"),
+	}
+	hasCoverFile := false
+	for _, coverPath := range coverPatterns {
+		if _, err := os.Stat(coverPath); err == nil {
+			hasCoverFile = true
+			break
+		}
+	}
+	if hasCoverFile {
+		hasDownloadCover := false
+		for _, s := range completedSteps {
+			if s == "下载封面" {
+				hasDownloadCover = true
+				break
+			}
+		}
+		if !hasDownloadCover {
+			completedSteps = append(completedSteps, "下载封面")
+			h.App.Logger.Debugf("📁 检测到封面文件存在，依赖检查视为'下载封面'已完成")
 		}
 	}
 

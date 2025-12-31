@@ -253,7 +253,53 @@ func (t *UploadToBilibili) Execute(context map[string]interface{}) bool {
 			videoSizeMB := t.getVideoSizeMB()
 			savedVideo.VideoSizeMB = videoSizeMB
 
-			// 检查是否有字幕
+			// 重新扫描目录查找字幕文件（防止数据库记录滞后）
+			// 优先查找: zh.srt, videoID.zh-Hans.srt, videoID.zh-Hant.srt, videoID.srt, en.srt
+			foundSubtitles := []string{}
+
+			// 添加调试日志
+			t.App.Logger.Debugf("🔍 扫描目录: %s", t.StateManager.CurrentDir)
+
+			globPatterns := []string{
+				"*.srt",
+			}
+			for _, pattern := range globPatterns {
+				searchPath := filepath.Join(t.StateManager.CurrentDir, pattern)
+				t.App.Logger.Debugf("🔍 搜索模式: %s", searchPath)
+				matches, _ := filepath.Glob(searchPath)
+				t.App.Logger.Debugf("🔍 找到 %d 个匹配文件", len(matches))
+				for _, match := range matches {
+					// 过滤掉太小的文件
+					if info, err := os.Stat(match); err == nil && info.Size() > 100 {
+						foundSubtitles = append(foundSubtitles, filepath.Base(match))
+						t.App.Logger.Debugf("✅ 添加字幕文件: %s (大小: %d 字节)", filepath.Base(match), info.Size())
+					} else {
+						t.App.Logger.Debugf("⚠️ 跳过文件: %s (错误或太小)", filepath.Base(match))
+					}
+				}
+			}
+
+			t.App.Logger.Infof("📊 共找到 %d 个有效的字幕文件", len(foundSubtitles))
+			if len(foundSubtitles) > 0 {
+				for i, sub := range foundSubtitles {
+					t.App.Logger.Debugf("  [%d] %s", i+1, sub)
+				}
+			}
+
+			// 如果数据库中没有字幕记录，但本地找到了，更新数据库
+			if (savedVideo.Subtitles == "" || savedVideo.Subtitles == "[]" || savedVideo.Subtitles == "null") && len(foundSubtitles) > 0 {
+				t.App.Logger.Infof("🔄 数据库无字幕记录，但检测到本地字幕文件，正在更新... (找到 %d 个)", len(foundSubtitles))
+				jsonBytes, _ := json.Marshal(foundSubtitles)
+				savedVideo.Subtitles = string(jsonBytes)
+				// ⚠️ 关键：立即保存到数据库，否则后续检查仍会认为无字幕
+				if err := t.SavedVideoService.UpdateVideo(savedVideo); err != nil {
+					t.App.Logger.Errorf("❌ 更新字幕记录失败: %v", err)
+				} else {
+					t.App.Logger.Info("✅ 字幕记录已保存到数据库")
+				}
+			}
+
+			// 检查是否有字幕（重新从数据库读取，确保获取最新状态）
 			hasSubtitle := savedVideo.Subtitles != "" && savedVideo.Subtitles != "[]" && savedVideo.Subtitles != "null"
 
 			if hasSubtitle {
@@ -828,13 +874,56 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 		}
 
 		if loginInfo != nil {
-			uploadClient := bilibili.NewUploadClient(loginInfo)
-			uploadedCoverURL, err := uploadClient.UploadCover(coverImagePath)
-			if err != nil {
-				t.App.Logger.Errorf("❌ 上传封面失败: %v", err)
+			// 如果是 webp 格式，尝试转换为 jpg
+			if strings.ToLower(filepath.Ext(coverImagePath)) == ".webp" {
+				jpgPath := strings.TrimSuffix(coverImagePath, filepath.Ext(coverImagePath)) + ".jpg"
+				// 检查 jpg 是否已存在，不存在才转换
+				if _, err := os.Stat(jpgPath); os.IsNotExist(err) {
+					t.App.Logger.Infof("🔄 检测到 WebP 封面，正在转换为 JPG: %s", filepath.Base(jpgPath))
+					cmd := exec.Command("ffmpeg", "-i", coverImagePath, "-q:v", "2", jpgPath)
+					if output, err := cmd.CombinedOutput(); err != nil {
+						t.App.Logger.Warnf("⚠️ WebP 转 JPG 失败: %v", err)
+						t.App.Logger.Debugf("FFmpeg 输出: %s", string(output))
+
+						// 尝试使用备用封面（yt-dlp 下载的其他封面文件）
+						altCoverPath := filepath.Join(filepath.Dir(coverImagePath), "maxresdefault.jpg")
+						if _, err := os.Stat(altCoverPath); err == nil {
+							t.App.Logger.Infof("✓ 使用备用封面: maxresdefault.jpg")
+							coverImagePath = altCoverPath
+						} else {
+							// 再尝试 sddefault.jpg
+							altCoverPath = filepath.Join(filepath.Dir(coverImagePath), "sddefault.jpg")
+							if _, err := os.Stat(altCoverPath); err == nil {
+								t.App.Logger.Infof("✓ 使用备用封面: sddefault.jpg")
+								coverImagePath = altCoverPath
+							} else {
+								t.App.Logger.Errorf("❌ 无法找到可用的封面文件（WebP 转换失败且无备用封面）")
+								coverImagePath = "" // 清空路径，跳过封面上传
+							}
+						}
+					} else {
+						t.App.Logger.Infof("✅ 封面格式转换成功")
+						coverImagePath = jpgPath
+					}
+				} else {
+					// jpg 已存在，直接使用
+					t.App.Logger.Infof("✓ 检测到已存在的 JPG 封面，直接使用: %s", filepath.Base(jpgPath))
+					coverImagePath = jpgPath
+				}
+			}
+
+			// 只有在有有效封面路径时才上传
+			if coverImagePath != "" {
+				uploadClient := bilibili.NewUploadClient(loginInfo)
+				uploadedCoverURL, err := uploadClient.UploadCover(coverImagePath)
+				if err != nil {
+					t.App.Logger.Errorf("❌ 上传封面失败: %v", err)
+				} else {
+					coverURL = uploadedCoverURL
+					t.App.Logger.Infof("✓ 封面上传成功: %s", coverURL)
+				}
 			} else {
-				coverURL = uploadedCoverURL
-				t.App.Logger.Infof("✓ 封面上传成功: %s", coverURL)
+				t.App.Logger.Warn("⚠️ 跳过封面上传（无有效封面文件）")
 			}
 		}
 	} else {

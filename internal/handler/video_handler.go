@@ -385,28 +385,10 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 		}
 	}
 
-	// 如果重试的是视频上传步骤，需要同时更新视频状态
-	if stepName == "上传到Bilibili" {
-		if err := h.SavedVideoService.UpdateStatus(savedVideo.ID, "200"); err != nil {
-			h.App.Logger.Warnf("更新视频状态失败: %v", err)
-		} else {
-			h.App.Logger.Infof("✅ 视频状态已更新为 200（准备上传）")
-		}
-
-		// 清除取消状态，允许 UploadScheduler 重新处理该任务
-		if h.CancelManager != nil {
-			h.CancelManager.ClearCancel(savedVideo.ID)
-			h.App.Logger.Infof("✅ 已清除任务的取消状态，允许重新上传")
-		}
-	}
-
-	// 如果重试的是字幕上传步骤，需要同时清除取消状态
-	if stepName == "上传字幕到Bilibili" {
-		// 清除取消状态，允许 UploadScheduler 重新处理该任务
-		if h.CancelManager != nil {
-			h.CancelManager.ClearCancel(savedVideo.ID)
-			h.App.Logger.Infof("✅ 已清除任务的取消状态，允许重新上传字幕")
-		}
+	// 清除取消状态，允许任务重新运行
+	// 无论重试哪个步骤，只要用户请求重试，就应该清除之前的取消标记
+	if h.CancelManager != nil {
+		h.CancelManager.ClearCancel(savedVideo.ID)
 	}
 
 	h.App.Logger.Infof("✅ 任务步骤 %s 已重置为待执行状态，等待调度器处理", stepName)
@@ -858,6 +840,12 @@ func (h *VideoHandler) resetAllSteps(c *gin.Context) {
 	}
 
 	h.App.Logger.Infof("🔄 用户请求重置所有步骤: %s - 已重置 %d 个步骤", savedVideo.VideoID, resetCount)
+
+	// 清除取消状态，允许任务重新运行
+	if h.CancelManager != nil {
+		h.CancelManager.ClearCancel(savedVideo.ID)
+		h.App.Logger.Infof("✅ 已清除任务的取消状态")
+	}
 
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,

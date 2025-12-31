@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +144,29 @@ func (s *UploadScheduler) SetUp() {
 	}
 
 	s.logger.Infof("✓ Upload scheduler started, checking every %d seconds", checkInterval)
+
+	// 添加延时清理定时任务（每天凌晨2点标记，3点执行清理）
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil && s.App.Config.DownloadConfig.AutoCleanupEnabled {
+		// 阶段1: 每天凌晨2点扫描并标记待清理的任务
+		s.Task.AddFunc("0 0 2 * * *", func() {
+			s.markFilesForCleanup()
+		})
+
+		// 阶段2: 每天凌晨3点执行软删除
+		s.Task.AddFunc("0 0 3 * * *", func() {
+			s.executeScheduledCleanup()
+		})
+
+		cleanupDelayDays := s.App.Config.DownloadConfig.AutoCleanupDelay / (24 * 60) // 分钟转天
+		if cleanupDelayDays < 1 {
+			cleanupDelayDays = 1
+		}
+		softDeleteMode := "软删除"
+		if !s.App.Config.DownloadConfig.SoftDelete {
+			softDeleteMode = "永久删除"
+		}
+		s.logger.Infof("🗑️ 自动清理已启用: %d 天后%s", cleanupDelayDays, softDeleteMode)
+	}
 }
 
 // uploadNextVideo 上传下一个准备好的视频（旧版本：无锁）
@@ -523,31 +547,53 @@ func (s *UploadScheduler) uploadNextSubtitleImpl(useTransactionLock bool) error 
 
 	// 执行上传字幕任务
 	if err := s.executeUploadTask(video.VideoID, "上传字幕到Bilibili"); err != nil {
+		errMsg := err.Error()
+
+		// 检查是否是"审核中"状态的特殊错误
+		isUnderReview := strings.Contains(errMsg, "ERR_VIDEO_UNDER_REVIEW")
+
 		// 上传失败，增加重试次数并设置下次重试时间
 		retryCount := video.SubtitleUploadRetries + 1
-		nextRetryTime := s.calculateNextRetryTime(retryCount)
+
+		// 根据错误类型计算重试延迟
+		var nextRetryTime time.Time
+		var maxRetries int
+
+		if isUnderReview {
+			// 审核中的视频：使用较长的固定延迟（10分钟），不使用指数退避
+			// 最大重试次数设置为30次（5小时），足以覆盖大多数审核场景
+			maxRetries = 30
+			nextRetryTime = time.Now().Add(10 * time.Minute)
+			s.logger.Infof("⏳ 视频审核中，将在10分钟后重试 (第%d次)", retryCount)
+		} else {
+			// 其他错误：使用指数退避策略，最大3次重试
+			maxRetries = 3
+			nextRetryTime = s.calculateNextRetryTime(retryCount)
+		}
 
 		s.Db.Table("cw_saved_videos").Where("id = ?", video.ID).Updates(map[string]interface{}{
 			"status":                  "300", // 保持待上传状态
 			"subtitle_upload_retries": retryCount,
 			"subtitle_scheduled_at":   nextRetryTime,
-			"subtitle_upload_error":   err.Error(),
+			"subtitle_upload_error":   errMsg,
 		})
 
-		if retryCount >= 3 {
+		if retryCount >= maxRetries {
 			// 超过最大重试次数，标记为失败
 			s.SavedVideoService.UpdateStatus(video.ID, "399")
 			userLogger.TaskLog(video.VideoID, "upload_subtitle", "failed",
 				map[string]interface{}{
-					"reason": "max_retries_exceeded",
-					"error":  err.Error(),
+					"reason":      "max_retries_exceeded",
+					"error":       errMsg,
+					"retry_count": retryCount,
 				})
+			return fmt.Errorf("超过最大重试次数(%d次): %v", maxRetries, err)
 		} else {
 			userLogger.TaskLog(video.VideoID, "upload_subtitle", "retry",
 				map[string]interface{}{
 					"next_retry": nextRetryTime.Format("15:04:05"),
 					"retry":      retryCount,
-					"error":      err.Error(),
+					"error":      errMsg,
 				})
 		}
 		return fmt.Errorf("上传字幕失败: %v", err)
@@ -669,8 +715,13 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	var ctx context.Context
 	if s.CancelManager != nil {
 		// 注册任务
-		ctx = s.CancelManager.Register(savedVideo.ID)
-		defer s.CancelManager.Deregister(savedVideo.ID)
+		runID := "upload_" + taskName
+		var allowed bool
+		ctx, allowed = s.CancelManager.Register(savedVideo.ID, runID)
+		if !allowed {
+			return fmt.Errorf("任务被取消")
+		}
+		defer s.CancelManager.Deregister(savedVideo.ID, runID)
 	}
 
 	// 获取当前目录
@@ -697,7 +748,9 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 
 	// 预填充 CompletedTasks，跳过依赖检查
 	// UploadScheduler 调度的任务已经通过状态检查（status=200）确保前置条件满足
-	chain.SetCompletedTasks([]string{
+	// 预填充 CompletedTasks，跳过依赖检查
+	// UploadScheduler 调度的任务已经通过状态检查（status=200）确保前置条件满足
+	completedTasks := []string{
 		"获取元数据",
 		"下载视频",
 		"下载字幕",
@@ -705,7 +758,14 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 		"翻译字幕",
 		"AI增强元数据",
 		"确认元数据",
-	})
+	}
+
+	// 如果是上传字幕任务，需要标记"上传到Bilibili"为已完成
+	if taskName == "上传字幕到Bilibili" {
+		completedTasks = append(completedTasks, "上传到Bilibili")
+	}
+
+	chain.SetCompletedTasks(completedTasks)
 
 	var task types.Task
 
@@ -1009,4 +1069,183 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 			}
 		}
 	}
+}
+
+// markFilesForCleanup 标记符合条件的任务文件为待清理状态
+// 每天凌晨2点执行，将满足保留期的任务标记为 scheduled 状态
+func (s *UploadScheduler) markFilesForCleanup() {
+	s.logger.Info("🔍 开始扫描待清理的任务文件...")
+
+	// 获取清理延迟配置（分钟转天）
+	cleanupDelayDays := 7 // 默认7天
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
+		delayMinutes := s.App.Config.DownloadConfig.AutoCleanupDelay
+		if delayMinutes > 0 {
+			cleanupDelayDays = delayMinutes / (24 * 60)
+			if cleanupDelayDays < 1 {
+				cleanupDelayDays = 1
+			}
+		}
+	}
+
+	// 计算截止时间（N天前完成的任务）
+	cutoffTime := time.Now().AddDate(0, 0, -cleanupDelayDays)
+	scheduledTime := time.Now().Add(24 * time.Hour) // 24小时后执行清理
+
+	// 查找符合条件的记录：
+	// 1. 状态为 400（已上传完成）
+	// 2. files_cleaned = false（尚未清理）
+	// 3. files_cleanup_status = 'pending'（未标记）
+	// 4. updated_at 早于截止时间
+	result := s.Db.Table("cw_saved_videos").
+		Where("status = ?", "400").
+		Where("files_cleaned = ?", false).
+		Where("(files_cleanup_status = ? OR files_cleanup_status IS NULL)", "pending").
+		Where("updated_at < ?", cutoffTime).
+		Updates(map[string]interface{}{
+			"files_cleanup_status":       "scheduled",
+			"files_cleanup_scheduled_at": scheduledTime,
+		})
+
+	if result.Error != nil {
+		s.logger.Errorf("❌ 标记待清理任务失败: %v", result.Error)
+		return
+	}
+
+	if result.RowsAffected > 0 {
+		s.logger.Infof("✅ 已标记 %d 个任务文件为待清理（将于明天凌晨3点执行）", result.RowsAffected)
+	} else {
+		s.logger.Debug("📂 没有需要标记清理的任务")
+	}
+}
+
+// executeScheduledCleanup 执行已计划的清理任务
+// 每天凌晨3点执行，处理 scheduled 状态的任务
+func (s *UploadScheduler) executeScheduledCleanup() {
+	s.logger.Info("🗑️ 开始执行计划清理任务...")
+
+	// 查找所有标记为 scheduled 且计划时间已到的记录
+	var videos []model.SavedVideo
+	err := s.Db.Where("files_cleanup_status = ?", "scheduled").
+		Where("files_cleanup_scheduled_at <= ?", time.Now()).
+		Find(&videos).Error
+
+	if err != nil {
+		s.logger.Errorf("❌ 查询待清理任务失败: %v", err)
+		return
+	}
+
+	if len(videos) == 0 {
+		s.logger.Debug("📂 没有需要执行清理的任务")
+		return
+	}
+
+	s.logger.Infof("📋 发现 %d 个待清理任务", len(videos))
+
+	// 获取软删除配置
+	softDelete := true
+	cleanupDir := ""
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil {
+		softDelete = s.App.Config.DownloadConfig.SoftDelete
+		cleanupDir = s.App.Config.DownloadConfig.CleanupDir
+	}
+
+	// 如果未配置回收站目录，使用默认目录
+	if cleanupDir == "" && s.App.Config != nil {
+		cleanupDir = filepath.Join(s.App.Config.FileUpDir, ".cleanup")
+	}
+
+	// 确保回收站目录存在（仅软删除模式）
+	if softDelete && cleanupDir != "" {
+		if err := os.MkdirAll(cleanupDir, 0755); err != nil {
+			s.logger.Errorf("❌ 创建回收站目录失败: %v", err)
+			return
+		}
+	}
+
+	cleanedCount := 0
+	for _, video := range videos {
+		if s.softCleanupVideoFiles(video.VideoID, softDelete, cleanupDir) {
+			cleanedCount++
+			// 更新数据库状态
+			s.Db.Table("cw_saved_videos").Where("video_id = ?", video.VideoID).Updates(map[string]interface{}{
+				"files_cleanup_status": "completed",
+				"files_cleaned":        true,
+				"files_cleaned_at":     time.Now(),
+			})
+		}
+	}
+
+	s.logger.Infof("✅ 清理完成: 成功清理 %d/%d 个任务", cleanedCount, len(videos))
+}
+
+// softCleanupVideoFiles 清理指定视频的文件（带软删除选项）
+// softDelete=true 时移动到回收站，否则永久删除
+func (s *UploadScheduler) softCleanupVideoFiles(videoID string, softDelete bool, cleanupDir string) bool {
+	// 获取视频信息以确定目录
+	video, err := s.SavedVideoService.GetVideoByVideoID(videoID)
+	if err != nil {
+		s.logger.Warnf("⚠️ 获取视频信息失败: %s - %v", videoID, err)
+		return false
+	}
+
+	// 构建视频目录路径（与现有方法一致）
+	baseDir, err := filepath.Abs(s.App.Config.FileUpDir)
+	if err != nil {
+		s.logger.Warnf("⚠️ 获取文件上传目录失败: %v", err)
+		return false
+	}
+	userDir := fmt.Sprintf("user_%d", video.UserID)
+	dateDir := video.CreatedAt.Local().Format("2006-01-02")
+	videoDir := filepath.Join(baseDir, userDir, dateDir, videoID)
+
+	// 检查目录是否存在
+	if _, err := os.Stat(videoDir); os.IsNotExist(err) {
+		s.logger.Debugf("📂 视频目录不存在，跳过: %s", videoDir)
+		return true // 目录不存在也算清理成功
+	}
+
+	// 统计文件
+	var fileCount int
+	var totalSize int64
+	entries, err := os.ReadDir(videoDir)
+	if err != nil {
+		s.logger.Warnf("⚠️ 读取目录失败: %v", err)
+		return false
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			if info, err := entry.Info(); err == nil {
+				fileCount++
+				totalSize += info.Size()
+			}
+		}
+	}
+
+	if softDelete && cleanupDir != "" {
+		// 软删除：移动到回收站
+		destDir := filepath.Join(cleanupDir, time.Now().Format("2006-01-02"), videoID)
+		if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+			s.logger.Errorf("❌ 创建回收站子目录失败: %v", err)
+			return false
+		}
+
+		if err := os.Rename(videoDir, destDir); err != nil {
+			s.logger.Errorf("❌ 移动到回收站失败: %v", err)
+			return false
+		}
+
+		s.logger.Infof("♻️ 已移动到回收站 %s: %d 个文件, %.2f MB", videoID, fileCount, float64(totalSize)/(1024*1024))
+	} else {
+		// 永久删除
+		if err := os.RemoveAll(videoDir); err != nil {
+			s.logger.Errorf("❌ 永久删除失败: %v", err)
+			return false
+		}
+
+		s.logger.Infof("🗑️ 已永久删除 %s: %d 个文件, %.2f MB", videoID, fileCount, float64(totalSize)/(1024*1024))
+	}
+
+	return true
 }

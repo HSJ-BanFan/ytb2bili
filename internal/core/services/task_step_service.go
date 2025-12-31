@@ -386,6 +386,16 @@ func (s *TaskStepService) GetCompletedStepNames(videoID string) ([]string, error
 	return stepNames, err
 }
 
+// GetRunningStepNames 获取指定视频正在运行的任务步骤名称列表
+// 用于单步重试时的依赖检查，避免并发竞态条件
+func (s *TaskStepService) GetRunningStepNames(videoID string) ([]string, error) {
+	var stepNames []string
+	err := s.DB.Model(&model.TaskStep{}).
+		Where("video_id = ? AND status = ?", videoID, model.TaskStepStatusRunning).
+		Pluck("step_name", &stepNames).Error
+	return stepNames, err
+}
+
 // EnsureSubtitleUploadStep 确保视频有"上传字幕到Bilibili"步骤
 // 用于为已存在的视频补充缺失的步骤
 func (s *TaskStepService) EnsureSubtitleUploadStep(videoID string) error {

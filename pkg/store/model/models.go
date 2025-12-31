@@ -139,8 +139,10 @@ type SavedVideo struct {
 	DownloadProgress string `gorm:"type:text" json:"download_progress,omitempty"` // JSON格式的下载进度
 
 	// 文件清理字段
-	FilesCleaned   bool       `gorm:"default:false" json:"files_cleaned"` // 是否已清理文件
-	FilesCleanedAt *time.Time `json:"files_cleaned_at,omitempty"`         // 文件清理时间
+	FilesCleaned            bool       `gorm:"default:false" json:"files_cleaned"`                           // 是否已清理文件
+	FilesCleanedAt          *time.Time `json:"files_cleaned_at,omitempty"`                                   // 文件清理时间
+	FilesCleanupStatus      string     `gorm:"type:varchar(20);default:pending" json:"files_cleanup_status"` // 清理状态: pending/scheduled/completed/skipped
+	FilesCleanupScheduledAt *time.Time `json:"files_cleanup_scheduled_at,omitempty"`                         // 预定清理时间
 }
 
 // TableName 指定表名
