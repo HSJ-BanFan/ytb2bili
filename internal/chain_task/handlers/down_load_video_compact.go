@@ -99,12 +99,46 @@ func (t *DownloadVideo) logDownloadProgressCompact(line string, lastProgressTime
 		return
 	}
 
-	// 下载完成（只识别视频下载的 100%，避免字幕下载进度误判）
-	// yt-dlp 视频下载完成格式: [download] 100% of XXXMiB in XX:XX
-	// 字幕下载使用不同的格式，不应该触发此判断
-	if (strings.HasPrefix(line, "[download]") && strings.Contains(line, "100%")) ||
-		strings.Contains(line, "has already been downloaded") {
-		progressLogger.LogMessage("✅ 视频下载完成")
+	// 下载完成检测（增强版：通过文件大小区分视频和字幕）
+	// ═══════════════════════════════════════════════════════════════
+	// 问题：yt-dlp 字幕下载也会输出 "[download] 100% of XXKiB"
+	// 解决：解析文件大小，只有 >3MB 才认为是视频下载完成
+	// 字幕文件通常 <1MB，短视频通常 >3MB
+	// ═══════════════════════════════════════════════════════════════
+	if strings.HasPrefix(line, "[download]") && strings.Contains(line, "100%") {
+		// 解析文件大小: [download] 100% of 239.12MiB in 00:42
+		sizeRegex := regexp.MustCompile(`\[download\]\s+100%\s+of\s+~?\s*([0-9.]+)\s*([KMGT]?i?B)`)
+		if matches := sizeRegex.FindStringSubmatch(line); len(matches) >= 3 {
+			sizeValue := 0.0
+			fmt.Sscanf(matches[1], "%f", &sizeValue)
+			unit := strings.ToUpper(matches[2])
+
+			// 转换为 MB
+			sizeMB := sizeValue
+			switch {
+			case strings.HasPrefix(unit, "G"):
+				sizeMB = sizeValue * 1024
+			case strings.HasPrefix(unit, "K"):
+				sizeMB = sizeValue / 1024
+			case strings.HasPrefix(unit, "B") && !strings.Contains(unit, "I"):
+				sizeMB = sizeValue / (1024 * 1024)
+			}
+
+			// 只有大于 3MB 才认为是视频下载完成
+			if sizeMB > 3 {
+				progressLogger.LogMessage("✅ 视频下载完成")
+				return
+			}
+			// 否则是字幕或其他小文件，不输出"视频下载完成"
+			return
+		}
+		// 无法解析大小，静默忽略（等待后续可解析的行，避免误判）
+		return
+	}
+
+	// 已下载的文件检测（保持原逻辑，视频已下载通常会有大文件）
+	if strings.Contains(line, "has already been downloaded") {
+		progressLogger.LogMessage("✅ 视频下载完成（已存在）")
 		return
 	}
 

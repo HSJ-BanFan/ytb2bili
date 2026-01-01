@@ -650,11 +650,14 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 		// 根据配置选择标题来源
 		biliConfig := t.App.Config.BilibiliConfig
 
-		// 优先使用 upload_* 字段（由"确认元数据"任务设置）
+		// ✅ 架构优化：upload_title 是唯一数据源（由"确认元数据"任务设置）
+		// 不再在此处处理模板逻辑，确保关注点分离
 		if savedVideo.UploadTitle != "" {
 			title = savedVideo.UploadTitle
 			sourceLabel := ""
 			switch savedVideo.MetadataSource {
+			case "template_mixture":
+				sourceLabel = "🧩 模板混合"
 			case "ai_generated":
 				sourceLabel = "✨ AI生成"
 			case "user_edited":
@@ -663,31 +666,19 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 				sourceLabel = "📹 原始"
 			}
 			t.App.Logger.Infof("✓ 使用预设标题 [%s]: %s", sourceLabel, title)
-		} else if biliConfig != nil && biliConfig.CustomTitleTemplate != "" {
-			// 回退到旧逻辑：使用自定义标题模板（兼容未执行"确认元数据"的情况）
-			title = biliConfig.CustomTitleTemplate
-			// 清理原标题中的标签
-			cleanedOriginalTitle := cleanTitle(savedVideo.Title)
-			title = strings.ReplaceAll(title, "{original_title}", cleanedOriginalTitle)
-			title = strings.ReplaceAll(title, "{ai_title}", savedVideo.GeneratedTitle)
-			t.App.Logger.Infof("✓ 使用自定义标题模板: %s", title)
-		} else if biliConfig != nil && !biliConfig.UseOriginalTitle {
-			// 配置为使用AI生成标题
-			if savedVideo.GeneratedTitle != "" {
+		} else {
+			// 如果 upload_title 为空，说明"确认元数据"任务未正确执行
+			// 使用简单的回退逻辑（不涉及模板合成）
+			t.App.Logger.Warn("⚠️ upload_title 为空，建议检查'确认元数据'任务是否正常执行")
+			if biliConfig != nil && !biliConfig.UseOriginalTitle && savedVideo.GeneratedTitle != "" {
 				title = savedVideo.GeneratedTitle
-				t.App.Logger.Infof("✓ 使用AI生成的标题: %s", title)
+				t.App.Logger.Infof("✓ 回退使用AI标题: %s", title)
 			} else if savedVideo.Title != "" {
 				title = cleanTitle(savedVideo.Title)
-				t.App.Logger.Infof("✓ AI标题不存在，回退使用原始标题（已清理标签）: %s", title)
-			}
-		} else {
-			// 默认使用原始标题（YouTube原标题）
-			if savedVideo.Title != "" {
-				title = cleanTitle(savedVideo.Title)
-				t.App.Logger.Infof("✓ 使用YouTube原始标题（已清理标签）: %s", title)
-			} else if savedVideo.GeneratedTitle != "" {
-				title = savedVideo.GeneratedTitle
-				t.App.Logger.Infof("✓ 原始标题不存在，回退使用AI标题: %s", title)
+				t.App.Logger.Infof("✓ 回退使用YouTube原始标题（已清理标签）: %s", title)
+			} else {
+				title = t.StateManager.VideoID
+				t.App.Logger.Warnf("⚠️ 无可用标题，使用VideoID: %s", title)
 			}
 		}
 
@@ -720,12 +711,14 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 			return true
 		}
 
-		// 根据配置选择描述来源
-		// 优先使用 upload_desc 字段（由"确认元数据"任务设置）
+		// ✅ 架构优化：upload_desc 是唯一数据源（由"确认元数据"任务设置）
+		// 不再在此处处理模板逻辑，确保关注点分离
 		if savedVideo.UploadDesc != "" {
 			desc = savedVideo.UploadDesc
 			sourceLabel := ""
 			switch savedVideo.MetadataSource {
+			case "template_mixture":
+				sourceLabel = "🧩 模板混合"
 			case "ai_generated":
 				sourceLabel = "✨ AI生成"
 			case "user_edited":
@@ -734,51 +727,16 @@ func (t *UploadToBilibili) buildStudioInfo(video *bilibili.Video, context map[st
 				sourceLabel = "📹 原始"
 			}
 			t.App.Logger.Infof("✓ 使用预设描述 [%s]", sourceLabel)
-		} else if biliConfig != nil && biliConfig.CustomDescTemplate != "" {
-			// 回退到旧逻辑：使用自定义模板（兼容未执行"确认元数据"的情况）
-			desc = biliConfig.CustomDescTemplate
-			desc = strings.ReplaceAll(desc, "{original_desc}", savedVideo.Description)
-			desc = strings.ReplaceAll(desc, "{ai_desc}", savedVideo.GeneratedDesc)
-			t.App.Logger.Infof("✓ 使用自定义描述模板")
-		} else if biliConfig != nil && biliConfig.UseOriginalDesc {
-			// 配置为使用原始描述
-			if isValidDescription(savedVideo.Description) {
-				desc = savedVideo.Description
-				t.App.Logger.Infof("✓ 使用YouTube原始描述")
-			} else if savedVideo.GeneratedDesc != "" {
-				desc = savedVideo.GeneratedDesc
-				t.App.Logger.Infof("✓ 原始描述无效，回退使用AI描述")
-			} else {
-				desc = ""
-				t.App.Logger.Info("✓ 无有效描述，仅使用原视频链接")
-			}
 		} else {
-			// 默认使用AI生成的描述 + 原视频简介
-			aiIntro := ""
-			originalDesc := ""
-
-			// 获取AI生成的精炼介绍（100字以内）
-			if savedVideo.GeneratedDesc != "" {
-				aiIntro = savedVideo.GeneratedDesc
-				t.App.Logger.Infof("✓ AI生成的精炼介绍: %s", aiIntro)
-			}
-
-			// 获取原视频简介
-			if isValidDescription(savedVideo.Description) {
-				originalDesc = savedVideo.Description
-				t.App.Logger.Infof("✓ 原视频简介长度: %d 字符", len([]rune(originalDesc)))
-			}
-
-			// 拼接描述：AI介绍 + 分隔线 + 原视频简介
-			if aiIntro != "" && originalDesc != "" {
-				desc = fmt.Sprintf("%s\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📄 原视频简介：\n%s", aiIntro, originalDesc)
-				t.App.Logger.Info("✓ 使用AI介绍 + 原视频简介")
-			} else if aiIntro != "" {
-				desc = aiIntro
-				t.App.Logger.Info("✓ 仅使用AI介绍")
-			} else if originalDesc != "" {
-				desc = originalDesc
-				t.App.Logger.Info("✓ 仅使用原视频简介")
+			// 如果 upload_desc 为空，说明"确认元数据"任务未正确执行
+			// 使用简单的回退逻辑（不涉及模板合成）
+			t.App.Logger.Warn("⚠️ upload_desc 为空，建议检查'确认元数据'任务是否正常执行")
+			if biliConfig != nil && !biliConfig.UseOriginalDesc && savedVideo.GeneratedDesc != "" {
+				desc = savedVideo.GeneratedDesc
+				t.App.Logger.Infof("✓ 回退使用AI描述")
+			} else if isValidDescription(savedVideo.Description) {
+				desc = savedVideo.Description
+				t.App.Logger.Infof("✓ 回退使用YouTube原始描述")
 			} else {
 				desc = ""
 				t.App.Logger.Info("✓ 无有效描述，仅使用原视频链接")

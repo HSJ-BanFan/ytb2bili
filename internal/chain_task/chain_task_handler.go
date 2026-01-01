@@ -166,8 +166,28 @@ func (h *ChainTaskHandler) SetUp() {
 			videoID := task.VideoId
 			userID := task.UserID
 
-			// 检查是否已在执行中
+			// 检查是否已在执行中（内存级快速检查）
 			if _, loaded := h.inFlightTasks.LoadOrStore(videoID, true); loaded {
+				continue
+			}
+
+			// ═══════════════════════════════════════════════════════════════
+			// 关键修复：使用数据库原子操作防止竞态条件
+			// 只有成功将状态从 "001" 更新为 "002" 的进程才能继续执行
+			// ═══════════════════════════════════════════════════════════════
+			result := h.Db.Model(&model.SavedVideo{}).
+				Where("id = ? AND status = ?", task.Id, "001").
+				Update("status", "002")
+
+			if result.Error != nil {
+				smartLogger.Errorf("原子更新任务状态失败: %v", result.Error)
+				h.inFlightTasks.Delete(videoID)
+				continue
+			}
+
+			if result.RowsAffected == 0 {
+				// 状态不是 "001"，说明已被其他调度器处理，跳过
+				h.inFlightTasks.Delete(videoID)
 				continue
 			}
 
@@ -176,6 +196,8 @@ func (h *ChainTaskHandler) SetUp() {
 				acquired, current, max, _ := h.ConcurrencyLimiter.TryAcquire(context.Background(), userID)
 				if !acquired {
 					smartLogger.Debugf("⏳ 用户 %d 并发已达上限 (%d/%d)，任务 %s 等待下次调度", userID, current, max, videoID)
+					// 回滚状态
+					h.updateSavedVideoStatus(task.Id, "001")
 					h.inFlightTasks.Delete(videoID)
 					continue
 				}
@@ -184,14 +206,7 @@ func (h *ChainTaskHandler) SetUp() {
 			// 尝试获取 worker slot
 			select {
 			case h.workerPool <- struct{}{}:
-				// 获取到 slot，更新状态并启动 goroutine 执行
-				if err := h.updateSavedVideoStatus(task.Id, "002"); err != nil {
-					smartLogger.Errorf("更新任务状态为处理中时出错: %v", err)
-					<-h.workerPool
-					h.inFlightTasks.Delete(videoID)
-					continue
-				}
-
+				// 获取到 slot，启动 goroutine 执行
 				go func(t models2.TbVideo, uid uint) {
 					defer func() {
 						<-h.workerPool
@@ -217,13 +232,14 @@ func (h *ChainTaskHandler) SetUp() {
 						})
 				}(*task, userID)
 			default:
-				// worker pool 已满，跳过本次调度
+				// worker pool 已满，回滚状态并跳过本次调度
+				h.updateSavedVideoStatus(task.Id, "001")
 				h.inFlightTasks.Delete(videoID)
 				// ⚠️ 重要：释放已获取的并发槽位，否则会槽位泄漏
 				if h.ConcurrencyLimiter != nil && userID > 0 {
 					h.ConcurrencyLimiter.Release(userID)
 				}
-				smartLogger.Debugf("Worker pool 已满，任务 %s 等待下次调度", videoID)
+				smartLogger.Debugf("Worker pool 已满，任务 %s 回滚状态并等待下次调度", videoID)
 			}
 		}
 	})
@@ -293,6 +309,10 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	// 注册任务到取消管理器（使用数据库主键 ID + 任务类型标识）
 	// 全链任务使用固定标识 "chain_full"
 	runID := "chain_full"
+	// 关键修复：每次启动新任务链前，清除可能残留的"已取消"状态
+	// 防止之前删除的任务重新提交时被误判为已取消
+	h.CancelManager.ClearCancel(video.Id)
+
 	ctx, allowed := h.CancelManager.Register(video.Id, runID)
 	if !allowed {
 		h.App.Logger.Warnf("⛔ 任务链启动被拒绝（任务已被取消）: VideoID=%s", video.VideoId)
@@ -483,6 +503,9 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	// 注册任务到取消管理器（使用数据库主键 ID + 步骤名称）
 	// 单步任务使用 "step_" + stepName 作为标识
 	runID := "step_" + stepName
+	// 同样在单步执行前清除取消状态，确保重试操作能正常执行
+	h.CancelManager.ClearCancel(video.Id)
+
 	ctx, allowed := h.CancelManager.Register(video.Id, runID)
 	if !allowed {
 		h.App.Logger.Warnf("⛔ 任务步骤启动被拒绝（任务已被取消）: %s - %s", video.VideoId, stepName)
