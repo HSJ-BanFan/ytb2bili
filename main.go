@@ -585,6 +585,7 @@ func registerHandlers(
 
 	// 字幕 Handler（需要 JWT 认证）
 	subtitleHandler := handler.NewSubtitleHandler(server, membershipStore, authMiddleware.JWTAuth)
+	subtitleHandler.SetCancelManager(cancelManager)
 	subtitleHandler.RegisterRoutes(server)
 	logger.Info("✓ Subtitle routes registered (JWT protected)")
 

@@ -20,6 +20,11 @@ type SubtitleHandler struct {
 	quotaService   *membership.QuotaService
 	featureChecker *membership.FeatureChecker
 	jwtMiddleware  func() gin.HandlerFunc
+	// 任务取消管理器接口
+	CancelManager interface {
+		Cancel(id uint)
+		ClearCancel(id uint)
+	}
 }
 
 func NewSubtitleHandler(app *core.AppServer, membershipStore membership.MembershipStore, jwtMiddleware func() gin.HandlerFunc) *SubtitleHandler {
@@ -30,6 +35,14 @@ func NewSubtitleHandler(app *core.AppServer, membershipStore membership.Membersh
 		featureChecker: checker,
 		jwtMiddleware:  jwtMiddleware,
 	}
+}
+
+// SetCancelManager 设置任务取消管理器
+func (h *SubtitleHandler) SetCancelManager(cancelManager interface {
+	Cancel(id uint)
+	ClearCancel(id uint)
+}) {
+	h.CancelManager = cancelManager
 }
 
 // SaveVideoRequest 保存视频请求
@@ -176,6 +189,11 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 
 		if existingVideo.DeletedAt.Valid {
 			fmt.Printf("✅ 恢复已删除的视频: %s\n", videoID)
+			// 清除该视频的取消状态，允许重新提交执行
+			if h.CancelManager != nil {
+				h.CancelManager.ClearCancel(existingVideo.ID)
+				fmt.Printf("🔄 已清除视频 %s (ID: %d) 的取消状态\n", videoID, existingVideo.ID)
+			}
 		}
 	} else if err == gorm.ErrRecordNotFound {
 		// 记录不存在，创建新记录
