@@ -10,13 +10,13 @@
 
 - [x] P2-3: 移除日志中的明文密码 ✅ 已完成
 - [x] 视频删除审计日志 ✅ 已完成
-- [ ] 任务重试审计日志
-- [ ] 视频上传审计日志
-- [ ] Cookie刷新审计日志
-- [ ] 创建集成测试框架
-- [ ] 加密服务集成测试
-- [ ] 审计日志集成测试
-- [ ] 备份服务集成测试
+- [x] 任务重试审计日志 ✅ 已完成 (retryTaskStep, resetAllFailedSteps, resetAllSteps)
+- [x] 视频上传审计日志 ✅ 已完成 (manualUploadVideo, manualUploadSubtitle)
+- [x] Cookie刷新审计日志 ⏭️ 跳过 (系统级cron job，无用户上下文)
+- [x] 创建集成测试框架 ✅ 已完成 (tests/integration/)
+- [x] 加密服务集成测试 ✅ 已完成 (encryption_test.go)
+- [x] 审计日志集成测试 ✅ 已完成 (audit_log_test.go)
+- [x] 备份服务集成测试 ✅ 已完成 (backup_test.go)
 
 ---
 

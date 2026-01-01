@@ -405,6 +405,19 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 
 	h.App.Logger.Infof("✅ 任务步骤 %s 已重置为待执行状态，等待调度器处理", stepName)
 
+	// ✅ 记录审计日志
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"retry_task_step",
+		"task_step",
+		fmt.Sprintf("%s:%s", savedVideo.VideoID, stepName),
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("重试任务成功: %s -> %s", savedVideo.Title, stepName),
+	)
+
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,
 		Message: fmt.Sprintf("任务步骤 %s 已加入重新执行队列", stepName),
@@ -497,8 +510,8 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 	h.AuditService.LogSuccess(
 		userID,
 		username,
-		"delete_video", // action
-		"video",        // resource
+		"delete_video",     // action
+		"video",            // resource
 		savedVideo.VideoID, // resource_id
 		c.ClientIP(),
 		c.Request.UserAgent(),
@@ -740,6 +753,20 @@ func (h *VideoHandler) manualUploadVideo(c *gin.Context) {
 		}
 	}()
 
+	// ✅ 记录审计日志
+	userID, _ := auth.GetUserID(c)
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"manual_upload_video",
+		"video",
+		savedVideo.VideoID,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("手动上传视频: %s", savedVideo.Title),
+	)
+
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,
 		Message: "视频上传任务已启动",
@@ -843,6 +870,20 @@ func (h *VideoHandler) resetAllFailedSteps(c *gin.Context) {
 		}
 	}
 
+	// ✅ 记录审计日志
+	userID, _ := auth.GetUserID(c)
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"reset_failed_steps",
+		"video",
+		savedVideo.VideoID,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("重置失败任务: %s, 步骤: %v", savedVideo.Title, stepNames),
+	)
+
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,
 		Message: fmt.Sprintf("已重置 %d 个失败步骤", resetCount),
@@ -916,6 +957,20 @@ func (h *VideoHandler) resetAllSteps(c *gin.Context) {
 		h.CancelManager.ClearCancel(savedVideo.ID)
 		h.App.Logger.Infof("✅ 已清除任务的取消状态")
 	}
+
+	// ✅ 记录审计日志
+	userID, _ := auth.GetUserID(c)
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"reset_all_steps",
+		"video",
+		savedVideo.VideoID,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("重置所有任务: %s", savedVideo.Title),
+	)
 
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,
@@ -1003,6 +1058,20 @@ func (h *VideoHandler) manualUploadSubtitle(c *gin.Context) {
 			h.SavedVideoService.UpdateStatus(savedVideo.ID, "400")
 		}
 	}()
+
+	// ✅ 记录审计日志
+	userID, _ := auth.GetUserID(c)
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"manual_upload_subtitle",
+		"video",
+		savedVideo.VideoID,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("手动上传字幕: %s", savedVideo.Title),
+	)
 
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,
