@@ -190,17 +190,26 @@ func (UserToken) TableName() string {
 // UserBiliAccount 用户绑定的B站账号
 type UserBiliAccount struct {
 	BaseModel
-	UserID       uint       `gorm:"index;not null" json:"user_id"`   // 系统用户ID
-	BiliMid      int64      `gorm:"index;not null" json:"bili_mid"`  // B站用户MID
-	BiliName     string     `gorm:"size:100" json:"bili_name"`       // B站用户名
-	BiliFace     string     `gorm:"size:500" json:"bili_face"`       // B站头像URL
-	IsEnabled    bool       `gorm:"default:true" json:"is_enabled"`  // 是否启用
-	IsPrimary    bool       `gorm:"default:false" json:"is_primary"` // 是否为主账号（用于上传）
-	Cookies      string     `gorm:"type:text" json:"-"`              // 登录凭证（加密存储）
-	AccessToken  string     `gorm:"type:text" json:"-"`              // Access Token
-	RefreshToken string     `gorm:"type:text" json:"-"`              // Refresh Token
-	ExpiresAt    *time.Time `json:"expires_at"`                      // 凭证过期时间
-	LastUsedAt   *time.Time `json:"last_used_at"`                    // 最后使用时间
+	UserID     uint       `gorm:"index;not null" json:"user_id"`   // 系统用户ID
+	BiliMid    int64      `gorm:"index;not null" json:"bili_mid"`  // B站用户MID
+	BiliName   string     `gorm:"size:100" json:"bili_name"`       // B站用户名
+	BiliFace   string     `gorm:"size:500" json:"bili_face"`       // B站头像URL
+	IsEnabled  bool       `gorm:"default:true" json:"is_enabled"`  // 是否启用
+	IsPrimary  bool       `gorm:"default:false" json:"is_primary"` // 是否为主账号（用于上传）
+	ExpiresAt  *time.Time `json:"expires_at"`                      // 凭证过期时间
+	LastUsedAt *time.Time `json:"last_used_at"`                    // 最后使用时间
+
+	// 明文字段（仅内存使用，不直接存储到数据库）
+	// 注意：为了兼容旧数据，这些字段暂时保留 gorm tag，但新数据优先使用加密字段
+	Cookies      string `gorm:"type:text" json:"-"` // 登录凭证（旧版明文，兼容）
+	AccessToken  string `gorm:"type:text" json:"-"` // Access Token（旧版明文，兼容）
+	RefreshToken string `gorm:"type:text" json:"-"` // Refresh Token（旧版明文，兼容）
+
+	// 加密字段（Version 2+）
+	CookiesEncrypted      string `gorm:"type:text" json:"-"` // 加密的 Cookies
+	AccessTokenEncrypted  string `gorm:"type:text" json:"-"` // 加密的 Access Token
+	RefreshTokenEncrypted string `gorm:"type:text" json:"-"` // 加密的 Refresh Token
+	EncryptionVersion     int    `gorm:"default:0" json:"-"` // 加密版本: 0=明文, 2=AES-256-GCM
 
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"` // 关联用户
 }

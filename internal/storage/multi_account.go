@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
+	"github.com/difyz9/ytb2bili/pkg/crypto"
 )
 
 // BiliAccount 单个B站账号信息
@@ -20,22 +21,26 @@ type BiliAccount struct {
 	Face      string              `json:"face"`       // 头像URL
 	IsEnabled bool                `json:"is_enabled"` // 是否启用
 	IsPrimary bool                `json:"is_primary"` // 是否为主账号（用于上传）
-	LoginInfo *bilibili.LoginInfo `json:"login_info"` // 登录凭证
+	LoginInfo *bilibili.LoginInfo `json:"-"`          // 登录凭证（内存使用，不序列化）
 	UserInfo  *UserBasicInfo      `json:"user_info"`  // 用户详细信息
 	CreatedAt time.Time           `json:"created_at"` // 添加时间
 	UpdatedAt time.Time           `json:"updated_at"` // 更新时间
 	ExpiresAt time.Time           `json:"expires_at"` // 过期时间
+
+	// 加密存储字段 (Version 2+)
+	EncryptedLoginInfo string `json:"encrypted_login_info,omitempty"` // 加密后的 LoginInfo
 }
 
 // MultiAccountStore 多账号存储管理器
 type MultiAccountStore struct {
-	storePath string
-	mu        sync.RWMutex
+	storePath         string
+	mu                sync.RWMutex
+	encryptionService *crypto.EncryptionService
 }
 
 // MultiAccountData 多账号存储数据结构
 type MultiAccountData struct {
-	Version  int            `json:"version"`  // 数据版本
+	Version  int            `json:"version"`  // 数据版本: 1=明文, 2=加密
 	Accounts []*BiliAccount `json:"accounts"` // 账号列表
 }
 
@@ -55,6 +60,15 @@ func GetMultiAccountStore() *MultiAccountStore {
 
 		storePath := filepath.Join(homeDir, ".bili_up", "accounts.json")
 		multiAccountStore = &MultiAccountStore{storePath: storePath}
+
+		// 初始化加密服务
+		encSvc, err := crypto.GetEncryptionService()
+		if err != nil {
+			log.Printf("⚠️ 无法初始化加密服务: %v", err)
+			log.Printf("⚠️ 账号数据将以明文存储（不推荐）")
+		} else {
+			multiAccountStore.encryptionService = encSvc
+		}
 
 		// 确保存储目录存在
 		if err := os.MkdirAll(filepath.Dir(storePath), 0700); err != nil {
@@ -102,7 +116,7 @@ func (s *MultiAccountStore) migrateFromSingleAccount() {
 	}
 
 	data := &MultiAccountData{
-		Version:  1,
+		Version:  2, // 新迁移的数据直接使用加密版本
 		Accounts: []*BiliAccount{account},
 	}
 
@@ -114,32 +128,127 @@ func (s *MultiAccountStore) migrateFromSingleAccount() {
 	log.Printf("Successfully migrated single account to multi-account format (Mid: %d)", account.Mid)
 }
 
-// loadData 加载多账号数据
+// loadData 加载多账号数据（自动解密 + 自动迁移到 Version 2）
 func (s *MultiAccountStore) loadData() (*MultiAccountData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if _, err := os.Stat(s.storePath); os.IsNotExist(err) {
-		return &MultiAccountData{Version: 1, Accounts: []*BiliAccount{}}, nil
+		return &MultiAccountData{Version: 2, Accounts: []*BiliAccount{}}, nil
 	}
 
-	data, err := os.ReadFile(s.storePath)
+	fileData, err := os.ReadFile(s.storePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read accounts data: %w", err)
 	}
 
 	var accountData MultiAccountData
-	if err := json.Unmarshal(data, &accountData); err != nil {
+	if err := json.Unmarshal(fileData, &accountData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal accounts data: %w", err)
+	}
+
+	// 解密/迁移每个账号的 LoginInfo
+	needMigration := false
+	for _, acc := range accountData.Accounts {
+		if acc.EncryptedLoginInfo != "" && s.encryptionService != nil {
+			// 解密 EncryptedLoginInfo
+			var loginInfo bilibili.LoginInfo
+			if err := s.encryptionService.DecryptJSON(acc.EncryptedLoginInfo, &loginInfo); err != nil {
+				log.Printf("⚠️ 解密账号 %d 的 LoginInfo 失败: %v", acc.Mid, err)
+				continue
+			}
+			acc.LoginInfo = &loginInfo
+		}
+		// 检查是否有需要迁移的明文数据 (Version 1 遗留)
+		if acc.EncryptedLoginInfo == "" && acc.LoginInfo != nil {
+			needMigration = true
+		}
+	}
+
+	// 如果有 Version 1 的明文数据，自动迁移到 Version 2
+	if needMigration && accountData.Version < 2 {
+		log.Printf("🔄 检测到 Version 1 数据，正在迁移到加密存储...")
+		s.mu.RUnlock() // 释放读锁，因为 migrateToVersion2 需要写锁
+		if err := s.migrateToVersion2(&accountData); err != nil {
+			log.Printf("⚠️ 迁移失败: %v", err)
+		}
+		s.mu.RLock() // 重新获取读锁
 	}
 
 	return &accountData, nil
 }
 
-// saveData 保存多账号数据
+// migrateToVersion2 将 Version 1 (明文) 迁移到 Version 2 (加密)
+func (s *MultiAccountStore) migrateToVersion2(data *MultiAccountData) error {
+	if s.encryptionService == nil {
+		return fmt.Errorf("加密服务未初始化，无法迁移")
+	}
+
+	// 1. 先备份
+	backupPath := s.storePath + ".backup." + time.Now().Format("20060102_150405")
+	log.Printf("📦 正在备份旧数据到: %s", backupPath)
+
+	srcData, err := os.ReadFile(s.storePath)
+	if err != nil {
+		return fmt.Errorf("读取源文件失败: %w", err)
+	}
+	if err := os.WriteFile(backupPath, srcData, 0600); err != nil {
+		return fmt.Errorf("备份失败，迁移已取消: %w", err)
+	}
+
+	// 2. 加密所有账号
+	log.Printf("🔐 正在加密 %d 个账号...", len(data.Accounts))
+	for i, account := range data.Accounts {
+		if account.LoginInfo != nil {
+			encrypted, err := s.encryptionService.EncryptJSON(account.LoginInfo)
+			if err != nil {
+				// 恢复备份
+				os.Rename(backupPath, s.storePath)
+				return fmt.Errorf("加密账号 #%d 失败，已恢复备份: %w", i, err)
+			}
+			account.EncryptedLoginInfo = encrypted
+		}
+	}
+
+	// 3. 更新版本号
+	data.Version = 2
+
+	// 4. 保存新数据
+	if err := s.saveDataInternal(data); err != nil {
+		// 恢复备份
+		os.Rename(backupPath, s.storePath)
+		return fmt.Errorf("保存加密数据失败，已恢复备份: %w", err)
+	}
+
+	log.Printf("✅ 迁移完成！备份文件: %s", backupPath)
+	log.Printf("⚠️ 确认账号功能正常后，可手动删除备份文件")
+
+	return nil
+}
+
+// saveData 保存多账号数据（自动加密）
 func (s *MultiAccountStore) saveData(data *MultiAccountData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	return s.saveDataInternal(data)
+}
+
+// saveDataInternal 内部保存方法（不加锁，用于迁移等场景）
+func (s *MultiAccountStore) saveDataInternal(data *MultiAccountData) error {
+	// 保存前加密每个账号的 LoginInfo
+	if s.encryptionService != nil {
+		data.Version = 2 // 标记为加密版本
+		for i, account := range data.Accounts {
+			if account.LoginInfo != nil {
+				encrypted, err := s.encryptionService.EncryptJSON(account.LoginInfo)
+				if err != nil {
+					return fmt.Errorf("加密账号 #%d 失败: %w", i, err)
+				}
+				account.EncryptedLoginInfo = encrypted
+			}
+		}
+	}
 
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {

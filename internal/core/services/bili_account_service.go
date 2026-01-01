@@ -9,18 +9,31 @@ import (
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/storage"
+	"github.com/difyz9/ytb2bili/pkg/crypto"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"gorm.io/gorm"
 )
 
 // BiliAccountService B站账号服务
 type BiliAccountService struct {
-	db *gorm.DB
+	db                *gorm.DB
+	encryptionService *crypto.EncryptionService
 }
 
 // NewBiliAccountService 创建B站账号服务
 func NewBiliAccountService(db *gorm.DB) *BiliAccountService {
-	return &BiliAccountService{db: db}
+	svc := &BiliAccountService{db: db}
+
+	// 初始化加密服务
+	encSvc, err := crypto.GetEncryptionService()
+	if err != nil {
+		log.Printf("⚠️ BiliAccountService: 无法初始化加密服务: %v", err)
+		log.Printf("⚠️ 数据库中的账号凭证将以明文存储（不推荐）")
+	} else {
+		svc.encryptionService = encSvc
+	}
+
+	return svc
 }
 
 // BindAccount 绑定B站账号到用户
@@ -30,9 +43,24 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 	}
 
 	// 序列化登录凭证
-	cookies, err := json.Marshal(loginInfo)
+	cookiesJson, err := json.Marshal(loginInfo)
 	if err != nil {
 		return nil, fmt.Errorf("序列化登录信息失败: %v", err)
+	}
+
+	// 加密凭证
+	var cookiesEncrypted string
+	var encryptionVersion int
+	if s.encryptionService != nil {
+		encrypted, err := s.encryptionService.EncryptString(string(cookiesJson))
+		if err != nil {
+			log.Printf("⚠️ 加密凭证失败，将使用明文存储: %v", err)
+			cookiesEncrypted = ""
+			encryptionVersion = 0
+		} else {
+			cookiesEncrypted = encrypted
+			encryptionVersion = 2
+		}
 	}
 
 	// 检查是否已绑定该B站账号
@@ -40,12 +68,16 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 	err = s.db.Where("user_id = ? AND bili_mid = ?", userID, loginInfo.TokenInfo.Mid).First(&existing).Error
 	if err == nil {
 		// 已存在，更新凭证
-		existing.Cookies = string(cookies)
+		if encryptionVersion == 2 {
+			existing.CookiesEncrypted = cookiesEncrypted
+			existing.Cookies = "" // 清空明文
+		} else {
+			existing.Cookies = string(cookiesJson)
+		}
+		existing.EncryptionVersion = encryptionVersion
 		existing.BiliName = loginInfo.TokenInfo.Uname
 		existing.BiliFace = loginInfo.TokenInfo.Face
 		existing.IsEnabled = true
-		now := time.Now()
-		existing.ExpiresAt = &now
 		existing.ExpiresAt = nil // 暂不设置过期时间，由刷新机制处理
 
 		if err := s.db.Save(&existing).Error; err != nil {
@@ -63,13 +95,20 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 
 	// 创建新绑定
 	account := &model.UserBiliAccount{
-		UserID:    userID,
-		BiliMid:   loginInfo.TokenInfo.Mid,
-		BiliName:  loginInfo.TokenInfo.Uname,
-		BiliFace:  loginInfo.TokenInfo.Face,
-		IsEnabled: true,
-		IsPrimary: isPrimary,
-		Cookies:   string(cookies),
+		UserID:            userID,
+		BiliMid:           loginInfo.TokenInfo.Mid,
+		BiliName:          loginInfo.TokenInfo.Uname,
+		BiliFace:          loginInfo.TokenInfo.Face,
+		IsEnabled:         true,
+		IsPrimary:         isPrimary,
+		EncryptionVersion: encryptionVersion,
+	}
+
+	// 根据加密状态存储
+	if encryptionVersion == 2 {
+		account.CookiesEncrypted = cookiesEncrypted
+	} else {
+		account.Cookies = string(cookiesJson)
 	}
 
 	if err := s.db.Create(account).Error; err != nil {
@@ -128,14 +167,30 @@ func (s *BiliAccountService) GetAccountByID(accountID uint) (*model.UserBiliAcco
 	return &account, err
 }
 
-// GetLoginInfo 获取账号的登录信息
+// GetLoginInfo 获取账号的登录信息（自动解密）
 func (s *BiliAccountService) GetLoginInfo(account *model.UserBiliAccount) (*bilibili.LoginInfo, error) {
-	if account.Cookies == "" {
+	var cookiesJson string
+
+	// 根据加密版本决定如何获取凭证
+	if account.EncryptionVersion >= 2 && account.CookiesEncrypted != "" {
+		// 解密
+		if s.encryptionService == nil {
+			return nil, errors.New("加密服务未初始化，无法解密凭证")
+		}
+		decrypted, err := s.encryptionService.DecryptString(account.CookiesEncrypted)
+		if err != nil {
+			return nil, fmt.Errorf("解密凭证失败: %v", err)
+		}
+		cookiesJson = decrypted
+	} else if account.Cookies != "" {
+		// 明文（兼容旧数据）
+		cookiesJson = account.Cookies
+	} else {
 		return nil, errors.New("账号凭证为空")
 	}
 
 	var loginInfo bilibili.LoginInfo
-	if err := json.Unmarshal([]byte(account.Cookies), &loginInfo); err != nil {
+	if err := json.Unmarshal([]byte(cookiesJson), &loginInfo); err != nil {
 		return nil, fmt.Errorf("解析登录信息失败: %v", err)
 	}
 
