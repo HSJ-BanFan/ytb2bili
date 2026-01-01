@@ -55,7 +55,10 @@ func NewLogger(debug bool) (*zap.SugaredLogger, error) {
 			MaxAge:     30, // days
 			Compress:   true,
 		}
-		writeSyncer = zapcore.AddSync(lumberJackLogger)
+		writeSyncer = zapcore.NewMultiWriteSyncer(
+			zapcore.AddSync(os.Stdout),
+			zapcore.AddSync(lumberJackLogger),
+		)
 	}
 
 	// 创建核心日志器

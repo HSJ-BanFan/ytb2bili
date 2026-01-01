@@ -61,17 +61,18 @@ type LogEntry struct {
 
 // Log 记录审计日志
 func (s *AuditService) Log(entry LogEntry) {
+	// 尝试写入通道，设置 100ms 超时，避免高并发下直接丢弃
 	select {
 	case s.logChan <- entry:
-	default:
-		// 缓冲区已满，丢弃日志或降级处理，避免阻塞主流程
+	case <-time.After(100 * time.Millisecond):
+		// 缓冲区已满且超时，丢弃日志
 		log.Printf("⚠️ 审计日志缓冲区已满，丢弃日志: %s - %s", entry.Action, entry.Message)
 	}
 }
 
 // worker 后台写入协程
 func (s *AuditService) worker() {
-	buffer := make([]LogEntry, 0, 10)
+	buffer := make([]LogEntry, 0, 100)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -79,26 +80,26 @@ func (s *AuditService) worker() {
 		select {
 		case entry, ok := <-s.logChan:
 			if !ok {
-				s.flush(buffer)
+				s.flushWithRetry(buffer)
 				close(s.done)
 				return
 			}
 			buffer = append(buffer, entry)
-			if len(buffer) >= 10 { // 批量写入阈值
-				s.flush(buffer)
+			if len(buffer) >= 100 { // 批量写入阈值增加了
+				s.flushWithRetry(buffer)
 				buffer = buffer[:0]
 			}
 		case <-ticker.C:
 			if len(buffer) > 0 {
-				s.flush(buffer)
+				s.flushWithRetry(buffer)
 				buffer = buffer[:0]
 			}
 		}
 	}
 }
 
-// flush 批量写入数据库
-func (s *AuditService) flush(entries []LogEntry) {
+// flushWithRetry 批量写入数据库（带重试机制）
+func (s *AuditService) flushWithRetry(entries []LogEntry) {
 	if len(entries) == 0 {
 		return
 	}
@@ -126,9 +127,17 @@ func (s *AuditService) flush(entries []LogEntry) {
 		logs = append(logs, auditLog)
 	}
 
-	if err := s.db.CreateInBatches(logs, len(logs)).Error; err != nil {
-		log.Printf("⚠️ 批量写入审计日志失败: %v", err)
+	// 重试逻辑
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if err := s.db.CreateInBatches(logs, 100).Error; err != nil {
+			log.Printf("⚠️ 批量写入审计日志失败 (尝试 %d/%d): %v", i+1, maxRetries, err)
+			time.Sleep(time.Duration(1<<i) * time.Second) // 指数退避: 1s, 2s, 4s
+			continue
+		}
+		return // 成功
 	}
+	log.Printf("❌ 审计日志写入最终失败，丢失 %d 条记录", len(logs))
 }
 
 // LogSuccess 记录成功操作

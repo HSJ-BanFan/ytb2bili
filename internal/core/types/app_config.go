@@ -494,6 +494,7 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
 		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
 		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
+		Security               SecurityConfig          `toml:"security"`
 	}
 
 	// 解码TOML配置文件
@@ -539,6 +540,11 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	}
 	if fileConfig.SMTPConfig != nil {
 		config.SMTPConfig = fileConfig.SMTPConfig
+	}
+
+	// 应用安全配置
+	if len(fileConfig.Security.CORSAllowedOrigins) > 0 || fileConfig.Security.CSPEnabled || fileConfig.Security.HSTSEnabled {
+		config.Security = fileConfig.Security
 	}
 
 	// 从环境变量覆盖敏感配置（优先级最高）

@@ -29,6 +29,7 @@ type BiliAccount struct {
 
 	// 加密存储字段 (Version 2+)
 	EncryptedLoginInfo string `json:"encrypted_login_info,omitempty"` // 加密后的 LoginInfo
+	Dirty              bool   `json:"-"`                              // P2-5: 脏标记，用于优化加密性能
 }
 
 // MultiAccountStore 多账号存储管理器
@@ -64,6 +65,10 @@ func GetMultiAccountStore() *MultiAccountStore {
 		// 初始化加密服务
 		encSvc, err := crypto.GetEncryptionService()
 		if err != nil {
+			// P1-1: 生产环境加密失败应阻止启动
+			if os.Getenv("ENVIRONMENT") == "production" {
+				log.Fatalf("🚨 生产环境加密服务初始化失败，无法启动: %v", err)
+			}
 			log.Printf("⚠️ 无法初始化加密服务: %v", err)
 			log.Printf("⚠️ 账号数据将以明文存储（不推荐）")
 		} else {
@@ -218,7 +223,7 @@ func (s *MultiAccountStore) loadData() (*MultiAccountData, error) {
 			if acc.EncryptedLoginInfo != "" && s.encryptionService != nil {
 				var loginInfo bilibili.LoginInfo
 				if err := s.encryptionService.DecryptJSON(acc.EncryptedLoginInfo, &loginInfo); err != nil {
-					log.Printf("⚠️ 解密账号 %d 的 LoginInfo 失败: %v", acc.Mid, err)
+					log.Printf("⚠️ 解密某个账号失败（已跳过）: %v", err)
 					continue
 				}
 				acc.LoginInfo = &loginInfo
@@ -293,11 +298,15 @@ func (s *MultiAccountStore) saveDataInternal(data *MultiAccountData) error {
 		data.Version = 2 // 标记为加密版本
 		for i, account := range data.Accounts {
 			if account.LoginInfo != nil {
-				encrypted, err := s.encryptionService.EncryptJSON(account.LoginInfo)
-				if err != nil {
-					return fmt.Errorf("加密账号 #%d 失败: %w", i, err)
+				// P2-5: 性能优化 - 仅在数据变更(Dirty)或未加密时执行加密
+				if account.Dirty || account.EncryptedLoginInfo == "" {
+					encrypted, err := s.encryptionService.EncryptJSON(account.LoginInfo)
+					if err != nil {
+						return fmt.Errorf("加密账号 #%d 失败: %w", i, err)
+					}
+					account.EncryptedLoginInfo = encrypted
+					account.Dirty = false // 重置脏标记
 				}
-				account.EncryptedLoginInfo = encrypted
 			}
 		}
 	}
@@ -418,6 +427,7 @@ func (s *MultiAccountStore) AddAccount(loginInfo *bilibili.LoginInfo, userInfo *
 			data.Accounts[i].UpdatedAt = time.Now()
 			data.Accounts[i].ExpiresAt = time.Now().Add(30 * 24 * time.Hour)
 			data.Accounts[i].IsEnabled = true
+			data.Accounts[i].Dirty = true // P2-5: 标记为脏，需要重新加密
 
 			if userInfo != nil {
 				data.Accounts[i].Name = userInfo.Name

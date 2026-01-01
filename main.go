@@ -18,6 +18,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
+	db_pkg "github.com/difyz9/ytb2bili/internal/db"
 	"github.com/difyz9/ytb2bili/internal/handler"
 	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/internal/migration"
@@ -163,9 +164,14 @@ func main() {
 			return auth.NewJWTService(auth.DefaultJWTConfig())
 		}),
 		fx.Provide(func(config *types.AppConfig) *services.EmailService {
-			// 无条件调试日志
-			log.Printf("🔧 [EmailService] SMTPConfig: %+v", config.SMTPConfig)
+			// 无条件调试日志（已脱敏）
 			if config.SMTPConfig != nil {
+				// ✅ P2-3修复：不输出完整配置，避免泄露密码
+				log.Printf("🔧 [EmailService] Host=%s, Username=%s, Enabled=%v",
+					config.SMTPConfig.Host,
+					config.SMTPConfig.Username,
+					config.SMTPConfig.Enabled,
+				)
 				log.Printf("🔧 [EmailService] Username=%s, Password=%s, Enabled=%v",
 					config.SMTPConfig.Username,
 					func() string {
@@ -225,12 +231,20 @@ func main() {
 			server.Engine.POST("/api/v1/security/csp-report", h.ReportCSPViolation)
 		}),
 
-		// 注册审计日志清理任务
-		fx.Invoke(func(c *cron.Cron, auditService *audit.AuditService, logger *zap.SugaredLogger) {
+		// 注册审计日志清理任务及数据库备份
+		fx.Invoke(func(c *cron.Cron, auditService *audit.AuditService, logger *zap.SugaredLogger, db *gorm.DB) {
 			// 每天凌晨 3 点清理旧日志 (保留 90 天)
 			c.AddFunc("0 3 * * *", func() {
 				if err := auditService.CleanupOldLogs(90); err != nil {
 					logger.Errorf("清理审计日志失败: %v", err)
+				}
+			})
+
+			// 每天凌晨 4 点进行数据库加密备份 (保留 7 天)
+			c.AddFunc("0 4 * * *", func() {
+				backupService := db_pkg.NewBackupService(db, "backups")
+				if err := backupService.CreateEncryptedBackup(); err != nil {
+					logger.Errorf("数据库加密备份失败: %v", err)
 				}
 			})
 		}),
@@ -250,6 +264,14 @@ func main() {
 			if err := migration.MigrateAll(db); err != nil {
 				logger.Warnf("Role migration skipped or failed: %v", err)
 			}
+
+			// P1-3: 检测并迁移旧的明文 Cookie 数据
+			logger.Info("🔍 Checking for legacy plaintext cookies...")
+			if err := db_pkg.MigrateDatabaseCookies(db); err != nil {
+				// 仅记录警告，不阻止启动（可能是临时解密失败等）
+				logger.Warnf("Cookie migration warning: %v", err)
+			}
+
 			return nil
 		}),
 
@@ -328,6 +350,7 @@ func main() {
 			cancelManager *chain_task.TaskCancelManager,
 			biliAccountHandler *handler.BiliAccountHandler,
 			userConfigHandler *handler.UserConfigHandler,
+			auditService *audit.AuditService, // ✅ 添加审计服务
 		) {
 			// 初始化服务器
 			server.Init(db)
@@ -349,7 +372,7 @@ func main() {
 			// }
 
 			// 注册所有 Handler 路由（包括连接 VideoHandler 和 UploadScheduler）
-			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService, cancelManager, biliAccountHandler, userConfigHandler)
+			registerHandlers(server, logger, savedVideoService, taskStepService, uploadScheduler, analyticsClient, membershipHandler, membershipStore, authHandler, authMiddleware, biliAccountService, userConfigService, cancelManager, biliAccountHandler, userConfigHandler, auditService)
 
 			// 健康检查
 			server.Engine.GET("/health", func(c *gin.Context) {
@@ -568,6 +591,7 @@ func registerHandlers(
 	cancelManager *chain_task.TaskCancelManager,
 	biliAccountHandler *handler.BiliAccountHandler,
 	userConfigHandler *handler.UserConfigHandler,
+	auditService *audit.AuditService, // ✅ 添加审计服务参数
 ) {
 	logger.Info("Registering handlers...")
 
@@ -609,7 +633,7 @@ func registerHandlers(
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsClient, logger)
 
 	// 视频 Handler
-	videoHandler := handler.NewVideoHandler(server, savedVideoService, taskStepService)
+	videoHandler := handler.NewVideoHandler(server, savedVideoService, taskStepService, auditService)
 	// 设置分析处理器
 	videoHandler.AnalyticsHandler = analyticsHandler
 	// 设置上传调度器（避免循环依赖）

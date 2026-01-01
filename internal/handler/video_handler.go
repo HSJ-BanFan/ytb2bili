@@ -13,6 +13,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ type VideoHandler struct {
 	BaseHandler
 	SavedVideoService *services.SavedVideoService
 	TaskStepService   *services.TaskStepService
+	AuditService      *audit.AuditService // 审计服务
 	UploadScheduler   interface {
 		ExecuteManualUpload(videoID, taskType string) error
 	}
@@ -33,11 +35,12 @@ type VideoHandler struct {
 	}
 }
 
-func NewVideoHandler(app *core.AppServer, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService) *VideoHandler {
+func NewVideoHandler(app *core.AppServer, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, auditService *audit.AuditService) *VideoHandler {
 	return &VideoHandler{
 		BaseHandler:       BaseHandler{App: app},
 		SavedVideoService: savedVideoService,
 		TaskStepService:   taskStepService,
+		AuditService:      auditService,
 		UploadScheduler:   nil, // Will be set later via SetUploadScheduler
 	}
 }
@@ -489,6 +492,19 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 		return
 	}
 
+	// ✅ 记录审计日志
+	username := getUsername(c)
+	h.AuditService.LogSuccess(
+		userID,
+		username,
+		"delete_video", // action
+		"video",        // resource
+		savedVideo.VideoID, // resource_id
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		fmt.Sprintf("删除视频成功: %s", savedVideo.Title),
+	)
+
 	h.App.Logger.Infof("✅ 视频删除成功: %s", savedVideo.VideoID)
 
 	c.JSON(http.StatusOK, VideoListResponse{
@@ -499,6 +515,16 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 			"id":       savedVideo.ID,
 		},
 	})
+}
+
+// getUsername 从上下文中获取用户名（用于审计日志）
+func getUsername(c *gin.Context) string {
+	if username, exists := c.Get("username"); exists {
+		if name, ok := username.(string); ok {
+			return name
+		}
+	}
+	return "" // 如果没有用户名，返回空字符串
 }
 
 // getVideoFiles 获取视频相关文件列表

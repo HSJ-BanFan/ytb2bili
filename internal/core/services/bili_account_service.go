@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
@@ -54,6 +55,9 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 	if s.encryptionService != nil {
 		encrypted, err := s.encryptionService.EncryptString(string(cookiesJson))
 		if err != nil {
+			if os.Getenv("ENVIRONMENT") == "production" {
+				return nil, fmt.Errorf("加密凭证失败 (生产环境拒绝明文存储): %v", err)
+			}
 			log.Printf("⚠️ 加密凭证失败，将使用明文存储: %v", err)
 			cookiesEncrypted = ""
 			encryptionVersion = 0

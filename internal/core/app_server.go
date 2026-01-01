@@ -116,8 +116,10 @@ func (s *AppServer) setupCORSMiddleware() {
 
 		allowed := false
 
-		// 生产环境: 严格白名单检查
-		if s.Config.Environment == "production" {
+		// 检查白名单
+		// 逻辑变更 (P2-1): 只要配置了 CORSAllowedOrigins，无论什么环境都应生效。
+		// 只有当 CORSAllowedOrigins 为空且不是生产环境时，才默认允许所有。
+		if len(s.Config.Security.CORSAllowedOrigins) > 0 || s.Config.Environment == "production" {
 			// 1. 验证 Origin 格式 (拒绝 null 或非法格式)
 			if origin == "null" || (!strings.HasPrefix(origin, "http://") && !strings.HasPrefix(origin, "https://")) {
 				s.Logger.Warnw("CORS Blocked: Invalid Origin", "origin", origin, "path", c.Request.URL.Path, "ip", c.ClientIP())
@@ -139,7 +141,7 @@ func (s *AppServer) setupCORSMiddleware() {
 				return
 			}
 		} else {
-			// 开发环境: 默认允许（为了方便调试）
+			// 开发环境且未配置白名单: 默认允许（为了方便调试）
 			allowed = true
 		}
 

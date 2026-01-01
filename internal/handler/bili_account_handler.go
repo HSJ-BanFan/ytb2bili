@@ -68,15 +68,16 @@ func (h *BiliAccountHandler) listAccounts(c *gin.Context) {
 	var result []gin.H
 	for _, acc := range accounts {
 		result = append(result, gin.H{
-			"id":           acc.ID,
-			"bili_mid":     acc.BiliMid,
-			"bili_name":    acc.BiliName,
-			"bili_face":    acc.BiliFace,
-			"is_enabled":   acc.IsEnabled,
-			"is_primary":   acc.IsPrimary,
-			"expires_at":   acc.ExpiresAt,
-			"last_used_at": acc.LastUsedAt,
-			"created_at":   acc.CreatedAt,
+			"id":                 acc.ID,
+			"bili_mid":           acc.BiliMid,
+			"bili_name":          acc.BiliName,
+			"bili_face":          acc.BiliFace,
+			"is_enabled":         acc.IsEnabled,
+			"is_primary":         acc.IsPrimary,
+			"expires_at":         acc.ExpiresAt,
+			"last_used_at":       acc.LastUsedAt,
+			"created_at":         acc.CreatedAt,
+			"encryption_version": acc.EncryptionVersion, // P1-9: 暴露加密版本
 		})
 	}
 
@@ -137,11 +138,12 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 		"code":    0,
 		"message": "绑定成功",
 		"data": gin.H{
-			"id":         account.ID,
-			"bili_mid":   account.BiliMid,
-			"bili_name":  account.BiliName,
-			"bili_face":  account.BiliFace,
-			"is_primary": account.IsPrimary,
+			"id":                 account.ID,
+			"bili_mid":           account.BiliMid,
+			"bili_name":          account.BiliName,
+			"bili_face":          account.BiliFace,
+			"is_primary":         account.IsPrimary,
+			"encryption_version": account.EncryptionVersion,
 		},
 	})
 }
@@ -208,11 +210,12 @@ func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
 		"code":    0,
 		"message": "绑定成功",
 		"data": gin.H{
-			"id":         account.ID,
-			"bili_mid":   account.BiliMid,
-			"bili_name":  account.BiliName,
-			"bili_face":  account.BiliFace,
-			"is_primary": account.IsPrimary,
+			"id":                 account.ID,
+			"bili_mid":           account.BiliMid,
+			"bili_name":          account.BiliName,
+			"bili_face":          account.BiliFace,
+			"is_primary":         account.IsPrimary,
+			"encryption_version": account.EncryptionVersion,
 		},
 	})
 }

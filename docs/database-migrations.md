@@ -1,0 +1,112 @@
+# 数据库迁移指南
+
+本文档说明如何使用和扩展 `ytb2bili` 的数据库迁移系统。
+
+## 迁移机制概述
+
+迁移使用 Go 的 `embed` 指令将 SQL 文件嵌入到二进制文件中，并在应用启动时自动执行。
+
+- **位置**: `internal/db/*.sql`
+- **引擎**: `gorm` + 自定义迁移逻辑 (`migration.go`)
+- **记录表**: `migrations` (自动创建)
+
+## 现有迁移列表
+
+| 文件名 | 说明 |
+|--------|------|
+| `001_add_upload_metadata.sql` | 添加视频上传元数据字段 |
+| `002_rollback_upload_metadata.sql` | **回滚脚本**，不会自动执行 |
+| `003_create_email_verifications.sql` | 创建邮箱验证码表 |
+| `004_add_email_verification_status.sql` | 添加验证状态字段 |
+| `005_add_indexes.sql` | 添加数据库索引优化查询 |
+| `006_add_encryption_fields.sql` | 添加加密相关字段 (Week 2 安全) |
+| `007_create_audit_logs.sql` | 创建审计日志表 |
+| `008_add_audit_indexes.sql` | 审计日志索引 |
+
+## 添加新迁移
+
+### 1. 创建 SQL 文件
+
+文件命名规则：`{序号}_{描述}.sql`
+
+```sql
+-- internal/db/009_add_new_feature.sql
+
+-- 添加新表
+CREATE TABLE IF NOT EXISTS cw_new_feature (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 添加新字段 (SQLite 限制：仅支持 ADD COLUMN)
+-- ALTER TABLE cw_existing_table ADD COLUMN new_field TEXT;
+```
+
+### 2. 幂等性要求
+
+> [!IMPORTANT]
+> 所有迁移脚本**必须是幂等的**，即多次执行不会报错或产生副作用。
+
+**推荐做法:**
+
+```sql
+-- ✅ 正确：使用 IF NOT EXISTS
+CREATE TABLE IF NOT EXISTS cw_my_table (...);
+CREATE INDEX IF NOT EXISTS idx_name ON cw_table(column);
+
+-- ❌ 错误：可能重复执行报错
+CREATE TABLE cw_my_table (...);
+ALTER TABLE cw_table ADD COLUMN new_col TEXT; -- SQLite 无 IF NOT EXISTS
+```
+
+**对于 ALTER TABLE (SQLite):**
+
+SQLite 不支持 `ADD COLUMN IF NOT EXISTS`，需要在 Go 代码中检查：
+
+```go
+// 参考 migrate_encrypted_cookies.go 中的做法
+var count int64
+db.Raw("SELECT COUNT(*) FROM pragma_table_info('cw_user_bili_accounts') WHERE name='encrypted_cookies'").Scan(&count)
+if count == 0 {
+    db.Exec("ALTER TABLE cw_user_bili_accounts ADD COLUMN encrypted_cookies TEXT")
+}
+```
+
+### 3. 创建回滚脚本 (可选)
+
+如果需要支持回滚，创建对应的回滚脚本：
+
+```sql
+-- internal/db/009_rollback_new_feature.sql
+DROP TABLE IF EXISTS cw_new_feature;
+```
+
+> [!NOTE]
+> 回滚脚本文件名包含 `rollback` 关键字，不会被自动执行。
+
+## 手动执行迁移
+
+迁移在应用启动时自动执行。如需手动执行：
+
+```go
+import "github.com/difyz9/ytb2bili/internal/db"
+
+// 在数据库初始化后调用
+db.RunMigrations(gormDB, logger)
+```
+
+## 迁移状态查询
+
+查看已执行的迁移：
+
+```sql
+SELECT * FROM migrations ORDER BY id;
+```
+
+## 注意事项
+
+1. **不要修改已执行的迁移**：一旦迁移提交到生产环境，不应修改其内容。新的变更应创建新的迁移文件。
+2. **测试先行**：在开发环境验证迁移后再提交。
+3. **备份数据**：生产环境执行迁移前务必备份数据库。
+4. **序号唯一**：确保序号不冲突，建议从最大序号 +1 开始。
