@@ -365,6 +365,11 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 		return "", 0, fmt.Errorf("账号 %s 没有登录信息", account.Name)
 	}
 
+	// 🔐 Cookie 有效性检测
+	if err := t.checkCookieExpiry(account); err != nil {
+		return "", 0, err
+	}
+
 	// 获取视频文件信息
 	fileInfo, err := os.Stat(videoPath)
 	if err != nil {
@@ -1185,4 +1190,34 @@ func (t *UploadToBilibili) findVideoFile() string {
 	}
 
 	return ""
+}
+
+// checkCookieExpiry 检测 Cookie 有效性，返回错误表示已过期，记录警告表示即将过期
+func (t *UploadToBilibili) checkCookieExpiry(account *storage.BiliAccount) error {
+	// 如果没有设置过期时间，认为有效（兼容旧数据）
+	if account.ExpiresAt.IsZero() {
+		t.App.Logger.Debugf("🍪 账号 %s 未设置过期时间，跳过检测", account.Name)
+		return nil
+	}
+
+	timeUntilExpiry := time.Until(account.ExpiresAt)
+
+	// 已过期
+	if timeUntilExpiry <= 0 {
+		t.App.Logger.Errorf("❌ 账号 %s 的 Cookie 已过期 (过期时间: %s)",
+			account.Name, account.ExpiresAt.Format("2006-01-02 15:04"))
+		return fmt.Errorf("账号 %s 的 Cookie 已过期，请重新扫码登录", account.Name)
+	}
+
+	// 即将过期（< 3 天）
+	warningThreshold := 3 * 24 * time.Hour
+	if timeUntilExpiry < warningThreshold {
+		daysRemaining := timeUntilExpiry.Hours() / 24
+		t.App.Logger.Warnf("⚠️ 账号 %s 的 Cookie 即将过期 (剩余 %.1f 天, 过期时间: %s)",
+			account.Name, daysRemaining, account.ExpiresAt.Format("2006-01-02 15:04"))
+		t.App.Logger.Warn("💡 建议尽快重新扫码登录以刷新 Cookie")
+		// 即将过期不阻止上传，只是警告
+	}
+
+	return nil
 }
