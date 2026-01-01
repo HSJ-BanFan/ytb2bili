@@ -54,6 +54,29 @@ func (s *AppServer) Init(db *gorm.DB) {
 
 // setupMiddleware 设置中间件
 func (s *AppServer) setupMiddleware() {
+	// 🔐 安全响应头中间件
+	s.Engine.Use(func(c *gin.Context) {
+		// 防止点击劫持 (Clickjacking)
+		c.Header("X-Frame-Options", "SAMEORIGIN")
+
+		// 防止 MIME 类型嗅探
+		c.Header("X-Content-Type-Options", "nosniff")
+
+		// 启用 XSS 过滤（现代浏览器已内置，这是额外保护）
+		c.Header("X-XSS-Protection", "1; mode=block")
+
+		// 控制 Referer 信息泄露
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+
+		// 禁止浏览器缓存敏感信息（API 响应）
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
+			c.Header("Pragma", "no-cache")
+		}
+
+		c.Next()
+	})
+
 	// CORS中间件
 	s.Engine.Use(func(c *gin.Context) {
 		method := c.Request.Method
@@ -74,8 +97,6 @@ func (s *AppServer) setupMiddleware() {
 
 		c.Next()
 	})
-
-	// 移除重复的 Logger 和 Recovery 配置
 }
 
 // Run 启动服务器
