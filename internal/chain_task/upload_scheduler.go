@@ -145,16 +145,20 @@ func (s *UploadScheduler) SetUp() {
 
 	s.logger.Infof("✓ Upload scheduler started, checking every %d seconds", checkInterval)
 
-	// 添加延时清理定时任务（每天凌晨2点标记，3点执行清理）
+	// ═══════════════════════════════════════════════════════════════
+	// 自动清理定时任务配置
+	// ═══════════════════════════════════════════════════════════════
 	if s.App.Config != nil && s.App.Config.DownloadConfig != nil && s.App.Config.DownloadConfig.AutoCleanupEnabled {
-		// 阶段1: 每天凌晨2点扫描并标记待清理的任务
-		s.Task.AddFunc("0 0 2 * * *", func() {
-			s.markFilesForCleanup()
+		// 任务1: 每分钟检查并执行到期的清理任务（即时响应）
+		// 处理由 triggerAutoCleanup() 调度的延迟清理（30分钟后）
+		s.Task.AddFunc("0 * * * * *", func() {
+			s.executeScheduledCleanup()
 		})
 
-		// 阶段2: 每天凌晨3点执行软删除
-		s.Task.AddFunc("0 0 3 * * *", func() {
-			s.executeScheduledCleanup()
+		// 任务2: 每天凌晨2点扫描并标记待清理的旧任务（批量清理）
+		// 根据配置的天数，将满足条件的任务标记为 scheduled
+		s.Task.AddFunc("0 0 2 * * *", func() {
+			s.markFilesForCleanup()
 		})
 
 		cleanupDelayDays := s.App.Config.DownloadConfig.AutoCleanupDelay / (24 * 60) // 分钟转天
@@ -165,7 +169,10 @@ func (s *UploadScheduler) SetUp() {
 		if !s.App.Config.DownloadConfig.SoftDelete {
 			softDeleteMode = "永久删除"
 		}
-		s.logger.Infof("🗑️ 自动清理已启用: %d 天后%s", cleanupDelayDays, softDeleteMode)
+		s.logger.Infof("🗑️ 自动清理已启用: 每分钟检查 + %d 天批量%s", cleanupDelayDays, softDeleteMode)
+
+		// 启动时扫描并清理那些应该被清理但因重启而丢失的任务
+		go s.recoverPendingCleanups()
 	}
 }
 
@@ -947,6 +954,10 @@ func (s *UploadScheduler) findCoverImage(dir string) string {
 
 // triggerAutoCleanup 触发自动清理（如果启用）
 // 清理模式由配置决定：immediate=立即清理，delayed=延迟清理（默认60分钟）
+//
+// 调用时机（已确保在字幕上传完成后）：
+// - 视频上传完成且无字幕
+// - 字幕上传成功
 func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 	// 检查是否启用自动清理
 	if s.App.Config == nil || s.App.Config.DownloadConfig == nil {
@@ -970,17 +981,60 @@ func (s *UploadScheduler) triggerAutoCleanup(videoID string) {
 
 	s.logger.Debugf("🔧 清理配置: mode=%s, delay=%d分钟", cleanupMode, cleanupDelay)
 
+	// 获取视频信息
+	savedVideo, err := s.SavedVideoService.GetVideoByVideoID(videoID)
+	if err != nil {
+		s.logger.Warnf("⚠️ 获取视频信息失败，无法调度清理: %v", err)
+		return
+	}
+
 	if cleanupMode == "immediate" {
 		// 立即清理（用户可在config.toml中配置）
 		s.logger.Infof("🧹 自动清理: 立即清理 - VideoID: %s", videoID)
-		go s.cleanupVideoFiles(videoID)
+		// 使用数据库原子操作，避免重复清理
+		result := s.Db.Model(&model.SavedVideo{}).
+			Where("id = ? AND files_cleaned = ?", savedVideo.ID, false).
+			Updates(map[string]interface{}{
+				"files_cleanup_status":       "scheduled",
+				"files_cleanup_scheduled_at": time.Now(), // 立即执行
+			})
+
+		if result.Error != nil {
+			s.logger.Errorf("❌ 调度立即清理失败: %v", result.Error)
+			return
+		}
+
+		if result.RowsAffected > 0 {
+			s.logger.Infof("✅ 已调度立即清理: %s", videoID)
+			// 触发清理执行（异步）
+			go s.cleanupVideoFiles(videoID)
+		}
 	} else {
-		// 延迟清理（默认）
-		s.logger.Infof("🧹 自动清理: 将在%d分钟后清理 - VideoID: %s", cleanupDelay, videoID)
-		go func(vid string, delay int) {
-			time.Sleep(time.Duration(delay) * time.Minute)
-			s.cleanupVideoFiles(vid)
-		}(videoID, cleanupDelay)
+		// ═══════════════════════════════════════════════════════════════
+		// 延迟清理（持久化到数据库，重启后仍能执行）
+		// ═══════════════════════════════════════════════════════════════
+		scheduledTime := time.Now().Add(time.Duration(cleanupDelay) * time.Minute)
+		s.logger.Infof("🧹 自动清理: 将在%d分钟后清理 (%s) - VideoID: %s",
+			cleanupDelay, scheduledTime.Format("15:04:05"), videoID)
+
+		// 使用数据库原子操作，避免重复调度
+		result := s.Db.Model(&model.SavedVideo{}).
+			Where("id = ? AND files_cleaned = ?", savedVideo.ID, false).
+			Updates(map[string]interface{}{
+				"files_cleanup_status":       "scheduled",
+				"files_cleanup_scheduled_at": scheduledTime,
+			})
+
+		if result.Error != nil {
+			s.logger.Errorf("❌ 调度延迟清理失败: %v", result.Error)
+			return
+		}
+
+		if result.RowsAffected == 0 {
+			s.logger.Debugf("📂 任务已被调度或已清理，跳过: %s", videoID)
+		} else {
+			s.logger.Infof("✅ 已调度延迟清理: %s (将于 %s 执行)", videoID, scheduledTime.Format("15:04:05"))
+		}
 	}
 }
 
@@ -1046,9 +1100,12 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 	}
 
 	// 更新数据库记录（标记为已清理）
+	now := time.Now()
 	s.Db.Table("cw_saved_videos").Where("video_id = ?", videoID).Updates(map[string]interface{}{
-		"files_cleaned":    true,
-		"files_cleaned_at": time.Now(),
+		"files_cleaned":          true,
+		"files_cleaned_at":       now,
+		"files_cleanup_status":   "completed",
+		"files_cleanup_scheduled_at": nil, // 清空预定时间
 	})
 
 	s.logger.Infof("✅ 已清理视频 %s: 删除 %d 个文件, 释放 %.2f MB",
@@ -1069,6 +1126,62 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 			}
 		}
 	}
+}
+
+// recoverPendingCleanups 恢复因重启而丢失的待清理任务
+// 在启动时扫描 status=400 且 files_cleaned=false 的视频，并触发清理
+func (s *UploadScheduler) recoverPendingCleanups() {
+	// 等待2秒让系统完全启动
+	time.Sleep(2 * time.Second)
+
+	s.logger.Info("🔍 启动时扫描：检查因重启而丢失的待清理任务...")
+
+	// 获取清理延迟配置
+	cleanupDelay := 30 // 默认30分钟
+	if s.App.Config != nil && s.App.Config.DownloadConfig != nil && s.App.Config.DownloadConfig.AutoCleanupDelay > 0 {
+		cleanupDelay = s.App.Config.DownloadConfig.AutoCleanupDelay
+	}
+
+	// 计算截止时间：如果视频完成时间超过配置的延迟时间，说明应该被清理了
+	cutoffTime := time.Now().Add(-time.Duration(cleanupDelay) * time.Minute)
+
+	// 查找符合条件的视频：
+	// 1. status = 400（已完成）
+	// 2. files_cleaned = false（未清理）
+	// 3. updated_at < cutoffTime（完成时间已超过延迟时间）
+	var videos []struct {
+		VideoID   string
+		Title     string
+		UpdatedAt time.Time
+	}
+
+	err := s.Db.Table("cw_saved_videos").
+		Select("video_id, title, updated_at").
+		Where("status = ?", "400").
+		Where("files_cleaned = ?", false).
+		Where("deleted_at IS NULL").
+		Where("updated_at < ?", cutoffTime).
+		Find(&videos).Error
+
+	if err != nil {
+		s.logger.Errorf("❌ 查询待清理视频失败: %v", err)
+		return
+	}
+
+	if len(videos) == 0 {
+		s.logger.Info("✅ 启动时扫描完成：没有需要恢复清理的任务")
+		return
+	}
+
+	s.logger.Infof("🧹 发现 %d 个因重启而遗漏的待清理任务，开始处理...", len(videos))
+
+	// 对每个视频触发清理
+	for _, video := range videos {
+		s.logger.Infof("🧹 恢复清理任务: %s (%s)", video.Title, video.VideoID)
+		s.cleanupVideoFiles(video.VideoID)
+	}
+
+	s.logger.Infof("✅ 启动时清理恢复完成：已处理 %d 个任务", len(videos))
 }
 
 // markFilesForCleanup 标记符合条件的任务文件为待清理状态

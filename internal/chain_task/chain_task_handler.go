@@ -176,7 +176,7 @@ func (h *ChainTaskHandler) SetUp() {
 			// 只有成功将状态从 "001" 更新为 "002" 的进程才能继续执行
 			// ═══════════════════════════════════════════════════════════════
 			result := h.Db.Model(&model.SavedVideo{}).
-				Where("id = ? AND status = ?", task.Id, "001").
+				Where("id = ? AND status != ?", task.Id, "002").
 				Update("status", "002")
 
 			if result.Error != nil {
