@@ -369,9 +369,9 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 		return
 	}
 
-	// 如果重试的是字幕上传步骤，需要同时更新视频状态
+	// 检查是否需要更新主视频状态以便调度器能够捕获
 	if stepName == "上传字幕到Bilibili" {
-		// 更新视频状态为 300（待上传字幕），并重置重试计数和计划时间
+		// 上传字幕：更新视频状态为 300（待上传字幕），并重置重试计数和计划时间
 		now := time.Now()
 		if err := h.SavedVideoService.UpdateVideoFields(savedVideo.ID, map[string]interface{}{
 			"status":                  "300",
@@ -382,6 +382,15 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 			h.App.Logger.Warnf("更新视频状态失败: %v", err)
 		} else {
 			h.App.Logger.Infof("✅ 视频状态已更新为 300（待上传字幕）")
+		}
+	} else if stepName == "上传到Bilibili" {
+		// 上传视频：更新视频状态为 200（准备就绪），以便 UploadScheduler 能够捕获
+		if err := h.SavedVideoService.UpdateVideoFields(savedVideo.ID, map[string]interface{}{
+			"status": "200", // 重置为就绪状态
+		}); err != nil {
+			h.App.Logger.Warnf("更新视频状态失败: %v", err)
+		} else {
+			h.App.Logger.Infof("✅ 视频状态已更新为 200（准备就绪），等待调度器重新捕获")
 		}
 	}
 
@@ -771,7 +780,42 @@ func (h *VideoHandler) resetAllFailedSteps(c *gin.Context) {
 		return
 	}
 
+	// 检查是否包含上传步骤，如果有，需要重置视频状态
+	hasUploadVideoStep := false
+	hasUploadSubtitleStep := false
+	for _, stepName := range stepNames {
+		if stepName == "上传到Bilibili" {
+			hasUploadVideoStep = true
+		} else if stepName == "上传字幕到Bilibili" {
+			hasUploadSubtitleStep = true
+		}
+	}
+
 	h.App.Logger.Infof("✅ 已重置 %d 个失败步骤为待执行状态，等待调度器处理", resetCount)
+
+	// 如果包含上传步骤，更新视频状态以便调度器捕获
+	if hasUploadSubtitleStep {
+		// 上传字幕：更新视频状态为 300（待上传字幕）
+		if err := h.SavedVideoService.UpdateVideoFields(savedVideo.ID, map[string]interface{}{
+			"status":                  "300",
+			"subtitle_upload_retries": 0,
+			"subtitle_scheduled_at":   time.Now(),
+			"subtitle_upload_error":   "",
+		}); err != nil {
+			h.App.Logger.Warnf("更新视频状态失败: %v", err)
+		} else {
+			h.App.Logger.Infof("✅ 视频状态已更新为 300（待上传字幕）")
+		}
+	} else if hasUploadVideoStep {
+		// 上传视频：更新视频状态为 200（准备就绪）
+		if err := h.SavedVideoService.UpdateVideoFields(savedVideo.ID, map[string]interface{}{
+			"status": "200",
+		}); err != nil {
+			h.App.Logger.Warnf("更新视频状态失败: %v", err)
+		} else {
+			h.App.Logger.Infof("✅ 视频状态已更新为 200（准备就绪），等待调度器重新捕获")
+		}
+	}
 
 	c.JSON(http.StatusOK, VideoListResponse{
 		Code:    200,

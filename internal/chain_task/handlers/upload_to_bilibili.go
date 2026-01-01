@@ -17,6 +17,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/storage"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 )
@@ -98,18 +99,20 @@ type UploadToBilibili struct {
 	App                *core.AppServer
 	SavedVideoService  *services.SavedVideoService
 	BiliAccountService *services.BiliAccountService
+	AuditService       *audit.AuditService // 审计服务
 }
 
-func NewUploadToBilibili(name string, app *core.AppServer, stateManager *manager.StateManager, client *cos.CosClient, savedVideoService *services.SavedVideoService, biliAccountService *services.BiliAccountService) *UploadToBilibili {
+func NewUploadToBilibili(name string, app *core.AppServer, stateManager *manager.StateManager, cosClient *cos.CosClient, savedVideoService *services.SavedVideoService, biliAccountService *services.BiliAccountService, auditService *audit.AuditService) *UploadToBilibili {
 	return &UploadToBilibili{
 		BaseTask: base.BaseTask{
 			Name:         name,
 			StateManager: stateManager,
-			Client:       client,
+			Client:       cosClient,
 		},
 		App:                app,
 		SavedVideoService:  savedVideoService,
 		BiliAccountService: biliAccountService,
+		AuditService:       auditService,
 	}
 }
 
@@ -407,10 +410,26 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 	// 提交视频
 	result, err := uploadClient.SubmitVideo(studio)
 	if err != nil {
+		t.AuditService.LogFailure(
+			t.StateManager.UserID, "",
+			audit.ActionUploadVideo,
+			audit.ResourceVideo,
+			filepath.Base(videoPath),
+			"", "",
+			fmt.Sprintf("投稿失败 (账号: %s): %v", account.Name, err),
+		)
 		return "", 0, fmt.Errorf("提交视频失败: %v", err)
 	}
 
 	if result.Code != 0 {
+		t.AuditService.LogFailure(
+			t.StateManager.UserID, "",
+			audit.ActionUploadVideo,
+			audit.ResourceVideo,
+			filepath.Base(videoPath),
+			"", "",
+			fmt.Sprintf("投稿失败 (账号: %s): code=%d, message=%s", account.Name, result.Code, result.Message),
+		)
 		return "", 0, fmt.Errorf("提交失败: code=%d, message=%s", result.Code, result.Message)
 	}
 
@@ -431,6 +450,16 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 			}
 		}
 	}
+
+	// 记录审计日志
+	t.AuditService.LogSuccess(
+		t.StateManager.UserID, "",
+		audit.ActionUploadVideo,
+		audit.ResourceVideo,
+		bvid,
+		"", "",
+		fmt.Sprintf("上传视频成功 (账号: %s, BVID: %s)", account.Name, bvid),
+	)
 
 	// 注意：字幕上传已改为延迟上传机制
 	// 视频上传成功后会设置 SubtitleScheduledAt，由调度器在审核通过后自动上传
@@ -467,13 +496,11 @@ func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 		if err == nil && len(dbAccounts) > 0 {
 			t.App.Logger.Infof("📦 从数据库获取到用户 %d 的 %d 个启用账号", userID, len(dbAccounts))
 			for _, dbAccount := range dbAccounts {
-				// 解析 cookies 中的 LoginInfo
-				var loginInfo *bilibili.LoginInfo
-				if dbAccount.Cookies != "" {
-					if err := json.Unmarshal([]byte(dbAccount.Cookies), &loginInfo); err != nil {
-						t.App.Logger.Warnf("解析账号 %s 的登录信息失败: %v", dbAccount.BiliName, err)
-						continue
-					}
+				// 解析账号登录信息（自动处理解密）
+				loginInfo, err := t.BiliAccountService.GetLoginInfo(&dbAccount)
+				if err != nil {
+					t.App.Logger.Warnf("获取账号 %s 的登录信息失败: %v", dbAccount.BiliName, err)
+					continue
 				}
 				if loginInfo == nil {
 					t.App.Logger.Warnf("账号 %s 没有有效的登录信息", dbAccount.BiliName)
@@ -1209,8 +1236,15 @@ func (t *UploadToBilibili) checkCookieExpiry(account *storage.BiliAccount) error
 		return fmt.Errorf("账号 %s 的 Cookie 已过期，请重新扫码登录", account.Name)
 	}
 
-	// 即将过期（< 3 天）
-	warningThreshold := 3 * 24 * time.Hour
+	// 即将过期（使用配置值，默认3天）
+	warningDays := 3 // 默认值
+	if t.App.Config != nil && t.App.Config.BilibiliConfig != nil {
+		if t.App.Config.BilibiliConfig.CookieWarningDays > 0 {
+			warningDays = t.App.Config.BilibiliConfig.CookieWarningDays
+		}
+	}
+	warningThreshold := time.Duration(warningDays) * 24 * time.Hour
+
 	if timeUntilExpiry < warningThreshold {
 		daysRemaining := timeUntilExpiry.Hours() / 24
 		t.App.Logger.Warnf("⚠️ 账号 %s 的 Cookie 即将过期 (剩余 %.1f 天, 过期时间: %s)",

@@ -74,7 +74,57 @@ func seedInitialData(db *gorm.DB) error {
 // runCustomMigrations 运行需要手动处理的迁移
 func runCustomMigrations(db *gorm.DB) error {
 	// 添加 role 字段到 users 表（如果不存在）
-	return addRoleFieldIfNotExists(db)
+	if err := addRoleFieldIfNotExists(db); err != nil {
+		return err
+	}
+
+	// 添加审计日志索引
+	return addAuditIndexes(db)
+}
+
+// addAuditIndexes 添加审计日志表的索引
+func addAuditIndexes(db *gorm.DB) error {
+	// 定义索引结构
+	indexes := []struct {
+		name   string
+		column string
+	}{
+		{"idx_audit_logs_user_created", "(user_id, created_at)"},
+		{"idx_audit_logs_action_created", "(action, created_at)"},
+		{"idx_audit_logs_resource_id", "(resource, resource_id)"},
+		{"idx_audit_logs_success_created", "(success, created_at)"},
+	}
+
+	for _, idx := range indexes {
+		// MySQL 不支持 CREATE INDEX IF NOT EXISTS，需要先检查索引是否存在
+		// 使用 GORM 的 Migrator 或手动检查
+		var count int64
+		checkSQL := fmt.Sprintf(
+			"SELECT COUNT(*) FROM information_schema.statistics "+
+			"WHERE table_schema = DATABASE() AND table_name = 'cw_audit_logs' AND index_name = '%s'",
+			idx.name,
+		)
+
+		if err := db.Raw(checkSQL).Count(&count).Error; err != nil {
+			fmt.Printf("⚠️ 检查索引 %s 失败: %v\n", idx.name, err)
+			continue
+		}
+
+		// 如果索引已存在，跳过
+		if count > 0 {
+			fmt.Printf("✅ 索引 %s 已存在，跳过\n", idx.name)
+			continue
+		}
+
+		// 创建索引（不使用 IF NOT EXISTS）
+		createSQL := fmt.Sprintf("CREATE INDEX %s ON cw_audit_logs %s", idx.name, idx.column)
+		if err := db.Exec(createSQL).Error; err != nil {
+			fmt.Printf("⚠️ 创建索引失败: %v (SQL: %s)\n", err, createSQL)
+		} else {
+			fmt.Printf("✅ 成功创建索引: %s\n", idx.name)
+		}
+	}
+	return nil
 }
 
 // addRoleFieldIfNotExists 添加 role 字段到 users 表（如果不存在）

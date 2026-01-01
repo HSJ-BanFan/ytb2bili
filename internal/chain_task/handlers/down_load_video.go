@@ -166,10 +166,16 @@ func (t *DownloadVideo) Execute(ctx map[string]interface{}) bool {
 
 	// 0. 检查视频文件是否已存在且完整
 	if existingVideo := t.checkExistingVideo(); existingVideo != "" {
-		t.App.Logger.Infof("✅ 视频文件已存在: %s", existingVideo)
-		t.App.Logger.Info("✅ 跳过下载，直接标记为完成")
-		ctx["video_path"] = existingVideo
-		return true
+		// 检查字幕文件是否存在
+		if t.checkExistingSubtitles() {
+			t.App.Logger.Infof("✅ 视频文件已存在: %s", existingVideo)
+			t.App.Logger.Info("✅ 跳过下载，直接标记为完成")
+			ctx["video_path"] = existingVideo
+			return true
+		}
+		t.App.Logger.Infof("⚠️ 视频文件已存在 (%s)，但缺少字幕文件", existingVideo)
+		t.App.Logger.Infof("🔄 将运行 yt-dlp 补充下载字幕...")
+		// 不直接返回，继续执行 yt-dlp 以补全字幕
 	}
 
 	// 0.5 清理旧的临时下载文件，避免文件系统冲突
@@ -992,6 +998,40 @@ func (t *DownloadVideo) checkExistingVideo() string {
 	}
 
 	return ""
+}
+
+// checkExistingSubtitles 检查是否存在字幕文件
+func (t *DownloadVideo) checkExistingSubtitles() bool {
+	videoID := t.StateManager.VideoID
+	currentDir := t.StateManager.CurrentDir
+
+	// 检查目录是否存在
+	if _, err := os.Stat(currentDir); os.IsNotExist(err) {
+		return false
+	}
+
+	// 检查是否存在 {videoID}.*.srt 或 {videoID}.*.vtt 文件
+	patterns := []string{
+		filepath.Join(currentDir, videoID+".*.srt"),
+		filepath.Join(currentDir, videoID+".*.vtt"),
+		filepath.Join(currentDir, "*.srt"), // 宽松检查
+		filepath.Join(currentDir, "*.vtt"), // 宽松检查
+	}
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err == nil && len(matches) > 0 {
+			// 过滤掉非该视频的字幕（对于宽松检查）
+			for _, match := range matches {
+				baseName := filepath.Base(match)
+				if strings.Contains(baseName, videoID) || len(matches) < 3 { // 如果文件很少，可能是改名后的字幕
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // cleanPartFiles 清理下载目录中的视频临时文件（.part 和 .aria2）

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/membership"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,14 +19,16 @@ type BiliAccountHandler struct {
 	BaseHandler
 	BiliAccountService *services.BiliAccountService
 	FeatureChecker     *membership.FeatureChecker
+	AuditService       *audit.AuditService // 审计服务
 }
 
 // NewBiliAccountHandler 创建 B站账号管理 Handler
-func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, featureChecker *membership.FeatureChecker) *BiliAccountHandler {
+func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, featureChecker *membership.FeatureChecker, auditService *audit.AuditService) *BiliAccountHandler {
 	return &BiliAccountHandler{
 		BaseHandler:        BaseHandler{App: app},
 		BiliAccountService: biliAccountService,
 		FeatureChecker:     featureChecker,
+		AuditService:       auditService,
 	}
 }
 
@@ -106,9 +110,28 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 	// 所有用户都可以绑定多个账号，多账号上传限制在上传环节检查
 	account, err := h.BiliAccountService.BindAccount(userID, req.LoginInfo, req.IsPrimary)
 	if err != nil {
+		h.AuditService.LogFailure(
+			userID, "",
+			audit.ActionBindBiliAccount,
+			audit.ResourceBiliAccount,
+			fmt.Sprintf("%d", req.LoginInfo.TokenInfo.Mid),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"绑定失败: "+err.Error(),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "绑定失败: " + err.Error()})
 		return
 	}
+
+	h.AuditService.LogSuccess(
+		userID, "",
+		audit.ActionBindBiliAccount,
+		audit.ResourceBiliAccount,
+		fmt.Sprintf("%d", account.BiliMid),
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		"绑定 B站账号成功: "+account.BiliName,
+	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -158,9 +181,28 @@ func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
 
 	account, err := h.BiliAccountService.BindAccount(userID, loginInfo, isPrimary)
 	if err != nil {
+		h.AuditService.LogFailure(
+			userID, "",
+			audit.ActionBindBiliAccount,
+			audit.ResourceBiliAccount,
+			fmt.Sprintf("%d", loginInfo.TokenInfo.Mid),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"扫码绑定失败: "+err.Error(),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "绑定失败: " + err.Error()})
 		return
 	}
+
+	h.AuditService.LogSuccess(
+		userID, "",
+		audit.ActionBindBiliAccount,
+		audit.ResourceBiliAccount,
+		fmt.Sprintf("%d", account.BiliMid),
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		"扫码绑定 B站账号成功: "+account.BiliName,
+	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -190,9 +232,28 @@ func (h *BiliAccountHandler) unbindAccount(c *gin.Context) {
 	}
 
 	if err := h.BiliAccountService.UnbindAccount(userID, uint(accountID)); err != nil {
+		h.AuditService.LogFailure(
+			userID, "",
+			audit.ActionUnbindBiliAccount,
+			audit.ResourceBiliAccount,
+			c.Param("id"),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"解绑失败: "+err.Error(),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "解绑失败: " + err.Error()})
 		return
 	}
+
+	h.AuditService.LogSuccess(
+		userID, "",
+		audit.ActionUnbindBiliAccount,
+		audit.ResourceBiliAccount,
+		c.Param("id"),
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		"解绑成功",
+	)
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "解绑成功"})
 }

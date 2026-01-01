@@ -23,8 +23,10 @@ import (
 	"github.com/difyz9/ytb2bili/internal/migration"
 	"github.com/difyz9/ytb2bili/internal/web"
 	"github.com/difyz9/ytb2bili/pkg/analytics"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/logger"
+	"github.com/difyz9/ytb2bili/pkg/security"
 	"github.com/difyz9/ytb2bili/pkg/store"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 	"github.com/gin-gonic/gin"
@@ -95,6 +97,10 @@ func main() {
 	}
 	config.Path = configFile
 
+	// 🔐 安全配置检查
+	securityIssues := security.ValidateSecurityConfig(config)
+	security.PrintSecurityReport(securityIssues)
+
 	app := fx.New(
 		// 初始化配置应用配置
 		fx.Provide(func() *types.AppConfig {
@@ -148,6 +154,9 @@ func main() {
 		fx.Provide(services.NewBiliAccountService),
 		fx.Provide(services.NewUserConfigService),
 		fx.Provide(services.NewAIConfigResolver),
+
+		// 审计服务
+		fx.Provide(audit.NewAuditService),
 
 		// 认证系统
 		fx.Provide(func() *auth.JWTService {
@@ -206,8 +215,24 @@ func main() {
 		fx.Provide(handler.NewCronHandler),
 		fx.Provide(handler.NewBiliAccountHandler),
 		fx.Provide(handler.NewUserConfigHandler),
+		fx.Provide(handler.NewSecurityHandler), // 注册 SecurityHandler
 		fx.Invoke(func(h *handler.CronHandler) {
 			h.SetUp()
+		}),
+
+		// 注册 CSP 违规报告路由
+		fx.Invoke(func(server *core.AppServer, h *handler.SecurityHandler) {
+			server.Engine.POST("/api/v1/security/csp-report", h.ReportCSPViolation)
+		}),
+
+		// 注册审计日志清理任务
+		fx.Invoke(func(c *cron.Cron, auditService *audit.AuditService, logger *zap.SugaredLogger) {
+			// 每天凌晨 3 点清理旧日志 (保留 90 天)
+			c.AddFunc("0 3 * * *", func() {
+				if err := auditService.CleanupOldLogs(90); err != nil {
+					logger.Errorf("清理审计日志失败: %v", err)
+				}
+			})
 		}),
 
 		// 生命周期管理

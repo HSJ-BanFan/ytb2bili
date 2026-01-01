@@ -9,6 +9,7 @@ import (
 
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/storage"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -26,15 +27,17 @@ type AuthHandler struct {
 	jwtService   *JWTService
 	middleware   *AuthMiddleware
 	emailService *services.EmailService
+	auditService *audit.AuditService // 审计服务
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(db *gorm.DB, jwtService *JWTService, emailService *services.EmailService) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, jwtService *JWTService, emailService *services.EmailService, auditService *audit.AuditService) *AuthHandler {
 	return &AuthHandler{
 		db:           db,
 		jwtService:   jwtService,
 		middleware:   NewAuthMiddleware(db, jwtService),
 		emailService: emailService,
+		auditService: auditService,
 	}
 }
 
@@ -347,6 +350,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// 查找用户 (邮箱登录)
 	var user model.User
 	if err := h.db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		h.auditService.LogFailure(
+			0, req.Email,
+			audit.ActionUserLogin,
+			audit.ResourceUser,
+			req.Email,
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"邮箱或密码错误",
+		)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
 			"message": "邮箱或密码错误",
@@ -356,6 +368,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// 检查用户状态
 	if user.Status != 1 {
+		h.auditService.LogFailure(
+			user.ID, user.Username,
+			audit.ActionUserLogin,
+			audit.ResourceUser,
+			fmt.Sprintf("%d", user.ID),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"账号已被禁用",
+		)
 		c.JSON(http.StatusForbidden, gin.H{
 			"code":    403,
 			"message": "账号已被禁用",
@@ -365,6 +386,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		h.auditService.LogFailure(
+			user.ID, user.Username,
+			audit.ActionUserLogin,
+			audit.ResourceUser,
+			fmt.Sprintf("%d", user.ID),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"邮箱或密码错误",
+		)
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"code":    401,
 			"message": "邮箱或密码错误",
@@ -395,6 +425,17 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		IP:        c.ClientIP(),
 	}
 	h.db.Create(&userToken)
+
+	// 记录审计日志
+	h.auditService.LogSuccess(
+		user.ID, user.Username,
+		audit.ActionUserLogin,
+		audit.ResourceUser,
+		fmt.Sprintf("%d", user.ID),
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		"登录成功",
+	)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -487,6 +528,19 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			// 将 Token 加入黑名单
 			h.db.Model(&model.UserToken{}).Where("token_hash = ?", tokenHash).Update("is_revoked", true)
 		}
+	}
+
+	// 记录审计日志
+	if userID, ok := GetUserID(c); ok {
+		h.auditService.LogSuccess(
+			userID, "", // Username 在这里可能拿不到，暂时为空或需要从 claims 取，这里简化处理
+			audit.ActionUserLogout,
+			audit.ResourceUser,
+			fmt.Sprintf("%d", userID),
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			"退出登录",
+		)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

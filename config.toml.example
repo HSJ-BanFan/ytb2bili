@@ -97,6 +97,43 @@ yt_dlp_path = ""
   session_secret = "your-session-secret"
 
 # ───────────────────────────────────────────────────────────────────────────────
+# 安全配置 (生产环境必备)
+# ───────────────────────────────────────────────────────────────────────────────
+[security]
+  # 🔐 CORS 跨域资源共享配置
+  # ⚠️ 生产环境必须配置，否则跨域请求将被拒绝！
+  # 开发环境默认允许所有来源
+  cors_allowed_origins = [
+      "http://localhost:3000",      # 开发环境前端地址
+      "https://yourdomain.com",     # 生产环境前端地址
+      "https://app.yourdomain.com", # 多域名支持
+  ]
+
+  # 🛡️ Content-Security-Policy (CSP) 内容安全策略
+  # 防止 XSS 攻击，控制可加载的资源
+  csp_enabled = true               # 是否启用 CSP
+  csp_report_only = false          # true=仅报告不阻止(测试阶段), false=强制执行(生产环境)
+
+  # CSP 策略配置
+  # ⚠️ 注意：不要使用 'unsafe-inline' 和 'unsafe-eval'，会大幅降低安全性
+  csp_script_src = "'self'"        # 脚本源：'self' 表示仅允许同源
+                                   # 如需 CDN: "'self' https://cdn.example.com"
+  csp_style_src = "'self' 'unsafe-inline'"  # 样式源：允许内联样式（某些 UI 框架需要）
+
+  # 🔒 HTTP 严格传输安全 (HSTS)
+  # ⚠️ 仅在 HTTPS 连接时生效
+  # ⚠️ 启用前请确保已配置 HTTPS 证书
+  hsts_enabled = true               # 是否启用 HSTS
+  hsts_max_age = 31536000          # 有效期（秒），建议 1 年以上
+  hsts_include_subdomains = true   # 是否包含所有子域名
+  hsts_preload = false             # ⚠️ 谨慎！需要先提交到 https://hstspreload.org/
+
+  # 🚫 Permissions-Policy (浏览器功能权限策略)
+  # 禁用不必要的浏览器功能，减少攻击面
+  permissions_policy_enabled = true
+  permissions_policy = "geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()" # interest-cohort() 禁用 FLoC 追踪
+
+# ───────────────────────────────────────────────────────────────────────────────
 # 腾讯云 COS 对象存储配置
 # ───────────────────────────────────────────────────────────────────────────────
 

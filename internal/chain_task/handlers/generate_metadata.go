@@ -313,6 +313,7 @@ func (g *GenerateMetadata) generateMetadataWithAIManager(subtitleText string) (*
 1. 标题：简洁有力，能吸引观众点击，不超过80个字符
 2. 描述：详细介绍视频内容，包含关键信息，适合SEO
 3. 标签：5-10个相关标签，用于视频分类和搜索
+4. 语言：必须使用简体中文 (Simplified Chinese)
 
 请以JSON格式返回，格式如下：
 {
@@ -515,7 +516,7 @@ func (g *GenerateMetadata) generateMetadataFromDeepSeek(subtitleText string) (*V
 1. 标题要简洁有力，严格控制在30个字以内（B站限制80字，但建议30字以内更易读），能够准确概括视频主题，吸引观众点击
 2. 描述要详细但不要过长，严格控制在600-800字以内，包含视频的主要内容和亮点（注意：B站简介限制2000字，需要预留约200字给原视频链接和分隔线）
 3. 标签要准确反映视频内容，3-5个即可
-4. 必须使用中文
+4. 必须使用简体中文 (Simplified Chinese)
 5. 输出格式必须是JSON，格式如下：
 {
   "title": "视频标题",

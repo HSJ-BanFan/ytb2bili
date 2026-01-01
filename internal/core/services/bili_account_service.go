@@ -78,7 +78,10 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 		existing.BiliName = loginInfo.TokenInfo.Uname
 		existing.BiliFace = loginInfo.TokenInfo.Face
 		existing.IsEnabled = true
-		existing.ExpiresAt = nil // 暂不设置过期时间，由刷新机制处理
+
+		// 设置过期时间（默认30天）
+		expiresAt := time.Now().Add(30 * 24 * time.Hour)
+		existing.ExpiresAt = &expiresAt
 
 		if err := s.db.Save(&existing).Error; err != nil {
 			return nil, fmt.Errorf("更新账号失败: %v", err)
@@ -93,6 +96,9 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 			Update("is_primary", false)
 	}
 
+	// 设置过期时间（默认30天）
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
+
 	// 创建新绑定
 	account := &model.UserBiliAccount{
 		UserID:            userID,
@@ -102,6 +108,7 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 		IsEnabled:         true,
 		IsPrimary:         isPrimary,
 		EncryptionVersion: encryptionVersion,
+		ExpiresAt:         &expiresAt,
 	}
 
 	// 根据加密状态存储

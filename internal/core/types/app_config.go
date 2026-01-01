@@ -2,8 +2,11 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -35,6 +38,31 @@ type AppConfig struct {
 
 	// AI服务选择配置
 	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
+
+	// 安全配置
+	Security SecurityConfig `toml:"security"`
+}
+
+// SecurityConfig 安全配置
+type SecurityConfig struct {
+	// CORS 配置
+	CORSAllowedOrigins []string `toml:"cors_allowed_origins"`
+
+	// CSP 配置
+	CSPEnabled    bool   `toml:"csp_enabled"`
+	CSPReportOnly bool   `toml:"csp_report_only"` // 报告模式
+	CSPScriptSrc  string `toml:"csp_script_src"`
+	CSPStyleSrc   string `toml:"csp_style_src"`
+
+	// HSTS 配置
+	HSTSEnabled           bool `toml:"hsts_enabled"`
+	HSTSMaxAge            int  `toml:"hsts_max_age"`
+	HSTSIncludeSubdomains bool `toml:"hsts_include_subdomains"`
+	HSTSPreload           bool `toml:"hsts_preload"`
+
+	// Permissions-Policy 配置
+	PermissionsPolicyEnabled bool   `toml:"permissions_policy_enabled"`
+	PermissionsPolicy        string `toml:"permissions_policy"`
 }
 
 // MembershipConfig 会员系统配置
@@ -68,6 +96,10 @@ type BilibiliConfig struct {
 	UpSelectionReply int    `toml:"up_selection_reply"` // 是否展示推荐评论 0=关闭, 1=开启
 	UpCloseReply     int    `toml:"up_close_reply"`     // 是否关闭评论 0=开启评论, 1=关闭评论
 	UpCloseReward    int    `toml:"up_close_reward"`    // 是否关闭打赏 0=开启, 1=关闭
+
+	// Cookie 过期配置
+	CookieExpireDays  int `toml:"cookie_expire_days"`  // Cookie有效期（天），默认30天
+	CookieWarningDays int `toml:"cookie_warning_days"` // Cookie过期预警天数，默认3天
 }
 
 type TencentCosConfig struct {
@@ -577,6 +609,18 @@ func SaveConfig(config *AppConfig) error {
 // applyEnvOverrides 从环境变量覆盖敏感配置
 // 优先级: 环境变量 > config.toml > 默认值
 func applyEnvOverrides(config *AppConfig) {
+	// 运行环境
+	if v := os.Getenv("ENVIRONMENT"); v != "" {
+		config.Environment = v
+	}
+
+	// Debug 模式 override
+	if v := os.Getenv("DEBUG"); v != "" {
+		if debugVal, err := strconv.ParseBool(v); err == nil {
+			config.Debug = debugVal
+		}
+	}
+
 	// 数据库密码
 	if v := os.Getenv("DATABASE_PASSWORD"); v != "" {
 		config.Database.Password = v
@@ -657,5 +701,64 @@ func applyEnvOverrides(config *AppConfig) {
 	// 应用认证密钥
 	if v := os.Getenv("APP_AUTH_SECRET"); v != "" {
 		config.AppAuth.AppSecret = v
+	}
+
+	// ========== 安全配置环境变量 ==========
+
+	// CORS 白名单（支持 JSON 数组或逗号分隔）
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		var origins []string
+		// 尝试 JSON 解析
+		if err := json.Unmarshal([]byte(v), &origins); err != nil {
+			// 尝试逗号分隔 fallback
+			parts := strings.Split(v, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					origins = append(origins, p)
+				}
+			}
+		}
+		if len(origins) > 0 {
+			config.Security.CORSAllowedOrigins = origins
+		}
+	}
+
+	// CSP 配置
+	if v := os.Getenv("CSP_ENABLED"); v != "" {
+		config.Security.CSPEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CSP_REPORT_ONLY"); v != "" {
+		config.Security.CSPReportOnly = v == "true" || v == "1"
+	}
+	if v := os.Getenv("CSP_SCRIPT_SRC"); v != "" {
+		config.Security.CSPScriptSrc = v
+	}
+	if v := os.Getenv("CSP_STYLE_SRC"); v != "" {
+		config.Security.CSPStyleSrc = v
+	}
+
+	// HSTS 配置
+	if v := os.Getenv("HSTS_ENABLED"); v != "" {
+		config.Security.HSTSEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("HSTS_MAX_AGE"); v != "" {
+		if age, err := strconv.Atoi(v); err == nil {
+			config.Security.HSTSMaxAge = age
+		}
+	}
+	if v := os.Getenv("HSTS_INCLUDE_SUBDOMAINS"); v != "" {
+		config.Security.HSTSIncludeSubdomains = v == "true" || v == "1"
+	}
+	if v := os.Getenv("HSTS_PRELOAD"); v != "" {
+		config.Security.HSTSPreload = v == "true" || v == "1"
+	}
+
+	// Permissions-Policy 配置
+	if v := os.Getenv("PERMISSIONS_POLICY_ENABLED"); v != "" {
+		config.Security.PermissionsPolicyEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("PERMISSIONS_POLICY"); v != "" {
+		config.Security.PermissionsPolicy = v
 	}
 }

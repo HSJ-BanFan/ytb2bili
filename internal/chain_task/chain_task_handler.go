@@ -14,6 +14,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	applogger "github.com/difyz9/ytb2bili/internal/logger"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
@@ -32,6 +33,7 @@ type ChainTaskHandler struct {
 	SavedVideoService  *services.SavedVideoService
 	TaskStepService    *services.TaskStepService
 	BiliAccountService *services.BiliAccountService
+	AuditService       *audit.AuditService // 审计服务
 
 	// 并发控制
 	workerPool         chan struct{} // 准备阶段并发控制
@@ -51,7 +53,7 @@ type ChainTaskHandler struct {
 	ConcurrencyLimiter *ConcurrencyLimiter
 }
 
-func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService) *ChainTaskHandler {
+func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService, auditService *audit.AuditService) *ChainTaskHandler {
 	// 从配置读取最大并发数，默认为 10
 	maxWorkers := 10
 	if app.Config != nil && app.Config.DownloadConfig != nil && app.Config.DownloadConfig.MaxConcurrentTasks > 0 {
@@ -71,6 +73,7 @@ func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, save
 		SavedVideoService:  savedVideoService,
 		TaskStepService:    taskStepService,
 		BiliAccountService: biliAccountService,
+		AuditService:       auditService,
 		workerPool:         make(chan struct{}, maxWorkers),
 		downloadWorkerPool: make(chan struct{}, maxDownloads),
 		maxWorkers:         maxWorkers,
@@ -660,7 +663,7 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	case "确认元数据":
 		task = handlers.NewConfirmMetadata("确认元数据", h.App, stateManager, h.App.CosClient, h.SavedVideoService)
 	case "上传到Bilibili":
-		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
+		task = handlers.NewUploadToBilibili("上传到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService, h.AuditService)
 	case "上传字幕到Bilibili":
 		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", h.App, stateManager, h.App.CosClient, h.SavedVideoService, h.BiliAccountService)
 	default:

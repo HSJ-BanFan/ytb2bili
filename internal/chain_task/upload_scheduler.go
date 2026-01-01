@@ -16,6 +16,7 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	applogger "github.com/difyz9/ytb2bili/internal/logger"
 	"github.com/difyz9/ytb2bili/internal/membership"
+	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
@@ -31,6 +32,7 @@ type UploadScheduler struct {
 	SavedVideoService  *services.SavedVideoService
 	TaskStepService    *services.TaskStepService
 	BiliAccountService *services.BiliAccountService
+	AuditService       *audit.AuditService // 审计服务
 	Db                 *gorm.DB
 	Task               *cron.Cron
 	mutex              sync.Mutex
@@ -55,7 +57,8 @@ func NewUploadScheduler(
 	savedVideoService *services.SavedVideoService,
 	taskStepService *services.TaskStepService,
 	biliAccountService *services.BiliAccountService,
-	cancelManager *TaskCancelManager, // 新增参数
+	auditService *audit.AuditService, // 审计服务
+	cancelManager *TaskCancelManager,
 ) *UploadScheduler {
 	return &UploadScheduler{
 		App:                app,
@@ -64,8 +67,9 @@ func NewUploadScheduler(
 		SavedVideoService:  savedVideoService,
 		TaskStepService:    taskStepService,
 		BiliAccountService: biliAccountService,
+		AuditService:       auditService,
 		logger:             app.Logger,
-		CancelManager:      cancelManager, // 初始化取消管理器
+		CancelManager:      cancelManager,
 	}
 }
 
@@ -779,7 +783,7 @@ func (s *UploadScheduler) executeUploadTask(videoID, taskName string) error {
 	// 根据任务名称创建对应的任务
 	switch taskName {
 	case "上传到Bilibili":
-		task = handlers.NewUploadToBilibili("上传到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService)
+		task = handlers.NewUploadToBilibili("上传到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService, s.AuditService)
 	case "上传字幕到Bilibili":
 		task = handlers.NewUploadSubtitleToBilibili("上传字幕到Bilibili", s.App, stateManager, s.App.CosClient, s.SavedVideoService, s.BiliAccountService)
 	default:
@@ -1102,9 +1106,9 @@ func (s *UploadScheduler) cleanupVideoFiles(videoID string) {
 	// 更新数据库记录（标记为已清理）
 	now := time.Now()
 	s.Db.Table("cw_saved_videos").Where("video_id = ?", videoID).Updates(map[string]interface{}{
-		"files_cleaned":          true,
-		"files_cleaned_at":       now,
-		"files_cleanup_status":   "completed",
+		"files_cleaned":              true,
+		"files_cleaned_at":           now,
+		"files_cleanup_status":       "completed",
 		"files_cleanup_scheduled_at": nil, // 清空预定时间
 	})
 
