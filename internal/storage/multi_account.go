@@ -168,11 +168,63 @@ func (s *MultiAccountStore) loadData() (*MultiAccountData, error) {
 	// 如果有 Version 1 的明文数据，自动迁移到 Version 2
 	if needMigration && accountData.Version < 2 {
 		log.Printf("🔄 检测到 Version 1 数据，正在迁移到加密存储...")
-		s.mu.RUnlock() // 释放读锁，因为 migrateToVersion2 需要写锁
-		if err := s.migrateToVersion2(&accountData); err != nil {
-			log.Printf("⚠️ 迁移失败: %v", err)
+		s.mu.RUnlock() // 释放读锁
+
+		// 使用写锁防止重复迁移
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		// 双重检查：可能已被其他 goroutine 迁移
+		// 重新加载数据以获取最新版本
+		if _, err := os.Stat(s.storePath); os.IsNotExist(err) {
+			return &MultiAccountData{Version: 2, Accounts: []*BiliAccount{}}, nil
 		}
-		s.mu.RLock() // 重新获取读锁
+
+		latestData, err := os.ReadFile(s.storePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reload accounts data: %w", err)
+		}
+
+		var latestAccountData MultiAccountData
+		if err := json.Unmarshal(latestData, &latestAccountData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal latest accounts data: %w", err)
+		}
+
+		// 如果已经被迁移，直接返回
+		if latestAccountData.Version >= 2 {
+			// 解密并返回
+			for _, acc := range latestAccountData.Accounts {
+				if acc.EncryptedLoginInfo != "" && s.encryptionService != nil {
+					var loginInfo bilibili.LoginInfo
+					if err := s.encryptionService.DecryptJSON(acc.EncryptedLoginInfo, &loginInfo); err != nil {
+						log.Printf("⚠️ 解密账号 %d 的 LoginInfo 失败: %v", acc.Mid, err)
+						continue
+					}
+					acc.LoginInfo = &loginInfo
+				}
+			}
+			return &latestAccountData, nil
+		}
+
+		// 执行迁移
+		if err := s.migrateToVersion2(&latestAccountData); err != nil {
+			log.Printf("⚠️ 迁移失败: %v", err)
+			// 返回原始数据（可能有部分解密）
+			return &accountData, nil
+		}
+
+		// 迁移成功，解密数据
+		for _, acc := range latestAccountData.Accounts {
+			if acc.EncryptedLoginInfo != "" && s.encryptionService != nil {
+				var loginInfo bilibili.LoginInfo
+				if err := s.encryptionService.DecryptJSON(acc.EncryptedLoginInfo, &loginInfo); err != nil {
+					log.Printf("⚠️ 解密账号 %d 的 LoginInfo 失败: %v", acc.Mid, err)
+					continue
+				}
+				acc.LoginInfo = &loginInfo
+			}
+		}
+		return &latestAccountData, nil
 	}
 
 	return &accountData, nil

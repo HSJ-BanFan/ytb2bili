@@ -235,3 +235,34 @@ type EmailVerification struct {
 func (EmailVerification) TableName() string {
 	return "cw_email_verifications"
 }
+
+// AuditLog 审计日志模型
+type AuditLog struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"` // 操作时间
+
+	// 操作者信息
+	UserID   uint   `gorm:"index" json:"user_id"`     // 用户ID (0 表示匿名/未登录)
+	Username string `gorm:"size:100" json:"username"` // 用户名快照
+
+	// 操作信息
+	Action     string `gorm:"size:50;not null;index" json:"action"` // 操作类型: user_login, user_logout, bind_bili_account, upload_video 等
+	Resource   string `gorm:"size:100" json:"resource"`             // 资源类型: user, bili_account, video 等
+	ResourceID string `gorm:"size:100" json:"resource_id"`          // 资源ID
+
+	// 请求信息
+	IP        string `gorm:"size:45" json:"ip"`          // 客户端IP
+	UserAgent string `gorm:"size:500" json:"user_agent"` // User-Agent
+
+	// 结果信息
+	Success bool   `gorm:"default:true" json:"success"` // 操作是否成功
+	Message string `gorm:"size:500" json:"message"`     // 结果消息或错误信息
+
+	// 扩展信息
+	Details string `gorm:"type:text" json:"details,omitempty"` // JSON 格式的详细信息
+}
+
+// TableName 指定表名
+func (AuditLog) TableName() string {
+	return "cw_audit_logs"
+}

@@ -20,6 +20,20 @@ type EncryptionService struct {
 	mu  sync.RWMutex
 }
 
+// NewEncryptionService 创建加密服务（用于测试）
+// 注意：此函数接收的密钥必须是 32 字节
+func NewEncryptionService(key string) (*EncryptionService, error) {
+	keyBytes := []byte(key)
+	if len(keyBytes) != 32 {
+		return nil, fmt.Errorf(
+			"加密密钥必须是 32 字节 (AES-256)，当前长度: %d\n"+
+				"生成方法: openssl rand -base64 32 | head -c 32",
+			len(keyBytes),
+		)
+	}
+	return &EncryptionService{key: keyBytes}, nil
+}
+
 var (
 	globalEncryptionService *EncryptionService
 	encryptionServiceOnce   sync.Once
@@ -70,6 +84,11 @@ func initEncryptionService() (*EncryptionService, error) {
 	log.Printf("📁 密钥将保存到: %s", keyFilePath)
 	log.Println("🔐 请立即备份此文件到安全位置（U盘/云盘/密码管理器）")
 	log.Println("❌ 如果密钥文件丢失，加密的账号数据将无法恢复！")
+	log.Println("")
+	log.Println("⚠️  安全警告：")
+	log.Println("   密钥文件和数据文件在同一目录，这仅适用于开发/测试环境。")
+	log.Println("   生产环境强烈建议使用环境变量 COOKIE_ENCRYPTION_KEY，")
+	log.Println("   或将密钥文件保存到独立的安全位置（如加密的U盘）。")
 	log.Println("═════════════════════════════════════════════════════════")
 
 	newKey := make([]byte, 32)

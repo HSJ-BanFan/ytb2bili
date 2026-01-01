@@ -2,7 +2,10 @@ package store
 
 import (
 	"fmt"
+	"log"
 
+	db_migration "github.com/difyz9/ytb2bili/internal/db"
+	"github.com/difyz9/ytb2bili/pkg/crypto"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"gorm.io/gorm"
 )
@@ -20,6 +23,7 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.UserAIConfig{},      // 用户AI配置
 		&model.UserPreference{},    // 用户偏好设置
 		&model.EmailVerification{}, // 邮箱验证码
+		&model.AuditLog{},          // 审计日志
 	); err != nil {
 		return err
 	}
@@ -30,7 +34,13 @@ func MigrateDatabase(db *gorm.DB) error {
 		return err
 	}
 
-	// 3. 初始化种子数据（如初始用户）
+	// 3. 迁移数据库中的明文 Cookies 到加密存储
+	if err := migrateEncryptedCookies(db); err != nil {
+		log.Printf("⚠️  Cookies 加密迁移失败: %v", err)
+		// 不返回错误，允许应用继续启动（新数据会使用加密）
+	}
+
+	// 4. 初始化种子数据（如初始用户）
 	return seedInitialData(db)
 }
 
@@ -164,4 +174,17 @@ func addRoleFieldIfNotExists(db *gorm.DB) error {
 
 	fmt.Println("✅ role 字段迁移完成!")
 	return nil
+}
+
+// migrateEncryptedCookies 迁移数据库中的明文 Cookies 到加密存储
+func migrateEncryptedCookies(db *gorm.DB) error {
+	// 检查加密服务是否可用
+	_, err := crypto.GetEncryptionService()
+	if err != nil {
+		log.Printf("⚠️  加密服务未初始化，跳过 Cookies 加密迁移")
+		return nil // 不返回错误，允许应用继续启动
+	}
+
+	// 执行迁移
+	return db_migration.MigrateDatabaseCookies(db)
 }
