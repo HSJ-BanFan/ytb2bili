@@ -509,6 +509,9 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		config.SMTPConfig = fileConfig.SMTPConfig
 	}
 
+	// 从环境变量覆盖敏感配置（优先级最高）
+	applyEnvOverrides(config)
+
 	return config, nil
 }
 
@@ -569,4 +572,90 @@ func SaveConfig(config *AppConfig) error {
 	}
 
 	return os.WriteFile(config.Path, buf.Bytes(), 0644)
+}
+
+// applyEnvOverrides 从环境变量覆盖敏感配置
+// 优先级: 环境变量 > config.toml > 默认值
+func applyEnvOverrides(config *AppConfig) {
+	// 数据库密码
+	if v := os.Getenv("DATABASE_PASSWORD"); v != "" {
+		config.Database.Password = v
+	}
+
+	// 认证配置
+	if v := os.Getenv("JWT_SECRET"); v != "" {
+		config.Auth.JWTSecret = v
+	}
+	if v := os.Getenv("SESSION_SECRET"); v != "" {
+		config.Auth.SessionSecret = v
+	}
+
+	// DeepSeek API Key
+	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
+		if config.DeepSeekTransConfig == nil {
+			config.DeepSeekTransConfig = &DeepSeekTransConfig{}
+		}
+		config.DeepSeekTransConfig.ApiKey = v
+	}
+
+	// Gemini API Key
+	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
+		if config.GeminiConfig == nil {
+			config.GeminiConfig = &GeminiConfig{}
+		}
+		config.GeminiConfig.ApiKey = v
+	}
+
+	// OpenAI 兼容 API Key
+	if v := os.Getenv("OPENAI_API_KEY"); v != "" {
+		if config.OpenAICompatibleConfig == nil {
+			config.OpenAICompatibleConfig = &OpenAICompatibleConfig{}
+		}
+		config.OpenAICompatibleConfig.ApiKey = v
+	}
+
+	// 百度翻译密钥
+	if v := os.Getenv("BAIDU_TRANSLATE_SECRET"); v != "" {
+		if config.BaiduTransConfig == nil {
+			config.BaiduTransConfig = &BaiduTransConfig{}
+		}
+		config.BaiduTransConfig.SecretKey = v
+	}
+
+	// 腾讯云 COS 密钥
+	if v := os.Getenv("TENCENT_COS_SECRET_KEY"); v != "" {
+		if config.TenCosConfig == nil {
+			config.TenCosConfig = &TencentCosConfig{}
+		}
+		config.TenCosConfig.CosSecretKey = v
+	}
+
+	// Redis 密码
+	if v := os.Getenv("REDIS_PASSWORD"); v != "" {
+		if config.MembershipConfig == nil {
+			config.MembershipConfig = &MembershipConfig{}
+		}
+		config.MembershipConfig.Redis.Password = v
+	}
+
+	// SMTP 密码
+	if v := os.Getenv("SMTP_PASSWORD"); v != "" {
+		if config.SMTPConfig == nil {
+			config.SMTPConfig = &SMTPConfig{}
+		}
+		config.SMTPConfig.Password = v
+	}
+
+	// 数据分析加密密钥
+	if v := os.Getenv("ANALYTICS_ENCRYPTION_KEY"); v != "" {
+		if config.AnalyticsConfig == nil {
+			config.AnalyticsConfig = &AnalyticsConfig{}
+		}
+		config.AnalyticsConfig.EncryptionKey = v
+	}
+
+	// 应用认证密钥
+	if v := os.Getenv("APP_AUTH_SECRET"); v != "" {
+		config.AppAuth.AppSecret = v
+	}
 }

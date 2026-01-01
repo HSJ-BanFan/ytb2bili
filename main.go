@@ -169,16 +169,7 @@ func main() {
 					config.SMTPConfig.Enabled)
 			}
 
-			// 从环境变量读取 SMTP 密码
-			if config.SMTPConfig != nil && config.SMTPConfig.Username != "" && config.SMTPConfig.Password == "" {
-				// 如果配置了用户名但没有密码，尝试从环境变量读取
-				if password := os.Getenv("SMTP_PASSWORD"); password != "" {
-					config.SMTPConfig.Password = password
-					log.Println("✅ SMTP 密码已从环境变量 SMTP_PASSWORD 读取")
-				} else {
-					log.Println("⚠️ 未设置 SMTP_PASSWORD 环境变量，邮件服务将在开发模式运行")
-				}
-			}
+			// 注意：SMTP_PASSWORD 现在由 applyEnvOverrides 统一处理
 			if config.SMTPConfig != nil && config.SMTPConfig.Enabled && config.SMTPConfig.Password != "" {
 				log.Println("📧 SMTP 邮件服务已启用:", config.SMTPConfig.Host)
 			} else if config.SMTPConfig != nil && config.SMTPConfig.Enabled {
