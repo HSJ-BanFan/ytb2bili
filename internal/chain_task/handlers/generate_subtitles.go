@@ -218,11 +218,16 @@ func (t *GenerateSubtitles) checkYtDlpSubtitles() bool {
 				englishSubtitle = name
 			}
 
-			// 检查是否是中文字幕（简体或繁体）
-			if strings.Contains(name, ".zh-Hans.") || strings.Contains(name, ".zh-CN.") ||
-				strings.Contains(name, ".zh.") || strings.Contains(name, ".zh-Hant.") ||
-				strings.Contains(name, ".zh-TW.") {
+			// 检查是否是中文字幕（优先简体中文）
+			// 优先级: zh-Hans > zh-CN > zh > zh-Hant > zh-TW
+			if strings.Contains(name, ".zh-Hans.") {
+				chineseSubtitle = name // 最高优先级
+			} else if strings.Contains(name, ".zh-CN.") && !strings.Contains(chineseSubtitle, ".zh-Hans.") {
 				chineseSubtitle = name
+			} else if strings.Contains(name, ".zh.") && !strings.Contains(chineseSubtitle, ".zh-Hans.") && !strings.Contains(chineseSubtitle, ".zh-CN.") {
+				chineseSubtitle = name
+			} else if (strings.Contains(name, ".zh-Hant.") || strings.Contains(name, ".zh-TW.")) && chineseSubtitle == "" {
+				chineseSubtitle = name // 繁体作为备选
 			}
 		}
 	}

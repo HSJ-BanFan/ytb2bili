@@ -414,7 +414,7 @@ func (t *DownloadVideo) executeDownloadWithAuthMode(cancelCtx context.Context, y
 		"--extractor-retries", "5",
 		"--write-subs",
 		"--write-auto-subs",
-		"--sub-langs", "en.*,zh.*,ja.*", // 匹配所有英文、中文、日文变体
+		"--sub-langs", "en,zh-Hans,zh-Hant,ja", // 只下载主要语言版本，避免429限流
 		"--sub-format", "srt/best",
 		"--convert-subs", "srt",
 		"--no-abort-on-error",
