@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/difyz9/ytb2bili/internal/membership"
 	"go.uber.org/zap"
 )
+
+// PermissionService 权限服务接口
+// 定义获取用户最大并发任务数的接口
+type PermissionService interface {
+	GetMaxConcurrentTasks(ctx context.Context, userID string) (int, error)
+}
 
 // ConcurrencyLimiter 并发控制器（per-user）
 type ConcurrencyLimiter struct {
@@ -15,13 +20,13 @@ type ConcurrencyLimiter struct {
 	userConcurrency map[uint]int
 	globalMutex     sync.RWMutex
 
-	permissionService *membership.PermissionService
+	permissionService PermissionService
 	logger            *zap.SugaredLogger
 }
 
 // NewConcurrencyLimiter 创建并发控制器
 func NewConcurrencyLimiter(
-	permService *membership.PermissionService,
+	permService PermissionService,
 	logger *zap.SugaredLogger,
 ) *ConcurrencyLimiter {
 	return &ConcurrencyLimiter{
