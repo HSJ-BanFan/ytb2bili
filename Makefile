@@ -1,4 +1,4 @@
-.PHONY: all build build-web build-api clean run test help install-deps
+.PHONY: all build build-web build-api clean run test help install-deps lint fmt test-cover quick-check security-check
 
 # 默认目标
 all: build
@@ -35,6 +35,11 @@ help:
 	@echo "  make clean          - 清理构建产物"
 	@echo "  make run            - 构建并运行服务器"
 	@echo "  make test           - 运行测试"
+	@echo "  make test-cover     - 运行测试并生成覆盖率报告"
+	@echo "  make quick-check    - 快速质量检查（格式化 + lint + 快速测试）"
+	@echo "  make lint           - 运行 golangci-lint"
+	@echo "  make fmt            - 格式化代码"
+	@echo "  make security-check - 运行安全扫描"
 	@echo "  make install-deps   - 安装依赖"
 	@echo "  make help           - 显示此帮助信息"
 	@echo ""
@@ -147,6 +152,46 @@ install-deps:
 test:
 	@echo "🧪 运行测试..."
 	@$(GOTEST) -v ./...
+
+# 运行测试并生成覆盖率报告
+test-cover:
+	@echo "📊 运行测试并生成覆盖率报告..."
+	@$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./...
+	@echo ""
+	@echo "📈 覆盖率统计:"
+	@go tool cover -func=coverage.out | grep total
+	@echo ""
+	@echo "📄 生成 HTML 覆盖率报告: coverage.html"
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "✅ 完成！打开 coverage.html 查看详细报告"
+
+# 快速检查（lint + 测试，不含竞态检测）
+quick-check:
+	@echo "⚡ 快速质量检查..."
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "1️⃣  格式化检查..."
+	@test -z "$$(gofmt -l . | tee /dev/stderr)" || { echo "❌ 代码格式不正确，请运行 'make fmt'"; exit 1; }
+	@echo "   ✅ 格式化检查通过"
+	@echo ""
+	@echo "2️⃣  运行 Lint..."
+	@$(MAKE) lint
+	@echo ""
+	@echo "3️⃣  运行快速测试（不含竞态检测）..."
+	@$(GOTEST) -short ./...
+	@echo ""
+	@echo "✅ 快速检查全部通过！"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 安全扫描
+security-check:
+	@echo "🔒 安全扫描..."
+	@if command -v gosec > /dev/null; then \
+		gosec -no-fail -fmt json -out gosec-report.json ./...; \
+		echo "✅ 安全扫描完成，报告: gosec-report.json"; \
+	else \
+		echo "⚠️  gosec 未安装，跳过安全扫描"; \
+		echo "   安装: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"; \
+	fi
 
 # 构建并运行
 run: build

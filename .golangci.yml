@@ -1,0 +1,164 @@
+# golangci-lint 配置文件 - 渐进式质量保障
+# 运行: golangci-lint run
+# 快速检查: golangci-lint run --fast
+
+run:
+  # 并发数
+  concurrency: 4
+
+  # 超时时间
+  timeout: 5m
+
+  # Go 版本（使用项目实际版本）
+  go: "1.21"
+
+  # 跳过测试目录（可选）
+  tests: true
+
+  # 要跳过的目录
+  skip-dirs:
+    - internal/web/bili-up-web  # 前端生成代码
+    - web/node_modules           # 前端依赖
+    - references                 # 参考代码
+    - .git
+
+  # 要跳过的文件
+  skip-files:
+    - ".*\\.pb\\.go$"     # Protobuf 生成代码
+    - ".*\\.gen\\.go$"    # 其他生成代码
+
+output:
+  # 输出格式
+  formats:
+    - format: colored-line-number
+  # 打印检查的linter名称
+  print-linter-name: true
+  # 排序结果
+  sort-results: true
+
+linters:
+  # 第一阶段：安全优先（Week 1-2）
+  enable:
+    # 🔴 安全性（必须开启）
+    - errcheck       # 检查未处理的错误
+    - govet          # 可疑代码构造检查（包括 printf 分析）
+    - gosec          # 安全问题扫描
+    - staticcheck    # 静态分析
+
+    # 🟡 代码质量（重要）
+    - gosimple       # 简化代码建议
+    - ineffassign    # 检查无效赋值
+    - unused         # 检查未使用的代码、常量、变量、函数
+
+    # 🟢 性能优化（推荐）
+    - prealloc       # 检查可以预分配的 slice
+    - unconvert      # 检查不必要的类型转换
+
+    # 🔵 代码风格（基础）
+    - gofmt          # 代码格式化检查
+    - misspell       # 拼写检查
+
+  # 禁用的 linter（后续可按需启用）
+  disable:
+    - exhaustive      # 过于严格
+    - exhaustivestruct # 过于严格
+    - funlen          # 函数长度限制（可选）
+    - wsl             # 空行规则（过于严格）
+    - gocyclo         # 圈复杂度（可后续启用）
+    - dupl            # 重复代码检测（可后续启用）
+
+  # 不预设默认 linter
+  presets: []
+
+linters-settings:
+  # errcheck 设置
+  errcheck:
+    # 检查类型断言
+    check-type-assertions: true
+    # 检查空值（如 _ = <-ch）
+    check-blank: true
+    # 排除特定函数（这些函数的错误通常可以忽略）
+    exclude-functions:
+      - (*io.Closer).Close
+      - (*os.File).Close
+      - (*database/sql.DB).Close
+      - (*database/sql.Tx).Commit
+
+  # govet 设置
+  govet:
+    # 启用所有检查器
+    enable-all: true
+    # 禁用特定检查器（如果需要）
+    disable:
+      - shadow  # 变量遮蔽检查（可选，后续可启用）
+
+  # gosec 设置
+  gosec:
+    # 要排除的规则
+    excludes:
+      - G104  # 审计错误，但不一定需要处理（与 errcheck 重复）
+      - G304  # 文件路径来自变量（项目正常使用场景）
+      - G307  # defer 文件关闭（某些场景下需要）
+
+  # staticcheck 设置
+  staticcheck:
+    # Go 版本
+    go: "1.21"
+
+  # prealloc 设置
+  prealloc:
+    # 检查 for 循环中的简单语句
+    simple: true
+    # 检查 range 循环
+    range-loops: true
+    # 检查 for 循环
+    for-loops: false
+
+  # misspell 设置
+  misspell:
+    # 语言环境
+    locale: US
+    # 忽略的单词
+    ignore-words:
+      - someword
+
+issues:
+  # 显示所有问题
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # 使用默认排除规则
+  exclude-use-default: false
+
+  # 独立排除规则
+  exclude-rules:
+    # 测试文件放宽要求
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - prealloc
+        - unconvert
+
+    # 自动生成的代码
+    - path: internal/web/
+      linters:
+        - gosec
+        - govet
+        - errcheck
+
+    # main 函数（通常是启动代码，复杂度较高）
+    - path: cmd/
+      linters:
+        - gosec
+
+    # 特定模块的已知问题（后续修复）
+    # 示例：如果某个包有大量历史问题，可以临时排除
+    # - path: internal/legacy/
+    #   linters:
+    #     - errcheck
+    #     - gosec
+
+# golangci-lint 版本说明
+# 本配置文件兼容 golangci-lint v1.55+
+# 如需检查版本: golangci-lint --version

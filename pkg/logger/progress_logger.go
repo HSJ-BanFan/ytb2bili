@@ -187,6 +187,14 @@ func (ph *ProgressHelper) UpdateProgress(format string, args ...interface{}) {
 	ph.manager.lastOutput.Store(msg)
 }
 
+// UpdateMessage 直接更新进度消息（不需要格式化参数）
+// 用于已格式化好的字符串，避免 govet 的 non-constant format string 警告
+func (ph *ProgressHelper) UpdateMessage(msg string) {
+	// 使用 ANSI 转义码实现单行更新
+	fmt.Printf("\r\033[K%s", msg) // \r 回到行首, \033[K 清除到行尾
+	ph.manager.lastOutput.Store(msg)
+}
+
 // Close 结束进度显示
 func (ph *ProgressHelper) Close() {
 	if ph.cleanup != nil {

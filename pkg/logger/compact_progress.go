@@ -41,7 +41,7 @@ func (cp *CompactProgressLogger) UpdateProgress(percent float64, downloaded, tot
 		eta,
 	)
 
-	cp.helper.UpdateProgress(output)
+	cp.helper.UpdateMessage(output)
 }
 
 // UpdateProgressYTDLP 更新下载进度（yt-dlp 格式）
@@ -60,7 +60,7 @@ func (cp *CompactProgressLogger) UpdateProgressYTDLP(percent float64, total, spe
 		eta,
 	)
 
-	cp.helper.UpdateProgress(output)
+	cp.helper.UpdateMessage(output)
 }
 
 // LogMessage 记录普通日志消息（会清除进度行）
@@ -70,7 +70,7 @@ func (cp *CompactProgressLogger) LogMessage(message string) {
 	// 恢复进度显示（如果需要）
 	if cp.helper.manager.lastOutput.Load().(string) != "" {
 		lastOutput := cp.helper.manager.lastOutput.Load().(string)
-		cp.helper.UpdateProgress(lastOutput)
+		cp.helper.UpdateMessage(lastOutput)
 	}
 }
 
