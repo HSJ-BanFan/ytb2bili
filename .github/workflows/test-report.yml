@@ -1,0 +1,198 @@
+name: Test Report
+
+on:
+  pull_request:
+    branches: [main, dev, develop]
+  push:
+    branches: [main, dev, develop]
+
+permissions:
+  contents: read
+  pull-requests: write  # 需要 PR 注释权限
+
+jobs:
+  test-report:
+    name: Test Report & PR Comment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run Unit Tests
+        id: unit-tests
+        run: |
+          echo "🧪 Running unit tests..."
+          go test -v -race -coverprofile=coverage_unit.out -covermode=atomic ./... 2>&1 | tee test_result_unit.txt
+
+      - name: Run Integration Tests
+        id: integration-tests
+        run: |
+          echo "🧪 Running integration tests..."
+          go test -v -race -coverprofile=coverage_integration.out -covermode=atomic ./tests/integration/... 2>&1 | tee test_result_integration.txt
+
+      - name: Generate Test Summary
+        id: test-summary
+        run: |
+          # 提取单元测试结果
+          UNIT_PASS=$(grep -c "PASS:" test_result_unit.txt || echo "0")
+          UNIT_FAIL=$(grep -c "FAIL:" test_result_unit.txt || echo "0")
+
+          # 提取集成测试结果
+          INT_PASS=$(grep -c "PASS:" test_result_integration.txt || echo "0")
+          INT_FAIL=$(grep -c "FAIL:" test_result_integration.txt || echo "0")
+
+          # 计算覆盖率
+          UNIT_COVERAGE=$(go tool cover -func=coverage_unit.out | grep total | awk '{print $3}' || echo "0%")
+          INT_COVERAGE=$(go tool cover -func=coverage_integration.out | grep total | awk '{print $3}' || echo "0%")
+
+          # 合并覆盖率
+          echo "mode: atomic" > coverage.out
+          grep -h "^.*:[0-9]*:.*" coverage_unit.out coverage_integration.out | sort -u >> coverage.out
+          TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' || echo "0%")
+
+          # 保存为环境变量
+          echo "unit_pass=$UNIT_PASS" >> $GITHUB_OUTPUT
+          echo "unit_fail=$UNIT_FAIL" >> $GITHUB_OUTPUT
+          echo "int_pass=$INT_PASS" >> $GITHUB_OUTPUT
+          echo "int_fail=$INT_FAIL" >> $GITHUB_OUTPUT
+          echo "unit_coverage=$UNIT_COVERAGE" >> $GITHUB_OUTPUT
+          echo "int_coverage=$INT_COVERAGE" >> $GITHUB_OUTPUT
+          echo "total_coverage=$TOTAL_COVERAGE" >> $GITHUB_OUTPUT
+
+          # 输出到控制台
+          echo "## 📊 Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Unit Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Passed: $UNIT_PASS" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Failed: $UNIT_FAIL" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Coverage: $UNIT_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Passed: $INT_PASS" >> $GITHUB_STEP_SUMMARY
+          echo "- ❌ Failed: $INT_FAIL" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Coverage: $INT_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Overall" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Total Coverage: $TOTAL_COVERAGE" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate HTML Coverage Report
+        run: |
+          go tool cover -html=coverage.out -o coverage.html
+          echo "✅ HTML coverage report generated"
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const unitPass = '${{ steps.test-summary.outputs.unit_pass }}';
+            const unitFail = '${{ steps.test-summary.outputs.unit_fail }}';
+            const intPass = '${{ steps.test-summary.outputs.int_pass }}';
+            const intFail = '${{ steps.test-summary.outputs.int_fail }}';
+            const unitCoverage = '${{ steps.test-summary.outputs.unit_coverage }}';
+            const intCoverage = '${{ steps.test-summary.outputs.int_coverage }}';
+            const totalCoverage = '${{ steps.test-summary.outputs.total_coverage }}';
+
+            const unitStatus = unitFail === '0' ? '✅' : '❌';
+            const intStatus = intFail === '0' ? '✅' : '❌';
+            const overallStatus = (unitFail === '0' && intFail === '0') ? '✅' : '❌';
+
+            const comment = `## 🧪 测试报告
+
+            ### 总体状态: ${overallStatus} 全部测试通过
+
+            | 测试类型 | 通过 | 失败 | 覆盖率 |
+            |---------|------|------|--------|
+            | 单元测试 | ${unitPass} | ${unitFail} | ${unitCoverage} |
+            | 集成测试 | ${intPass} | ${intFail} | ${intCoverage} |
+            | **总计** | **${parseInt(unitPass) + parseInt(intPass)}** | **${parseInt(unitFail) + parseInt(intFail)}** | **${totalCoverage}** |
+
+            <details>
+            <summary>📊 覆盖率详情</summary>
+
+            \`\`\`
+            ${fs.readFileSync('coverage_full.txt', 'utf8')}
+            \`\`\`
+            </details>
+
+            <details>
+            <summary>📝 单元测试详情</summary>
+
+            \`\`\`
+            ${fs.readFileSync('test_result_unit.txt', 'utf8')}
+            \`\`\`
+            </details>
+
+            <details>
+            <summary>📝 集成测试详情</summary>
+
+            \`\`\`
+            ${fs.readFileSync('test_result_integration.txt', 'utf8')}
+            \`\`\`
+            </details>
+
+            ---
+            📅 生成时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+            🤖 Generated by [GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment => {
+              return comment.user.type === 'Bot' && comment.body.includes('🧪 测试报告');
+            });
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.out
+            coverage.html
+            coverage_full.txt
+            test_result_unit.txt
+            test_result_integration.txt
+          retention-days: 30
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

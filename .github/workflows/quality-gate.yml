@@ -5,6 +5,7 @@ on:
     branches: [main, dev, develop]
   pull_request:
     branches: [main, dev, develop]
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   # 快速检查（2分钟内反馈）
@@ -19,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23'
           cache: true
 
       - name: Download dependencies
@@ -31,11 +32,13 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.55
+          version: v1.60
           args: --timeout=5m --out-format=colored-line-number
 
-      - name: Quick Test (skip integration)
-        run: go test -v -short ./...
+      - name: Quick Test (unit tests only)
+        run: |
+          echo "🧪 Running unit tests..."
+          go test -v -short ./... -exclude-dir tests/integration
 
   # 完整检查（PR 合并前）
   full-check:
@@ -50,20 +53,36 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23'
           cache: true
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Run Tests with Coverage
+      - name: Run Unit Tests with Coverage
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          echo "🧪 Running unit tests with coverage..."
+          go test -v -race -coverprofile=coverage_unit.out -covermode=atomic ./...
+
+      - name: Run Integration Tests
+        run: |
+          echo "🧪 Running integration tests..."
+          go test -v -race -coverprofile=coverage_integration.out -covermode=atomic ./tests/integration/...
+
+      - name: Merge Coverage Profiles
+        run: |
+          echo "📊 Merging coverage profiles..."
+          go tool cover -func=coverage_unit.out > coverage_full.txt
+          go tool cover -func=coverage_integration.out >> coverage_full.txt
+
+          # Generate combined coverage
+          echo "mode: atomic" > coverage.out
+          grep -h "^.*:[0-9]*:.*" coverage_unit.out coverage_integration.out | sort -u >> coverage.out
 
       - name: Generate Coverage Report
         run: |
           echo "📊 Coverage Summary:"
-          go tool cover -func=coverage.out | grep total
+          go tool cover -func=coverage.out | tail -1
 
       - name: Check Coverage Threshold
         run: |
@@ -123,7 +142,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23'
           cache: true
 
       - name: Build Binary
