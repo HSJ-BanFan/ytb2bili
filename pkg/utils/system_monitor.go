@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"syscall"
-	"unsafe"
 )
 
 // SystemMonitor 系统监控工具
@@ -82,55 +80,9 @@ func (sm *SystemMonitor) getDiskFreeBytes(dir string) (uint64, error) {
 	return sm.getDiskFreeBytesUnix(dir)
 }
 
-// getDiskFreeBytesWindows 使用 Windows API 获取磁盘空间
-func (sm *SystemMonitor) getDiskFreeBytesWindows(dir string) (uint64, error) {
-	// 加载 kernel32.dll
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	getDiskFreeSpaceExW := kernel32.NewProc("GetDiskFreeSpaceExW")
+// getDiskFreeBytesWindows 在 system_monitor_windows.go 中实现
 
-	// 转换路径为 UTF-16
-	dirPtr, err := syscall.UTF16PtrFromString(dir)
-	if err != nil {
-		return 0, fmt.Errorf("路径转换失败: %w", err)
-	}
-
-	var freeBytesAvailable uint64
-	var totalBytes uint64
-	var totalFreeBytes uint64
-
-	// 调用 Windows API
-	ret, _, callErr := getDiskFreeSpaceExW.Call(
-		uintptr(unsafe.Pointer(dirPtr)),
-		uintptr(unsafe.Pointer(&freeBytesAvailable)),
-		uintptr(unsafe.Pointer(&totalBytes)),
-		uintptr(unsafe.Pointer(&totalFreeBytes)),
-	)
-
-	if ret == 0 {
-		return 0, fmt.Errorf("GetDiskFreeSpaceExW 调用失败: %v", callErr)
-	}
-
-	return freeBytesAvailable, nil
-}
-
-// getDiskFreeBytesUnix 使用 syscall.Statfs 获取磁盘空间 (Linux/macOS)
-func (sm *SystemMonitor) getDiskFreeBytesUnix(dir string) (uint64, error) {
-	// 在 Windows 上编译时，此函数不会被调用
-	// 但需要提供一个基本实现以通过编译
-	// 实际 Unix 实现需要使用 build tags
-
-	// 尝试创建临时文件来验证磁盘可写
-	testFile := dir + "/.disk_space_check_test"
-	file, err := os.Create(testFile)
-	if err != nil {
-		return 0, fmt.Errorf("无法创建测试文件: %w", err)
-	}
-	file.Close()
-	os.Remove(testFile)
-
-	// 返回一个较大的默认值（Unix 系统需要单独实现）
-	return 10 * 1024 * 1024 * 1024, nil
-}
+// getDiskFreeBytesUnix 在 system_monitor_unix.go 中实现
 
 // GetSystemInfo 获取系统信息
 func (sm *SystemMonitor) GetSystemInfo() map[string]interface{} {

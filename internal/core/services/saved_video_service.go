@@ -160,6 +160,7 @@ func (s *SavedVideoService) GetVideoByIDForUser(id, userID uint) (*model.SavedVi
 	}
 	return &video, nil
 }
+
 // GetVideoByVideoIDForUser 根据 VideoID 获取视频（带用户隔离，userID=0 时查看所有）
 func (s *SavedVideoService) GetVideoByVideoIDForUser(videoID string, userID uint) (*model.SavedVideo, error) {
 	var video model.SavedVideo

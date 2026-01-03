@@ -71,8 +71,8 @@ func MigrateDatabaseCookies(db *gorm.DB) error {
 
 		// 更新数据库
 		err = tx.Model(&account).Updates(map[string]interface{}{
-			"cookies_encrypted": encrypted,
-			"cookies":           "", // 清空明文
+			"cookies_encrypted":  encrypted,
+			"cookies":            "", // 清空明文
 			"encryption_version": 2,
 		}).Error
 

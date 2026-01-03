@@ -1,9 +1,9 @@
 package translator
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
 	"context"
 	"fmt"
+	"github.com/difyz9/ytb2bili/internal/core/types"
 	"sync"
 	"time"
 )

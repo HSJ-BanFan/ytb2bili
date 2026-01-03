@@ -45,13 +45,13 @@ func ExtractWaveAudio(inputFile, outputFile string) error {
 	// 构造 ffmpeg 命令，提取音频并转换为WAV格式
 	cmd := exec.Command(
 		"ffmpeg",
-		"-y",                    // 覆盖输出文件
-		"-i", inputFile,         // 输入文件
-		"-vn",                   // 不处理视频流
-        "-acodec", "pcm_s16le",  // PCM 16位
-	   "-ar", "16000",          // 16kHz 采样率（whisper 标准）
-        "-ac", "1",              // 单声道（语音识别足够）
-        outputFile,
+		"-y",            // 覆盖输出文件
+		"-i", inputFile, // 输入文件
+		"-vn",                  // 不处理视频流
+		"-acodec", "pcm_s16le", // PCM 16位
+		"-ar", "16000", // 16kHz 采样率（whisper 标准）
+		"-ac", "1", // 单声道（语音识别足够）
+		outputFile,
 	)
 
 	// 设置标准输出和标准错误

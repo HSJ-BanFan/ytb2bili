@@ -949,14 +949,14 @@ func TestIsAdmin(t *testing.T) {
 		expected bool
 	}{
 		{
-			name:     "管理员返回 true",
+			name: "管理员返回 true",
 			setup: func(c *gin.Context) {
 				c.Set(ContextKeyUserRole, "admin")
 			},
 			expected: true,
 		},
 		{
-			name:     "普通用户返回 false",
+			name: "普通用户返回 false",
 			setup: func(c *gin.Context) {
 				c.Set(ContextKeyUserRole, "user")
 			},

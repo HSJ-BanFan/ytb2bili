@@ -180,27 +180,27 @@ func TestUploadScheduler_RealWorldScenario(t *testing.T) {
 	t.Log("========================================")
 
 	scenarios := []struct {
-		name             string
-		videoCount       int
-		videoUploadTime  time.Duration
+		name               string
+		videoCount         int
+		videoUploadTime    time.Duration
 		subtitleUploadTime time.Duration
 	}{
 		{
-			name:             "小规模：2个视频",
-			videoCount:       2,
-			videoUploadTime:  2 * time.Minute,
+			name:               "小规模：2个视频",
+			videoCount:         2,
+			videoUploadTime:    2 * time.Minute,
 			subtitleUploadTime: 30 * time.Second,
 		},
 		{
-			name:             "中等规模：5个视频",
-			videoCount:       5,
-			videoUploadTime:  2 * time.Minute,
+			name:               "中等规模：5个视频",
+			videoCount:         5,
+			videoUploadTime:    2 * time.Minute,
 			subtitleUploadTime: 30 * time.Second,
 		},
 		{
-			name:             "大规模：10个视频",
-			videoCount:       10,
-			videoUploadTime:  2 * time.Minute,
+			name:               "大规模：10个视频",
+			videoCount:         10,
+			videoUploadTime:    2 * time.Minute,
 			subtitleUploadTime: 30 * time.Second,
 		},
 	}
@@ -222,7 +222,7 @@ func TestUploadScheduler_RealWorldScenario(t *testing.T) {
 			t.Logf("  单个视频耗时：上传 %v + 字幕 %v = %v",
 				scenario.videoUploadTime,
 				scenario.subtitleUploadTime,
-				scenario.videoUploadTime + scenario.subtitleUploadTime)
+				scenario.videoUploadTime+scenario.subtitleUploadTime)
 			t.Logf("")
 			t.Logf("  旧代码（全局锁）：%v (串行执行)", sequentialTime)
 			t.Logf("  新代码（细粒度锁）：%v (并发执行，理想情况)", concurrentTime)
@@ -247,10 +247,10 @@ func TestUploadScheduler_BeforeAfterComparison(t *testing.T) {
 	t.Log("========================================")
 
 	comparisons := []struct {
-		aspect          string
-		before          string
-		after           string
-		impact          string
+		aspect string
+		before string
+		after  string
+		impact string
 	}{
 		{
 			aspect: "并发模型",

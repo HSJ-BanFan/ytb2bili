@@ -10,14 +10,14 @@ import (
 	"net/http"
 	"net/url"
 
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
 	"github.com/difyz9/ytb2bili/internal/chain_task/base"
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/pkg/cos"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // XMLText XML 字幕中的文本元素
@@ -109,7 +109,7 @@ func (t *Task03Handler) getVideoSrtURL(videoID string) (string, error) {
 	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
 
 	// 尝试使用代理（如果配置了）
-	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != ""
 
 	if useProxy {
@@ -167,7 +167,7 @@ func (t *Task03Handler) fetchSrtURL(videoURL string, useProxy bool) (string, err
 // getSrtFile 获取字幕文件内容
 func (t *Task03Handler) getSrtFile(srtURL string) (*TranscriptData, error) {
 	// 尝试使用代理（如果配置了）
-	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	useProxy := t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != ""
 
 	if useProxy {
@@ -236,7 +236,7 @@ func (t *Task03Handler) fetchSrtContent(srtURL string, useProxy bool) (*Transcri
 func (t *Task03Handler) createHTTPClient(useProxy bool) *http.Client {
 	client := &http.Client{}
 
-	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil && 
+	if useProxy && t.App.Config != nil && t.App.Config.ProxyConfig != nil &&
 		t.App.Config.ProxyConfig.UseProxy && t.App.Config.ProxyConfig.ProxyHost != "" {
 		proxyURL, err := url.Parse(t.App.Config.ProxyConfig.ProxyHost)
 		if err == nil {

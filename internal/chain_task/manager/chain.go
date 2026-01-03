@@ -33,11 +33,11 @@ type TaskConfig struct {
 // │ 9  │ 上传字幕     │       上传到B站             │  否  │  延迟重试  │
 // └────┴──────────────┴─────────────────────────────┴──────┴────────────┘
 var TaskConfigs = map[string]TaskConfig{
-	"获取元数据":   {Name: "获取元数据", Dependencies: nil, Required: true},
-	"下载视频":    {Name: "下载视频", Dependencies: nil, Required: true},
-	"下载字幕":    {Name: "下载字幕", Dependencies: nil, Required: false},
-	"下载封面":    {Name: "下载封面", Dependencies: []string{"获取元数据"}, Required: true},
-	"翻译字幕":    {Name: "翻译字幕", Dependencies: []string{"下载字幕"}, Required: false},
+	"获取元数据": {Name: "获取元数据", Dependencies: nil, Required: true},
+	"下载视频":  {Name: "下载视频", Dependencies: nil, Required: true},
+	"下载字幕":  {Name: "下载字幕", Dependencies: nil, Required: false},
+	"下载封面":  {Name: "下载封面", Dependencies: []string{"获取元数据"}, Required: true},
+	"翻译字幕":  {Name: "翻译字幕", Dependencies: []string{"下载字幕"}, Required: false},
 	// AI增强元数据：仅依赖下载视频（不强制依赖翻译字幕）
 	// 说明：优先使用中文字幕，如不存在则使用英文字幕
 	"AI增强元数据": {Name: "AI增强元数据", Dependencies: []string{"下载视频"}, Required: false},

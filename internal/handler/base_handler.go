@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core"
 	"fmt"
+	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,7 +17,7 @@ func (h *BaseHandler) GetInt(c *gin.Context, key string, defaultValue int) int {
 	if value == "" {
 		return defaultValue
 	}
-	
+
 	intValue := 0
 	if _, err := fmt.Sscanf(value, "%d", &intValue); err != nil {
 		return defaultValue

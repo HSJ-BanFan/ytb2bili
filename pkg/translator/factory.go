@@ -1,8 +1,8 @@
 package translator
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
 	"fmt"
+	"github.com/difyz9/ytb2bili/internal/core/types"
 )
 
 // Factory 翻译器工厂实现

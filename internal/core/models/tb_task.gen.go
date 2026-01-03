@@ -17,7 +17,7 @@ type TvTask struct {
 	VideoID        string    `gorm:"column:video_id;not null" json:"video_id"`
 	FieldID        string    `gorm:"column:field_id;not null" json:"field_id"`
 	VideoURL       string    `gorm:"column:video_url" json:"video_url"`
-	TaskName      string    `gorm:"column:task_name;not null" json:"task_name"`
+	TaskName       string    `gorm:"column:task_name;not null" json:"task_name"`
 	Status         string    `gorm:"column:status" json:"status"`
 	StartTime      time.Time `gorm:"column:start_time" json:"start_time"`
 	EndTime        time.Time `gorm:"column:end_time" json:"end_time"`

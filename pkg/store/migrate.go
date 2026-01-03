@@ -101,7 +101,7 @@ func addAuditIndexes(db *gorm.DB) error {
 		var count int64
 		checkSQL := fmt.Sprintf(
 			"SELECT COUNT(*) FROM information_schema.statistics "+
-			"WHERE table_schema = DATABASE() AND table_name = 'cw_audit_logs' AND index_name = '%s'",
+				"WHERE table_schema = DATABASE() AND table_name = 'cw_audit_logs' AND index_name = '%s'",
 			idx.name,
 		)
 

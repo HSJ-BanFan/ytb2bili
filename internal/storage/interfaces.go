@@ -9,7 +9,7 @@ type LoginStoreInterface interface {
 	Delete() error
 	IsValid() bool
 	GetStorePath() string
-	
+
 	// 新增用户信息相关方法
 	SaveWithUserInfo(loginInfo *bilibili.LoginInfo, userInfo *UserBasicInfo) error
 	LoadWithUserInfo() (*bilibili.LoginInfo, *UserBasicInfo, error)

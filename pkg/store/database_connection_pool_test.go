@@ -120,7 +120,7 @@ func evaluateConfig(t *testing.T, config struct {
 	}
 
 	// 检查5: 是否适合细粒度锁场景
-	concurrentUploads := 5 // 默认并发上传数
+	concurrentUploads := 5                  // 默认并发上传数
 	requiredConns := concurrentUploads + 10 // 预留10个连接用于常规查询
 
 	if config.maxOpenConns < requiredConns {
@@ -142,28 +142,28 @@ func TestDatabaseConnectionPoolSimulation(t *testing.T) {
 	t.Log("========================================")
 
 	scenarios := []struct {
-		name                string
-		concurrentQueries  int
-		maxOpenConns        int
-		expectedBehavior    string
+		name              string
+		concurrentQueries int
+		maxOpenConns      int
+		expectedBehavior  string
 	}{
 		{
-			name:               "当前配置 - 5个并发查询",
-			concurrentQueries:  5,
-			maxOpenConns:       100,
-			expectedBehavior:   "连接充足",
+			name:              "当前配置 - 5个并发查询",
+			concurrentQueries: 5,
+			maxOpenConns:      100,
+			expectedBehavior:  "连接充足",
 		},
 		{
-			name:               "当前配置 - 50个并发查询",
-			concurrentQueries:  50,
-			maxOpenConns:       100,
-			expectedBehavior:   "连接充足，但接近上限",
+			name:              "当前配置 - 50个并发查询",
+			concurrentQueries: 50,
+			maxOpenConns:      100,
+			expectedBehavior:  "连接充足，但接近上限",
 		},
 		{
-			name:               "当前配置 - 150个并发查询",
-			concurrentQueries:  150,
-			maxOpenConns:       100,
-			expectedBehavior:   "连接不足，需要等待",
+			name:              "当前配置 - 150个并发查询",
+			concurrentQueries: 150,
+			maxOpenConns:      100,
+			expectedBehavior:  "连接不足，需要等待",
 		},
 	}
 
@@ -343,9 +343,9 @@ func TestDatabaseConnectionPool_HealthCheck(t *testing.T) {
 	t.Log("========================================")
 
 	tunings := []struct {
-		problem         string
-		solution        string
-		implementation  string
+		problem        string
+		solution       string
+		implementation string
 	}{
 		{
 			problem:        "连接池耗尽（WaitCount 很高）",

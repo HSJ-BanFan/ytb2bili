@@ -12,8 +12,8 @@ import (
 
 // UserConfigHandler 用户配置处理器
 type UserConfigHandler struct {
-	App                *core.AppServer
-	UserConfigService  *services.UserConfigService
+	App               *core.AppServer
+	UserConfigService *services.UserConfigService
 }
 
 // NewUserConfigHandler 创建用户配置处理器
@@ -60,11 +60,11 @@ func (h *UserConfigHandler) getUserAIConfig(c *gin.Context) {
 			"code":    200,
 			"message": "获取成功",
 			"data": gin.H{
-				"deepseek_enabled":    false,
-				"gemini_enabled":      false,
-				"openai_enabled":      false,
-				"baidu_enabled":       false,
-				"uses_system_config":  true,
+				"deepseek_enabled":   false,
+				"gemini_enabled":     false,
+				"openai_enabled":     false,
+				"baidu_enabled":      false,
+				"uses_system_config": true,
 			},
 		})
 		return
@@ -133,18 +133,18 @@ func (h *UserConfigHandler) getUserPreferences(c *gin.Context) {
 			"code":    200,
 			"message": "获取成功",
 			"data": gin.H{
-				"default_auto_upload":     true,
-				"default_upload_delay":    10,
-				"default_subtitle_delay":  10,
-				"default_copyright":       2,
-				"default_source":          "YouTube",
-				"default_tid":             122,
-				"theme":                   "light",
-				"language":                "zh",
-				"items_per_page":          20,
-				"show_advanced":           false,
+				"default_auto_upload":         true,
+				"default_upload_delay":        10,
+				"default_subtitle_delay":      10,
+				"default_copyright":           2,
+				"default_source":              "YouTube",
+				"default_tid":                 122,
+				"theme":                       "light",
+				"language":                    "zh",
+				"items_per_page":              20,
+				"show_advanced":               false,
 				"email_notifications_enabled": true,
-				"enable_analytics":        false,
+				"enable_analytics":            false,
 			},
 		})
 		return

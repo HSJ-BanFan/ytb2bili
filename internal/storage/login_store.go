@@ -1,9 +1,9 @@
 package storage
 
 import (
-	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"encoding/json"
 	"fmt"
+	"github.com/difyz9/bilibili-go-sdk/bilibili"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,7 +20,7 @@ type LoginStore struct {
 // StoredLoginInfo 存储的登录信息（包含保存时间）
 type StoredLoginInfo struct {
 	LoginInfo *bilibili.LoginInfo `json:"login_info"`
-	UserInfo  *UserBasicInfo      `json:"user_info,omitempty"`  // 用户基本信息
+	UserInfo  *UserBasicInfo      `json:"user_info,omitempty"` // 用户基本信息
 	SavedAt   time.Time           `json:"saved_at"`
 	ExpiresAt time.Time           `json:"expires_at"`
 	UserMid   int64               `json:"user_mid"`
@@ -30,7 +30,7 @@ type StoredLoginInfo struct {
 type UserBasicInfo struct {
 	Mid      int64  `json:"mid"`
 	Name     string `json:"name"`
-	Uname    string `json:"uname"`    // 用户名
+	Uname    string `json:"uname"` // 用户名
 	Sex      string `json:"sex"`
 	Face     string `json:"face"`     // 头像URL
 	Sign     string `json:"sign"`     // 个人签名
@@ -132,10 +132,10 @@ func (s *LoginStore) SaveWithUserInfo(loginInfo *bilibili.LoginInfo, userInfo *U
 	}
 
 	if userInfo != nil {
-		log.Printf("Login info and user info saved successfully (Mid: %d, Name: %s, ExpiresAt: %s)", 
+		log.Printf("Login info and user info saved successfully (Mid: %d, Name: %s, ExpiresAt: %s)",
 			stored.UserMid, userInfo.Name, stored.ExpiresAt.Format(time.RFC3339))
 	} else {
-		log.Printf("Login info saved successfully (Mid: %d, ExpiresAt: %s)", 
+		log.Printf("Login info saved successfully (Mid: %d, ExpiresAt: %s)",
 			stored.UserMid, stored.ExpiresAt.Format(time.RFC3339))
 	}
 	return nil
@@ -210,13 +210,13 @@ func (s *LoginStore) loadStoredInfo() (*StoredLoginInfo, error) {
 	}
 
 	if stored.UserInfo != nil {
-		log.Printf("Login info and user info loaded successfully (Mid: %d, Name: %s, ValidUntil: %s)", 
+		log.Printf("Login info and user info loaded successfully (Mid: %d, Name: %s, ValidUntil: %s)",
 			stored.UserMid, stored.UserInfo.Name, stored.ExpiresAt.Format(time.RFC3339))
 	} else {
-		log.Printf("Login info loaded successfully (Mid: %d, ValidUntil: %s)", 
+		log.Printf("Login info loaded successfully (Mid: %d, ValidUntil: %s)",
 			stored.UserMid, stored.ExpiresAt.Format(time.RFC3339))
 	}
-	
+
 	return &stored, nil
 }
 
@@ -278,7 +278,7 @@ func ConvertMyInfoToUserInfo(myInfo *bilibili.MyInfoResponse) *UserBasicInfo {
 	if myInfo == nil {
 		return nil
 	}
-	
+
 	return &UserBasicInfo{
 		Mid:       myInfo.Mid,
 		Name:      myInfo.Uname,
@@ -303,7 +303,7 @@ func ConvertBasicInfoToUserInfo(basicInfo *bilibili.UserBasicInfo) *UserBasicInf
 	if basicInfo == nil {
 		return nil
 	}
-	
+
 	return &UserBasicInfo{
 		Mid:      basicInfo.Mid,
 		Name:     basicInfo.Name,

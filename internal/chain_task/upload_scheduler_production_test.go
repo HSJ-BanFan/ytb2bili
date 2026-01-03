@@ -57,10 +57,10 @@ func TestUploadScheduler_ProductionLoad(t *testing.T) {
 
 	// 配置测试参数
 	config := &ProductionTestConfig{
-		Duration:                  30 * time.Second, // 测试30秒
-		ConcurrentVideos:          5,                 // 5个视频并发
-		SimulatedUploadDuration:   2 * time.Second,   // 每个视频2秒
-		VerboseLogging:            true,
+		Duration:                30 * time.Second, // 测试30秒
+		ConcurrentVideos:        5,                // 5个视频并发
+		SimulatedUploadDuration: 2 * time.Second,  // 每个视频2秒
+		VerboseLogging:          true,
 	}
 
 	t.Logf("测试配置：")
@@ -409,10 +409,10 @@ func TestUploadScheduler_GradualRolloutSimulation(t *testing.T) {
 	t.Log("========================================")
 
 	strategies := []struct {
-		name          string
-		percentage    int
-		testDuration  time.Duration
-		metricsCheck  func() bool
+		name         string
+		percentage   int
+		testDuration time.Duration
+		metricsCheck func() bool
 	}{
 		{
 			name:         "第一阶段：5% 流量",

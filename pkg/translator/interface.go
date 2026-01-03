@@ -26,10 +26,10 @@ type BatchTranslationRequest struct {
 
 // TranslationResult 翻译结果
 type TranslationResult struct {
-	OriginalText   string  `json:"originalText"`        // 原文
-	TranslatedText string  `json:"translatedText"`      // 译文
-	SourceLang     string  `json:"sourceLang"`          // 检测到的源语言
-	TargetLang     string  `json:"targetLang"`          // 目标语言
+	OriginalText   string  `json:"originalText"`         // 原文
+	TranslatedText string  `json:"translatedText"`       // 译文
+	SourceLang     string  `json:"sourceLang"`           // 检测到的源语言
+	TargetLang     string  `json:"targetLang"`           // 目标语言
 	Confidence     float64 `json:"confidence,omitempty"` // 置信度
 	Provider       string  `json:"provider"`             // 翻译服务提供商
 	Model          string  `json:"model,omitempty"`      // 使用的模型
@@ -37,10 +37,10 @@ type TranslationResult struct {
 }
 
 type TranslationResultDto struct {
-	OriginalText   string  `json:"originalText"`        // 原文
-	TranslatedText string  `json:"translatedText"`      // 译文
-	SourceLang     string  `json:"sourceLang"`          // 检测到的源语言
-	TargetLang     string  `json:"targetLang"`          // 目标语言
+	OriginalText   string  `json:"originalText"`         // 原文
+	TranslatedText string  `json:"translatedText"`       // 译文
+	SourceLang     string  `json:"sourceLang"`           // 检测到的源语言
+	TargetLang     string  `json:"targetLang"`           // 目标语言
 	Confidence     float64 `json:"confidence,omitempty"` // 置信度
 }
 
@@ -66,9 +66,9 @@ type Usage struct {
 	InputTokens  int     `json:"inputTokens,omitempty"`  // 输入token数
 	OutputTokens int     `json:"outputTokens,omitempty"` // 输出token数
 	TotalTokens  int     `json:"totalTokens,omitempty"`  // 总token数
-	Characters   int     `json:"characters,omitempty"`    // 字符数
-	Cost         float64 `json:"cost,omitempty"`          // 费用
-	Duration     int64   `json:"duration,omitempty"`      // 耗时(毫秒)
+	Characters   int     `json:"characters,omitempty"`   // 字符数
+	Cost         float64 `json:"cost,omitempty"`         // 费用
+	Duration     int64   `json:"duration,omitempty"`     // 耗时(毫秒)
 }
 
 // LanguageInfo 语言信息

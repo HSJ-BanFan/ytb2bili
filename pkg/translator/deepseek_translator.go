@@ -1,11 +1,11 @@
 package translator
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/difyz9/ytb2bili/internal/core/types"
 	"net/http"
 	"strings"
 	"time"

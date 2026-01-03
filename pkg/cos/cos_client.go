@@ -1,9 +1,9 @@
 package cos
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core/types"
 	"context"
 	"fmt"
+	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/tencentyun/qcloud-cos-sts-sdk/go"
 	"io"
@@ -596,7 +596,7 @@ func (c *CosClient) UploadVideoToCOS(filePath, keyName string) (string, error) {
 func (c *CosClient) UploadVideoFromReader(reader io.Reader, fileName string) (string, string, error) {
 	// 生成唯一的 key
 	keyName := c.GenerateVideoKey(fileName)
-	
+
 	fmt.Printf("Uploading video to COS: key=%s, filename=%s\n", keyName, fileName)
 
 	// 设置视频文件的 Content-Type
@@ -1175,17 +1175,17 @@ func (c *CosClient) GenerateVideoKey(fileName string) string {
 	// 生成基于时间戳的唯一 key
 	timestamp := time.Now().Unix()
 	randomSuffix := rand.Intn(10000)
-	
+
 	// 获取文件扩展名
 	ext := filepath.Ext(fileName)
 	if ext == "" {
 		ext = ".mp4" // 默认扩展名
 	}
-	
+
 	// 生成格式: videos/2024/01/15/video_1642384000_1234.mp4
-	key := fmt.Sprintf("videos/%s/video_%d_%d%s", 
+	key := fmt.Sprintf("videos/%s/video_%d_%d%s",
 		time.Now().Format("2006/01/02"), timestamp, randomSuffix, ext)
-	
+
 	return key
 }
 
@@ -1193,7 +1193,7 @@ func (c *CosClient) GenerateVideoKey(fileName string) string {
 func (c *CosClient) GenerateURL(key string) string {
 	// 获取 COS 配置的域名
 	baseURL := c.Client.BaseURL.BucketURL.String()
-	
+
 	// 确保 baseURL 以 / 结尾，key 不以 / 开头
 	if !strings.HasSuffix(baseURL, "/") {
 		baseURL += "/"
@@ -1201,6 +1201,6 @@ func (c *CosClient) GenerateURL(key string) string {
 	if strings.HasPrefix(key, "/") {
 		key = key[1:]
 	}
-	
+
 	return baseURL + key
 }

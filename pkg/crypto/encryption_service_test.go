@@ -91,10 +91,10 @@ func TestEncryptionService_EncryptJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	type TestStruct struct {
-		Name    string `json:"name"`
-		Age     int    `json:"age"`
-		Secret  string `json:"secret"`
-		Active  bool   `json:"active"`
+		Name   string `json:"name"`
+		Age    int    `json:"age"`
+		Secret string `json:"secret"`
+		Active bool   `json:"active"`
 	}
 
 	original := TestStruct{

@@ -71,13 +71,13 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 					}
 					return
 				}
-				
+
 				var clientErr *analysis.ClientError
 				if errors.As(err, &clientErr) {
 					m.logger.Errorf("Client error tracking API request: %v (context: %+v)", clientErr.Err, clientErr.Context)
 					return
 				}
-				
+
 				m.logger.Errorf("Failed to track API request: %v", err)
 			}
 		}()
@@ -87,7 +87,7 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 // getUserID 从请求中获取用户ID
 func (m *Middleware) getUserID(c *gin.Context) string {
 	// 尝试从多个地方获取用户ID
-	
+
 	// 1. 从JWT token中获取
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok {
@@ -112,7 +112,7 @@ func (m *Middleware) getUserID(c *gin.Context) string {
 // getDeviceID 从请求中获取设备ID
 func (m *Middleware) getDeviceID(c *gin.Context) string {
 	// 尝试从多个地方获取设备ID
-	
+
 	// 1. 从请求头中获取
 	if deviceID := c.GetHeader("X-Device-ID"); deviceID != "" {
 		return deviceID
@@ -163,13 +163,13 @@ func (m *Middleware) TrackCustomEvent(c *gin.Context, eventName string, properti
 				}
 				return
 			}
-			
+
 			var clientErr *analysis.ClientError
 			if errors.As(err, &clientErr) {
 				m.logger.Errorf("Client error tracking custom event %s: %v (context: %+v)", eventName, clientErr.Err, clientErr.Context)
 				return
 			}
-			
+
 			m.logger.Errorf("Failed to track custom event %s: %v", eventName, err)
 		}
 	}()

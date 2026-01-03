@@ -1,11 +1,11 @@
 package handler
 
 import (
+	"encoding/json"
+	bilibili2 "github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
-	bilibili2 "github.com/difyz9/bilibili-go-sdk/bilibili"
 	"github.com/difyz9/ytb2bili/pkg/cos"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"

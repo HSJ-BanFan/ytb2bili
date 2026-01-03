@@ -3,10 +3,10 @@ package cos
 import (
 	"context"
 	"fmt"
+	"github.com/tencentyun/cos-go-sdk-v5"
 	"os"
 	"path/filepath"
 	"strings"
-	"github.com/tencentyun/cos-go-sdk-v5"
 )
 
 // DownloadOptions 下载选项
@@ -82,11 +82,11 @@ func (c *CosClient) countFiles(remoteDir string, filter func(string) bool) (int,
 			if strings.HasSuffix(obj.Key, "/") {
 				continue // 跳过目录
 			}
-			
+
 			if filter != nil && !filter(obj.Key) {
 				continue // 跳过不匹配的文件
 			}
-			
+
 			count++
 		}
 

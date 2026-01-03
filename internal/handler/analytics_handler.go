@@ -66,10 +66,10 @@ func (h *AnalyticsHandler) TrackVideoUpload(c *gin.Context, videoID string, file
 	deviceID := h.getDeviceID(c)
 
 	videoInfo := map[string]interface{}{
-		"video_id":  videoID,
-		"file_size": fileSize,
-		"duration":  duration,
-		"format":    format,
+		"video_id":    videoID,
+		"file_size":   fileSize,
+		"duration":    duration,
+		"format":      format,
 		"upload_time": time.Now().Format(time.RFC3339),
 	}
 
@@ -129,7 +129,7 @@ func (h *AnalyticsHandler) TrackError(c *gin.Context, errorType string, errorMes
 // getUserID 从请求中获取用户ID
 func (h *AnalyticsHandler) getUserID(c *gin.Context) string {
 	// 尝试从多个地方获取用户ID
-	
+
 	// 1. 从JWT token中获取
 	if userID, exists := c.Get("user_id"); exists {
 		if uid, ok := userID.(string); ok {
@@ -154,7 +154,7 @@ func (h *AnalyticsHandler) getUserID(c *gin.Context) string {
 // getDeviceID 从请求中获取设备ID
 func (h *AnalyticsHandler) getDeviceID(c *gin.Context) string {
 	// 尝试从多个地方获取设备ID
-	
+
 	// 1. 从请求头中获取
 	if deviceID := c.GetHeader("X-Device-ID"); deviceID != "" {
 		return deviceID

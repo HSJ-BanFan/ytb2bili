@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
+	"github.com/difyz9/ytb2bili/internal/core"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
