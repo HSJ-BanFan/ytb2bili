@@ -43,31 +43,47 @@ jobs:
       - name: Generate Test Summary
         id: test-summary
         run: |
-          # 提取单元测试结果
-          UNIT_PASS=$(grep -c "PASS:" test_result_unit.txt || echo "0")
-          UNIT_FAIL=$(grep -c "FAIL:" test_result_unit.txt || echo "0")
+          # 提取单元测试结果（确保返回数字）
+          UNIT_PASS=$(grep -c "^PASS:" test_result_unit.txt 2>/dev/null || echo "0")
+          UNIT_FAIL=$(grep -c "^FAIL:" test_result_unit.txt 2>/dev/null || echo "0")
 
-          # 提取集成测试结果
-          INT_PASS=$(grep -c "PASS:" test_result_integration.txt || echo "0")
-          INT_FAIL=$(grep -c "FAIL:" test_result_integration.txt || echo "0")
+          # 提取集成测试结果（确保返回数字）
+          INT_PASS=$(grep -c "^PASS:" test_result_integration.txt 2>/dev/null || echo "0")
+          INT_FAIL=$(grep -c "^FAIL:" test_result_integration.txt 2>/dev/null || echo "0")
 
-          # 计算覆盖率
-          UNIT_COVERAGE=$(go tool cover -func=coverage_unit.out | grep total | awk '{print $3}' || echo "0%")
-          INT_COVERAGE=$(go tool cover -func=coverage_integration.out | grep total | awk '{print $3}' || echo "0%")
+          # 计算覆盖率（移除 % 符号）
+          UNIT_COV_RAW=$(go tool cover -func=coverage_unit.out | grep total | awk '{print $3}' 2>/dev/null || echo "0%")
+          UNIT_COVERAGE="${UNIT_COV_RAW%\%}"
+
+          INT_COV_RAW=$(go tool cover -func=coverage_integration.out | grep total | awk '{print $3}' 2>/dev/null || echo "0%")
+          INT_COVERAGE="${INT_COV_RAW%\%}"
 
           # 合并覆盖率
           echo "mode: atomic" > coverage.out
-          grep -h "^.*:[0-9]*:.*" coverage_unit.out coverage_integration.out | sort -u >> coverage.out
-          TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' || echo "0%")
+          grep -h "^.*:[0-9]*:.*" coverage_unit.out coverage_integration.out 2>/dev/null | sort -u >> coverage.out || true
 
-          # 保存为环境变量
-          echo "unit_pass=$UNIT_PASS" >> $GITHUB_OUTPUT
-          echo "unit_fail=$UNIT_FAIL" >> $GITHUB_OUTPUT
-          echo "int_pass=$INT_PASS" >> $GITHUB_OUTPUT
-          echo "int_fail=$INT_FAIL" >> $GITHUB_OUTPUT
-          echo "unit_coverage=$UNIT_COVERAGE" >> $GITHUB_OUTPUT
-          echo "int_coverage=$INT_COVERAGE" >> $GITHUB_OUTPUT
-          echo "total_coverage=$TOTAL_COVERAGE" >> $GITHUB_OUTPUT
+          TOTAL_COV_RAW=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' 2>/dev/null || echo "0%")
+          TOTAL_COVERAGE="${TOTAL_COV_RAW%\%}"
+
+          # 验证所有变量都是非空数字
+          : "${UNIT_PASS:=0}"
+          : "${UNIT_FAIL:=0}"
+          : "${INT_PASS:=0}"
+          : "${INT_FAIL:=0}"
+          : "${UNIT_COVERAGE:=0}"
+          : "${INT_COVERAGE:=0}"
+          : "${TOTAL_COVERAGE:=0}"
+
+          # 保存为环境变量（确保格式正确）
+          {
+            echo "unit_pass=${UNIT_PASS}"
+            echo "unit_fail=${UNIT_FAIL}"
+            echo "int_pass=${INT_PASS}"
+            echo "int_fail=${INT_FAIL}"
+            echo "unit_coverage=${UNIT_COVERAGE}"
+            echo "int_coverage=${INT_COVERAGE}"
+            echo "total_coverage=${TOTAL_COVERAGE}"
+          } >> $GITHUB_OUTPUT
 
           # 输出到控制台
           echo "## 📊 Test Summary" >> $GITHUB_STEP_SUMMARY
@@ -75,15 +91,15 @@ jobs:
           echo "### Unit Tests" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Passed: $UNIT_PASS" >> $GITHUB_STEP_SUMMARY
           echo "- ❌ Failed: $UNIT_FAIL" >> $GITHUB_STEP_SUMMARY
-          echo "- 📈 Coverage: $UNIT_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Coverage: ${UNIT_COVERAGE}%" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Integration Tests" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Passed: $INT_PASS" >> $GITHUB_STEP_SUMMARY
           echo "- ❌ Failed: $INT_FAIL" >> $GITHUB_STEP_SUMMARY
-          echo "- 📈 Coverage: $INT_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Coverage: ${INT_COVERAGE}%" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Overall" >> $GITHUB_STEP_SUMMARY
-          echo "- 📈 Total Coverage: $TOTAL_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "- 📈 Total Coverage: ${TOTAL_COVERAGE}%" >> $GITHUB_STEP_SUMMARY
 
       - name: Generate HTML Coverage Report
         run: |
@@ -114,15 +130,15 @@ jobs:
 
             | 测试类型 | 通过 | 失败 | 覆盖率 |
             |---------|------|------|--------|
-            | 单元测试 | ${unitPass} | ${unitFail} | ${unitCoverage} |
-            | 集成测试 | ${intPass} | ${intFail} | ${intCoverage} |
-            | **总计** | **${parseInt(unitPass) + parseInt(intPass)}** | **${parseInt(unitFail) + parseInt(intFail)}** | **${totalCoverage}** |
+            | 单元测试 | ${unitPass} | ${unitFail} | ${unitCoverage}% |
+            | 集成测试 | ${intPass} | ${intFail} | ${intCoverage}% |
+            | **总计** | **${parseInt(unitPass) + parseInt(intPass)}** | **${parseInt(unitFail) + parseInt(intFail)}** | **${totalCoverage}%** |
 
             <details>
             <summary>📊 覆盖率详情</summary>
 
             \`\`\`
-            ${fs.readFileSync('coverage_full.txt', 'utf8')}
+            total: coverage: ${totalCoverage}% of statements
             \`\`\`
             </details>
 
