@@ -61,8 +61,9 @@ func (h *VideoHandler) SetCancelManager(cancelManager interface {
 }
 
 // RegisterRoutes 注册视频相关路由
-func (h *VideoHandler) RegisterRoutes(api *gin.RouterGroup) {
+func (h *VideoHandler) RegisterRoutes(api *gin.RouterGroup, authMiddleware *auth.AuthMiddleware) {
 	video := api.Group("/videos")
+	video.Use(authMiddleware.JWTAuth())
 	{
 		video.GET("", h.getVideoList)
 		video.GET("/:id", h.getVideoDetail)

@@ -154,7 +154,7 @@ func main() {
 
 	// 注册 API 路由
 	authHandler.RegisterRoutes(server, authMiddleware)
-	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
+	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"), authMiddleware)
 	subtitleHandler.RegisterRoutes(server, authMiddleware)
 	biliAccountHandler.RegisterRoutes(server, authMiddleware)
 	uploadHandler.RegisterRoutes(server, authMiddleware)
