@@ -7,9 +7,9 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 
+	"github.com/glebarez/sqlite" // Pure-Go SQLite driver (no CGO required)
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
