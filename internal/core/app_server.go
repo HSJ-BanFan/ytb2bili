@@ -49,8 +49,8 @@ func (s *AppServer) Init(db *gorm.DB) {
 	// 设置中间件
 	s.setupMiddleware()
 
-	// 设置静态文件
-	s.Engine.Static("/static", "./static")
+	// 设置静态文件服务 (Next.js 静态导出)
+	s.setupStaticFileServing()
 }
 
 // setupMiddleware 设置中间件
@@ -66,6 +66,57 @@ func (s *AppServer) setupMiddleware() {
 
 	// 🔐 4. HSTS 中间件 (严格传输安全)
 	s.setupHSTSMiddleware()
+}
+
+// setupStaticFileServing 设置静态文件服务 (支持 Next.js 静态导出)
+func (s *AppServer) setupStaticFileServing() {
+	// 静态资源目录
+	staticDir := "./static"
+
+	// 服务 Next.js 的 _next 静态资源
+	s.Engine.Static("/_next", staticDir+"/_next")
+
+	// 服务其他静态资源
+	s.Engine.StaticFile("/favicon.ico", staticDir+"/favicon.ico")
+
+	// 根路径返回 index.html
+	s.Engine.GET("/", func(c *gin.Context) {
+		c.File(staticDir + "/index.html")
+	})
+
+	// Next.js 页面路由 - 每个页面对应一个目录
+	pages := []string{
+		"/login",
+		"/dashboard",
+		"/bili-accounts",
+		"/extension",
+		"/membership",
+		"/schedule",
+		"/settings",
+		"/user-settings",
+	}
+
+	for _, page := range pages {
+		pagePath := page
+		s.Engine.GET(pagePath, func(c *gin.Context) {
+			c.File(staticDir + pagePath + "/index.html")
+		})
+		// 支持带斜杠的路径
+		s.Engine.GET(pagePath+"/", func(c *gin.Context) {
+			c.File(staticDir + pagePath + "/index.html")
+		})
+	}
+
+	// 404 页面
+	s.Engine.NoRoute(func(c *gin.Context) {
+		// 如果是 API 请求，返回 JSON 404
+		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
+			c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "API not found"})
+			return
+		}
+		// 否则返回 404 HTML 页面
+		c.File(staticDir + "/404.html")
+	})
 }
 
 // setupSecurityHeaders 设置通用安全响应头

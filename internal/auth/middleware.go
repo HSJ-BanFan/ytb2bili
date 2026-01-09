@@ -22,14 +22,22 @@ const (
 	ContextKeyClaims   = "claims"
 )
 
+// JWTServiceInterface JWT 服务接口（用于支持多种实现）
+type JWTServiceInterface interface {
+	ParseToken(tokenString string) (*UserClaims, error)
+	GenerateTokenPair(userID uint, username, tier, appID string) (*TokenPair, error)
+	GenerateAccessToken(userID uint, username, tier, appID string) (string, error)
+	GenerateRefreshToken(userID uint) (string, error)
+}
+
 // AuthMiddleware 认证中间件
 type AuthMiddleware struct {
 	db         *gorm.DB
-	jwtService *JWTService
+	jwtService JWTServiceInterface
 }
 
 // NewAuthMiddleware 创建认证中间件
-func NewAuthMiddleware(db *gorm.DB, jwtService *JWTService) *AuthMiddleware {
+func NewAuthMiddleware(db *gorm.DB, jwtService JWTServiceInterface) *AuthMiddleware {
 	return &AuthMiddleware{
 		db:         db,
 		jwtService: jwtService,

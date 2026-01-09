@@ -9,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWT 错误定义
 var (
 	ErrInvalidToken  = errors.New("无效的 token")
 	ErrExpiredToken  = errors.New("token 已过期")
@@ -43,12 +44,33 @@ type UserClaims struct {
 	jwt.RegisteredClaims
 }
 
-// JWTService JWT 服务
+// TokenPair Token 对
+type TokenPair struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	TokenType    string    `json:"token_type"`
+}
+
+// HashToken 计算 Token 哈希 (用于黑名单)
+func HashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
+
+// ===============================================
+// 注意：以下旧的 JWTService 实现已废弃
+// 请使用 goauth_adapter.go 中的 GoAuthJWTService
+// ===============================================
+
+// JWTService 旧版 JWT 服务（已废弃，保留用于向后兼容）
+// Deprecated: 请使用 NewGoAuthJWTService 代替
 type JWTService struct {
 	config JWTConfig
 }
 
-// NewJWTService 创建 JWT 服务
+// NewJWTService 创建 JWT 服务（已废弃）
+// Deprecated: 请使用 NewGoAuthJWTService 代替
 func NewJWTService(config JWTConfig) *JWTService {
 	return &JWTService{config: config}
 }
@@ -110,20 +132,6 @@ func (s *JWTService) ParseToken(tokenString string) (*UserClaims, error) {
 	}
 
 	return claims, nil
-}
-
-// HashToken 计算 Token 哈希 (用于黑名单)
-func HashToken(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])
-}
-
-// TokenPair Token 对
-type TokenPair struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	TokenType    string    `json:"token_type"`
 }
 
 // GenerateTokenPair 生成 Token 对

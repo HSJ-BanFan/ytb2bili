@@ -9,7 +9,6 @@ import (
 	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
-	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/gin-gonic/gin"
 )
@@ -18,16 +17,16 @@ import (
 type BiliAccountHandler struct {
 	BaseHandler
 	BiliAccountService *services.BiliAccountService
-	FeatureChecker     *membership.FeatureChecker
+	PermissionService  *services.PermissionService
 	AuditService       *audit.AuditService // 审计服务
 }
 
 // NewBiliAccountHandler 创建 B站账号管理 Handler
-func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, featureChecker *membership.FeatureChecker, auditService *audit.AuditService) *BiliAccountHandler {
+func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, permissionService *services.PermissionService, auditService *audit.AuditService) *BiliAccountHandler {
 	return &BiliAccountHandler{
 		BaseHandler:        BaseHandler{App: app},
 		BiliAccountService: biliAccountService,
-		FeatureChecker:     featureChecker,
+		PermissionService:  permissionService,
 		AuditService:       auditService,
 	}
 }

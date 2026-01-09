@@ -24,14 +24,14 @@ func GetBiliStore() *storage.LoginStore {
 // AuthHandler 认证处理器
 type AuthHandler struct {
 	db           *gorm.DB
-	jwtService   *JWTService
+	jwtService   JWTServiceInterface
 	middleware   *AuthMiddleware
 	emailService *services.EmailService
 	auditService *audit.AuditService // 审计服务
 }
 
 // NewAuthHandler 创建认证处理器
-func NewAuthHandler(db *gorm.DB, jwtService *JWTService, emailService *services.EmailService, auditService *audit.AuditService) *AuthHandler {
+func NewAuthHandler(db *gorm.DB, jwtService JWTServiceInterface, emailService *services.EmailService, auditService *audit.AuditService) *AuthHandler {
 	return &AuthHandler{
 		db:           db,
 		jwtService:   jwtService,
@@ -175,7 +175,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:           req.Email,
 		Password:        string(hashedPassword),
 		Status:          1,
-		MembershipTier:  "free",
+		MembershipTier:  "basic",
 		EmailVerified:   true, // 通过验证码注册，自动标记为已验证
 		EmailVerifiedAt: &now, // 记录验证时间
 	}

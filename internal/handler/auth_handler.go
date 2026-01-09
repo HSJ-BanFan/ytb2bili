@@ -17,7 +17,6 @@ import (
 	internalAuth "github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
-	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/internal/storage"
 
 	"github.com/gin-gonic/gin"
@@ -31,14 +30,12 @@ func currentTime() time.Time {
 
 type AuthHandler struct {
 	BaseHandler
-	FeatureChecker     *membership.FeatureChecker
 	BiliAccountService *services.BiliAccountService
 }
 
-func NewAuthHandler(app *core.AppServer, featureChecker *membership.FeatureChecker, biliAccountService *services.BiliAccountService) *AuthHandler {
+func NewAuthHandler(app *core.AppServer, biliAccountService *services.BiliAccountService) *AuthHandler {
 	return &AuthHandler{
 		BaseHandler:        BaseHandler{App: app},
-		FeatureChecker:     featureChecker,
 		BiliAccountService: biliAccountService,
 	}
 }

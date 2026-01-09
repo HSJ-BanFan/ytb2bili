@@ -14,7 +14,6 @@ import (
 	"github.com/difyz9/ytb2bili/internal/chain_task/manager"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
-	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/cos"
 	"github.com/difyz9/ytb2bili/pkg/prompts"
 	"github.com/google/generative-ai-go/genai"
@@ -103,21 +102,24 @@ func (g *GenerateMetadata) checkUserPermission() bool {
 
 	userID := strconv.FormatUint(uint64(savedVideo.UserID), 10)
 
-	// 创建会员存储和检查器
-	membershipStore := membership.NewDBMembershipStore(g.App.DB)
-	checker := membership.NewFeatureChecker(membershipStore)
+	// 使用 PermissionService 检查权限
+	permissionService := services.NewPermissionService(g.App.DB)
 
 	// 获取用户会员信息用于日志
-	userMembership, err := checker.GetUserMembership(context.Background(), userID)
+	userMembership, err := permissionService.GetUserMembership(context.Background(), userID)
 	if err == nil {
-		g.App.Logger.Infof("  │ 用户 %s (%s) - Gemini权限: %v",
-			userID, userMembership.GetEffectiveTier(), userMembership.GetConfig().Features.GeminiVideoAnalysis)
+		g.App.Logger.Infof("  │ 用户 %s (%s) - AI元数据权限检查",
+			userID, userMembership.GetEffectiveTier())
 	}
 
-	// 检查 Gemini 视频分析权限
-	result := checker.CanUseFeature(context.Background(), userID, "gemini_video_analysis")
-	if !result.Allowed {
-		g.App.Logger.Warnf("  │ 用户 %s 无 Gemini 权限: %s", userID, result.Reason)
+	// 检查 AI 元数据生成权限（使用 metadata_generation 作为 feature key）
+	canUse, reason, err := permissionService.CanUseFeature(context.Background(), userID, "metadata_generation")
+	if err != nil {
+		g.App.Logger.Warnf("  │ 检查权限失败: %v，默认允许", err)
+		return true
+	}
+	if !canUse {
+		g.App.Logger.Warnf("  │ 用户 %s 无 AI 元数据权限: %s", userID, reason)
 		return false
 	}
 

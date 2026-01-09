@@ -15,7 +15,6 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	applogger "github.com/difyz9/ytb2bili/internal/logger"
-	"github.com/difyz9/ytb2bili/internal/membership"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -46,7 +45,7 @@ type UploadScheduler struct {
 	CancelManager *TaskCancelManager
 
 	// 权限服务（可选注入）
-	PermissionService *membership.PermissionService
+	PermissionService *services.PermissionService
 }
 
 // NewUploadScheduler 创建上传调度器实例
