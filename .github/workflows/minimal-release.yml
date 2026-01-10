@@ -56,6 +56,7 @@ jobs:
         cp ytb2bili-windows-amd64.exe win64/
         cp config.toml win64/
         cp README.md win64/
+        cp -r static/ win64/
         cat > win64/start.bat << 'EOF'
         @echo off
         echo Starting YTB2BILI Server...
@@ -69,6 +70,7 @@ jobs:
         cp ytb2bili-linux-amd64 linux64/
         cp config.toml linux64/
         cp README.md linux64/
+        cp -r static/ linux64/
         cat > linux64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
@@ -83,6 +85,7 @@ jobs:
         cp ytb2bili-linux-arm64 linux-arm64/
         cp config.toml linux-arm64/
         cp README.md linux-arm64/
+        cp -r static/ linux-arm64/
         cat > linux-arm64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
@@ -97,6 +100,7 @@ jobs:
         cp ytb2bili-darwin-amd64 macos-intel/
         cp config.toml macos-intel/
         cp README.md macos-intel/
+        cp -r static/ macos-intel/
         cat > macos-intel/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
@@ -111,6 +115,7 @@ jobs:
         cp ytb2bili-darwin-arm64 macos-arm64/
         cp config.toml macos-arm64/
         cp README.md macos-arm64/
+        cp -r static/ macos-arm64/
         cat > macos-arm64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
