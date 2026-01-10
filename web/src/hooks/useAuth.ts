@@ -123,8 +123,13 @@ export function useAuth() {
 
       setUser(null);
       console.log('✅ 登出成功');
+
+      // 跳转到登录页面
+      window.location.href = '/login';
     } catch (error) {
       console.error('登出失败:', error);
+      // 即使失败也跳转到登录页面
+      window.location.href = '/login';
     }
   };
 

@@ -11,12 +11,17 @@ import type {
   UploadValidation,
   MembershipInfo,
   TierConfig,
+  TierFeatures,
+  TierLimits,
   QuotaInfo,
   AvailableFeatures,
   FeatureCheckResult,
   BoostPackStatus,
   PurchaseBoostPackRequest,
   PurchaseBoostPackResponse,
+  VipProduct,
+  CreatePaymentOrderRequest,
+  PaymentOrderResponse,
 } from "@/types";
 
 const API_BASE_URL =
@@ -345,44 +350,187 @@ export const subtitleApi = {
   },
 };
 
-// 会员相关 API
+// =====================================================
+// 许可证相关 API（新版，替代旧的 membershipApi）
+// =====================================================
+export const licenseApi = {
+  // 验证许可证（不需要登录）
+  verifyLicense: (licenseKey: string): Promise<ApiResponse<LicenseInfo>> => {
+    return api.post("/license/verify", { license_key: licenseKey });
+  },
+
+  // 激活许可证（需要登录）
+  activateLicense: (licenseKey: string): Promise<ApiResponse<{ tier: string; expires_at: string }>> => {
+    return api.post("/license/activate", { license_key: licenseKey });
+  },
+
+  // 获取当前会员状态（需要登录）
+  getStatus: (): Promise<ApiResponse<LicenseStatus>> => {
+    return api.get("/license/status");
+  },
+
+  // 获取许可证列表（需要登录）
+  getLicenseList: (): Promise<ApiResponse<LicenseActivation[]>> => {
+    return api.get("/license/list");
+  },
+};
+
+// 许可证信息类型
+export interface LicenseInfo {
+  license_key: string;
+  tier: string;
+  plan: string;
+  expires_at: string | null;
+  is_expired: boolean;
+  is_valid: boolean;
+}
+
+// 许可证状态类型
+export interface LicenseStatus {
+  tier: string;
+  tier_name?: string;
+  expires_at: string | null;
+  activation_count: number;
+  features?: TierFeatures;
+  limits?: TierLimits;
+}
+
+// 许可证激活记录类型
+export interface LicenseActivation {
+  id: number;
+  license_key: string;
+  tier: string;
+  plan: string;
+  expires_at: string | null;
+  activated_at: string;
+  is_active: boolean;
+}
+
+// =====================================================
+// 旧版会员 API（已废弃，保留用于向后兼容）
+// Deprecated: 请使用 licenseApi 代替
+// =====================================================
 export const membershipApi = {
-  // 获取会员信息
+  // @deprecated 使用 licenseApi.getStatus() 代替
   getMembershipInfo: (): Promise<ApiResponse<MembershipInfo>> => {
-    return api.get("/membership/info");
+    // 使用 license/status 端点
+    return api.get("/license/status").then((res: any) => {
+      // 转换响应格式
+      const tier = res.data?.tier || "basic";
+      return {
+        code: 0,
+        message: "success",
+        data: {
+          user_id: "",
+          tier: tier,
+          tier_name: tier === "basic" ? "基础版" : tier === "pro" ? "专业版" : "企业版",
+          expires_at: res.data?.expires_at,
+          days_remaining: 0,
+          is_expired: false,
+          daily_limit: 10,
+          batch_limit: 5,
+          priority: 0,
+        } as MembershipInfo,
+      };
+    }).catch(() => ({
+      code: 0,
+      message: "success",
+      data: {
+        user_id: "",
+        tier: "basic" as const,
+        tier_name: "基础版",
+        days_remaining: 0,
+        is_expired: false,
+        daily_limit: 10,
+        batch_limit: 5,
+        priority: 0,
+      } as MembershipInfo,
+    }));
   },
 
-  // 获取所有等级配置
+  // @deprecated 暂时返回空数组
   getAllTiers: (): Promise<ApiResponse<TierConfig[]>> => {
-    return api.get("/membership/tiers");
+    return Promise.resolve({ code: 0, message: "success", data: [] as TierConfig[] });
   },
 
-  // 获取配额信息
+  // @deprecated 暂时返回默认配额
   getQuotaInfo: (): Promise<ApiResponse<QuotaInfo>> => {
-    return api.get("/membership/quota");
+    return Promise.resolve({
+      code: 0,
+      message: "success",
+      data: {
+        daily_limit: 10,
+        daily_used: 0,
+        daily_remaining: 10,
+        boost_pack_remaining: 0,
+        total_remaining: 10,
+        is_unlimited: false,
+      } as QuotaInfo,
+    });
   },
 
-  // 获取可用功能列表
+  // @deprecated 暂时返回空
   getAvailableFeatures: (): Promise<ApiResponse<AvailableFeatures>> => {
-    return api.get("/membership/features");
+    return Promise.resolve({
+      code: 0,
+      message: "success",
+      data: { tier: "basic", features: [] } as AvailableFeatures
+    });
   },
 
-  // 检查功能是否可用
+  // @deprecated 暂时返回可用
   checkFeature: (feature: string): Promise<ApiResponse<FeatureCheckResult>> => {
-    return api.get(`/membership/features/${feature}/check`);
+    return Promise.resolve({
+      code: 0,
+      message: "success",
+      data: { feature, allowed: true, reason: "" } as FeatureCheckResult,
+    });
   },
 
-  // 获取加油包状态
+  // @deprecated 加油包功能已移除
   getBoostPackStatus: (): Promise<ApiResponse<BoostPackStatus>> => {
-    return api.get("/membership/boost-pack");
+    return Promise.resolve({
+      code: 0,
+      message: "success",
+      data: {
+        has_pack: false,
+        videos_remaining: 0,
+        days_remaining: 0
+      } as BoostPackStatus,
+    });
   },
 
-  // 购买加油包
+  // @deprecated 加油包功能已移除
   purchaseBoostPack: (
     data: PurchaseBoostPackRequest
   ): Promise<ApiResponse<PurchaseBoostPackResponse>> => {
-    return api.post("/membership/boost-pack/purchase", data);
+    return Promise.resolve({
+      code: -1,
+      message: "加油包功能已移除",
+      data: {} as PurchaseBoostPackResponse,
+    });
+  },
+};
+
+// 支付相关 API
+export const paymentApi = {
+  // 获取所有可用商品
+  getProducts: (): Promise<ApiResponse<VipProduct[]>> => {
+    return api.get("/payment/products");
+  },
+
+  // 获取单个商品
+  getProduct: (productId: string): Promise<ApiResponse<VipProduct>> => {
+    return api.get(`/payment/products/${productId}`);
+  },
+
+  // 创建支付订单
+  createOrder: (
+    data: CreatePaymentOrderRequest
+  ): Promise<ApiResponse<PaymentOrderResponse>> => {
+    return api.post("/payment/create-order", data);
   },
 };
 
 export default api;
+

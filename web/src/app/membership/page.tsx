@@ -1,32 +1,24 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { membershipApi } from '@/lib/api';
-import { MembershipCard, QuotaDisplay, BoostPackCard, UpgradeModal } from '@/components/membership';
+import { licenseApi } from '@/lib/api';
+import type { LicenseStatus, LicenseActivation } from '@/lib/api';
 import AppLayout from '@/components/layout/AppLayout';
 import { useAuth } from '@/hooks/useAuth';
-import type { MembershipInfo, TierConfig, AvailableFeatures } from '@/types';
-
-const FEATURE_NAMES: Record<string, string> = {
-  ai_translation: 'AI 字幕翻译',
-  translation_optimize: '翻译质量优化',
-  ai_title_generation: 'AI 标题生成',
-  gemini_video_analysis: 'Gemini 视频分析',
-  auto_upload: '自动上传',
-  priority_queue: '优先队列',
-  api_access: 'API 访问',
-  custom_template: '自定义模板',
-  data_export: '数据导出',
-  team_collaboration: '团队协作',
-};
+import MemberStatusCard from '@/components/membership/MemberStatusCard';
+import FeatureGrid from '@/components/membership/FeatureGrid';
+import TierComparisonTable from '@/components/membership/TierComparisonTable';
 
 export default function MembershipPage() {
   const { user, loading: authLoading, handleLogout } = useAuth();
-  const [membership, setMembership] = useState<MembershipInfo | null>(null);
-  const [tiers, setTiers] = useState<TierConfig[]>([]);
-  const [features, setFeatures] = useState<AvailableFeatures | null>(null);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [status, setStatus] = useState<LicenseStatus | null>(null);
+  const [licenseList, setLicenseList] = useState<LicenseActivation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // 激活许可证状态
+  const [licenseKey, setLicenseKey] = useState('');
+  const [activating, setActivating] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -36,177 +28,213 @@ export default function MembershipPage() {
 
   const fetchData = async () => {
     try {
-      setDataLoading(true);
-      const [membershipRes, tiersRes, featuresRes] = await Promise.all([
-        membershipApi.getMembershipInfo(),
-        membershipApi.getAllTiers(),
-        membershipApi.getAvailableFeatures(),
+      setLoading(true);
+      const [statusRes, listRes] = await Promise.all([
+        licenseApi.getStatus(),
+        licenseApi.getLicenseList(),
       ]);
 
-      if (membershipRes.code === 0) setMembership(membershipRes.data);
-      if (tiersRes.code === 0) setTiers(tiersRes.data);
-      if (featuresRes.code === 0) setFeatures(featuresRes.data);
+      if (statusRes.code === 0) setStatus(statusRes.data);
+      if (listRes.code === 0) setLicenseList(listRes.data || []);
     } catch (err) {
       console.error('获取会员信息失败:', err);
     } finally {
-      setDataLoading(false);
+      setLoading(false);
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!licenseKey.trim()) return;
+
+    try {
+      setActivating(true);
+      setMessage(null);
+      const res = await licenseApi.activateLicense(licenseKey);
+
+      if (res.code === 0) {
+        setMessage({ type: 'success', text: `激活成功！当前等级: ${res.data.tier}，有效期至: ${res.data.expires_at}` });
+        setLicenseKey('');
+        fetchData(); // 刷新数据
+      } else {
+        setMessage({ type: 'error', text: res.message || '激活失败' });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || '激活失败' });
+    } finally {
+      setActivating(false);
+    }
+  };
+
+  const getTierIcon = (tier: string) => {
+    switch (tier) {
+      case 'basic': return '⭐';
+      case 'pro': return '💎';
+      case 'enterprise': return '👑';
+      default: return '📦';
+    }
+  };
+
+  const getTierName = (tier: string) => {
+    switch (tier) {
+      case 'basic': return '基础版';
+      case 'pro': return '专业版';
+      case 'enterprise': return '企业版';
+      default: return tier;
     }
   };
 
   return (
     <AppLayout userName={user?.name} onLogout={handleLogout}>
-      {(authLoading || dataLoading) ? (
-        <div className="space-y-6">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="h-48 bg-gray-200 rounded-lg"></div>
-              <div className="h-48 bg-gray-200 rounded-lg"></div>
-            </div>
-          </div>
+      {(authLoading || loading) ? (
+        <div className="space-y-6 animate-pulse">
+          <div className="h-48 bg-gray-200 rounded-2xl"></div>
+          <div className="h-64 bg-gray-200 rounded-2xl"></div>
+          <div className="h-96 bg-gray-200 rounded-2xl"></div>
         </div>
       ) : (
-      <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">会员中心</h1>
-        {membership?.tier === 'free' && (
-          <button
-            onClick={() => setShowUpgrade(true)}
-            className="px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all"
-          >
-            升级会员
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 左侧：会员信息和配额 */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* 会员状态 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">会员状态</h2>
-            {membership && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-2xl mb-1">
-                    {membership.tier === 'free' ? '🆓' : 
-                     membership.tier === 'basic' ? '⭐' : 
-                     membership.tier === 'pro' ? '💎' : '👑'}
-                  </div>
-                  <div className="text-sm text-gray-500">当前等级</div>
-                  <div className="font-semibold text-gray-900">{membership.tier_name}</div>
-                </div>
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-2xl mb-1">📅</div>
-                  <div className="text-sm text-gray-500">剩余天数</div>
-                  <div className="font-semibold text-gray-900">
-                    {membership.days_remaining === -1 ? '永久' : `${membership.days_remaining} 天`}
-                  </div>
-                </div>
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-2xl mb-1">🎬</div>
-                  <div className="text-sm text-gray-500">每日配额</div>
-                  <div className="font-semibold text-gray-900">
-                    {membership.daily_limit === -1 ? '无限' : membership.daily_limit}
-                  </div>
-                </div>
-                <div className="text-center p-4 bg-gray-50 rounded-lg">
-                  <div className="text-2xl mb-1">📦</div>
-                  <div className="text-sm text-gray-500">批量限制</div>
-                  <div className="font-semibold text-gray-900">{membership.batch_limit}</div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 可用功能 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">可用功能</h2>
-            {features && (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {Object.entries(FEATURE_NAMES).map(([key, name]) => {
-                  const isEnabled = features.features.includes(key);
-                  return (
-                    <div
-                      key={key}
-                      className={`flex items-center gap-2 p-3 rounded-lg ${
-                        isEnabled ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-400'
-                      }`}
-                    >
-                      {isEnabled ? (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : (
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                        </svg>
-                      )}
-                      <span className="text-sm">{name}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* 等级对比 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">等级对比</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4">等级</th>
-                    <th className="text-center py-3 px-4">每日配额</th>
-                    <th className="text-center py-3 px-4">批量限制</th>
-                    <th className="text-center py-3 px-4">优先级</th>
-                    <th className="text-center py-3 px-4">价格</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tiers.map((tier) => (
-                    <tr 
-                      key={tier.tier} 
-                      className={`border-b ${tier.tier === membership?.tier ? 'bg-blue-50' : ''}`}
-                    >
-                      <td className="py-3 px-4 font-medium">
-                        {tier.tier === 'free' ? '🆓' : 
-                         tier.tier === 'basic' ? '⭐' : 
-                         tier.tier === 'pro' ? '💎' : '👑'} {tier.name}
-                        {tier.tier === membership?.tier && (
-                          <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">当前</span>
-                        )}
-                      </td>
-                      <td className="text-center py-3 px-4">
-                        {tier.daily_limit === -1 ? '无限' : tier.daily_limit}
-                      </td>
-                      <td className="text-center py-3 px-4">{tier.batch_limit}</td>
-                      <td className="text-center py-3 px-4">{tier.priority}</td>
-                      <td className="text-center py-3 px-4">
-                        {tier.price ? `¥${tier.price}/月` : '免费'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="space-y-8">
+          {/* 页面标题 */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">会员中心</h1>
+              <p className="text-gray-600 mt-1">管理您的会员等级和权益</p>
             </div>
           </div>
-        </div>
 
-        {/* 右侧：配额和加油包 */}
-        <div className="space-y-6">
-          <QuotaDisplay />
-          <BoostPackCard onPurchaseSuccess={fetchData} />
-        </div>
-      </div>
+          {/* 主要内容网格 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* 左列 */}
+            <div className="space-y-8">
+              {/* 会员状态卡片 */}
+              {status && <MemberStatusCard status={status} />}
 
-      <UpgradeModal 
-        isOpen={showUpgrade} 
-        onClose={() => setShowUpgrade(false)}
-        currentTier={membership?.tier}
-      />
-      </div>
+              {/* 激活许可证 */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
+                <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                  <span className="text-2xl">🔑</span>
+                  激活新许可证
+                </h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      许可证密钥
+                    </label>
+                    <input
+                      type="text"
+                      value={licenseKey}
+                      onChange={(e) => setLicenseKey(e.target.value)}
+                      placeholder="请输入您的许可证密钥..."
+                      className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                    />
+                  </div>
+
+                  {message && (
+                    <div
+                      className={`p-4 rounded-xl text-sm ${
+                        message.type === 'success'
+                          ? 'bg-green-50 text-green-700 border border-green-200'
+                          : 'bg-red-50 text-red-700 border border-red-200'
+                      }`}
+                    >
+                      {message.text}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleActivate}
+                    disabled={activating || !licenseKey.trim()}
+                    className={`w-full py-3 rounded-xl text-white font-medium transition-all ${
+                      activating || !licenseKey.trim()
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+                    }`}
+                  >
+                    {activating ? '激活中...' : '立即激活'}
+                  </button>
+
+                  <p className="text-xs text-gray-500 text-center">
+                    激活后，您的会员时长将会相应增加
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* 右列 */}
+            <div className="space-y-8">
+              {/* 功能网格 */}
+              {status && <FeatureGrid status={status} />}
+
+              {/* 激活记录 */}
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <span className="text-xl">📋</span>
+                    激活记录
+                  </h3>
+                </div>
+
+                {licenseList.length === 0 ? (
+                  <div className="p-8 text-center text-gray-500">
+                    <div className="text-4xl mb-2">📭</div>
+                    <p>暂无激活记录</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600 font-medium">
+                        <tr>
+                          <th className="px-6 py-3 text-left">许可证密钥</th>
+                          <th className="px-6 py-3 text-left">等级</th>
+                          <th className="px-6 py-3 text-left">计划</th>
+                          <th className="px-6 py-3 text-left">激活时间</th>
+                          <th className="px-6 py-3 text-left">状态</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {licenseList.map((item) => (
+                          <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4 font-mono text-gray-600 text-xs">
+                              {item.license_key}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <span>{getTierIcon(item.tier)}</span>
+                                <span className="text-gray-700">
+                                  {getTierName(item.tier)}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-gray-600">{item.plan}</td>
+                            <td className="px-6 py-4 text-gray-600">
+                              {new Date(item.activated_at).toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  item.is_active
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-gray-100 text-gray-800'
+                                }`}
+                              >
+                                {item.is_active ? '✅ 已生效' : '❌ 已失效'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 等级对比表 - 全宽 */}
+          <div className="pt-4">
+            {status && <TierComparisonTable currentTier={status.tier} />}
+          </div>
+        </div>
       )}
     </AppLayout>
   );

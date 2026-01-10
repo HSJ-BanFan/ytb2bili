@@ -233,7 +233,7 @@ func (s *AppServer) setupCSPMiddleware() {
 		// 脚本源
 		scriptSrc := s.Config.Security.CSPScriptSrc
 		if scriptSrc == "" {
-			scriptSrc = "'self'"
+			scriptSrc = "'self' 'unsafe-inline' 'unsafe-eval'" // Next.js 需要 unsafe-inline (hydration) 和 unsafe-eval (dev)
 		}
 		cspParts = append(cspParts, fmt.Sprintf("script-src %s", scriptSrc))
 

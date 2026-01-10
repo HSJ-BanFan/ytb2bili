@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown, Sparkles } from 'lucide-react';
-import { MembershipCard, QuotaDisplay, UpgradeModal } from '@/components/membership';
+import { UpgradeModal } from '@/components/membership';
 import { useJWTAuth } from '@/hooks/useJWTAuth';
 
 interface AppLayoutProps {
@@ -33,11 +33,6 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
             </div>
 
             <div className="flex items-center space-x-4">
-              <div className="flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
-                <span className="text-xs text-gray-500">配额</span>
-                <QuotaDisplay compact />
-              </div>
-
               <div className="flex items-center space-x-2 text-sm text-gray-600">
                 <User className="w-4 h-4" />
                 <span>{displayName}</span>
@@ -104,9 +99,7 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                 </li>
               </ul>
             </nav>
-            <div className="mt-4">
-              <MembershipCard onUpgradeClick={() => setShowUpgradeModal(true)} />
-            </div>
+            {/* 暂时隐藏侧边栏的 MembershipCard，等待新版组件 */}
           </div>
           <div className="flex-1">{children}</div>
         </div>

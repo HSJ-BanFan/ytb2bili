@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/difyz9/ytb2bili/internal/core/types"
 	db_migration "github.com/difyz9/ytb2bili/internal/db"
 	"github.com/difyz9/ytb2bili/pkg/crypto"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -24,6 +25,8 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.UserPreference{},    // 用户偏好设置
 		&model.EmailVerification{}, // 邮箱验证码
 		&model.AuditLog{},          // 审计日志
+		&types.LicenseActivation{}, // 许可证激活记录
+		&types.UserMembership{},    // 用户会员状态
 	); err != nil {
 		return err
 	}

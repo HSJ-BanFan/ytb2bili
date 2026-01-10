@@ -5,14 +5,12 @@ import { membershipApi } from '@/lib/api';
 import type { MembershipInfo, QuotaInfo, TIER_COLORS, TIER_ICONS } from '@/types';
 
 const TIER_COLORS_MAP: Record<string, { bg: string; text: string; border: string }> = {
-  free: { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-300' },
   basic: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-300' },
   pro: { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-300' },
   enterprise: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-300' },
 };
 
 const TIER_ICONS_MAP: Record<string, string> = {
-  free: '🆓',
   basic: '⭐',
   pro: '💎',
   enterprise: '👑',
@@ -71,8 +69,8 @@ export default function MembershipCard({ onUpgradeClick }: MembershipCardProps) 
     );
   }
 
-  const tierColors = TIER_COLORS_MAP[membership.tier] || TIER_COLORS_MAP.free;
-  const tierIcon = TIER_ICONS_MAP[membership.tier] || '🆓';
+  const tierColors = TIER_COLORS_MAP[membership.tier] || TIER_COLORS_MAP.basic;
+  const tierIcon = TIER_ICONS_MAP[membership.tier] || '⭐';
 
   return (
     <div className={`bg-white rounded-lg shadow overflow-hidden border-l-4 ${tierColors.border}`}>
@@ -92,7 +90,7 @@ export default function MembershipCard({ onUpgradeClick }: MembershipCardProps) 
               )}
             </div>
           </div>
-          {membership.tier === 'free' && onUpgradeClick && (
+          {membership.tier === 'basic' && onUpgradeClick && (
             <button
               onClick={onUpgradeClick}
               className="px-3 py-1 text-sm bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full hover:from-purple-600 hover:to-pink-600 transition-all"

@@ -119,6 +119,8 @@ data/
 *.out
 coverage.html
 coverage/
+coverage_*
+pkgs.txt
 
 # ============================================
 # Docker

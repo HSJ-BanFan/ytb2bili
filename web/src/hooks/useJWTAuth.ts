@@ -65,9 +65,10 @@ export function useJWTAuth() {
       console.error("登出请求失败:", e);
     } finally {
       clearAuth();
-      router.push("/login");
+      // 使用 window.location 强制跳转，确保页面完全刷新
+      window.location.href = "/login";
     }
-  }, [clearAuth, router]);
+  }, [clearAuth]);
 
   // 刷新 Token
   const refreshToken = useCallback(async () => {

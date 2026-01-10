@@ -25,7 +25,7 @@ const PRODUCT_CONFIG: Record<string, { icon: string; color: string; features: st
   },
 };
 
-export default function UpgradeModal({ isOpen, onClose, currentTier = 'free' }: UpgradeModalProps) {
+export default function UpgradeModal({ isOpen, onClose, currentTier = 'basic' }: UpgradeModalProps) {
   const [products, setProducts] = useState<VipProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export default function UpgradeModal({ isOpen, onClose, currentTier = 'free' }: 
         setPaymentQR({
           isOpen: true,
           payUrl: res.data.pay_url || res.data.qr_code || '',
-          orderId: res.data.order_id || '',
+          orderId: res.data.order_no || '',  // 后端返回的是 order_no
           amount: product.price,
           productName: product.name,
         });
@@ -169,8 +169,8 @@ export default function UpgradeModal({ isOpen, onClose, currentTier = 'free' }: 
             <div className="inline-flex space-x-4">
               <label
                 className={`cursor-pointer border rounded-lg px-4 py-2 flex items-center space-x-2 transition-all ${payWay === 'wechat'
-                    ? 'border-green-500 bg-green-50 text-green-700 ring-1 ring-green-500'
-                    : 'border-gray-200 hover:border-green-300'
+                  ? 'border-green-500 bg-green-50 text-green-700 ring-1 ring-green-500'
+                  : 'border-gray-200 hover:border-green-300'
                   }`}
                 onClick={() => setPayWay('wechat')}
               >
@@ -179,8 +179,8 @@ export default function UpgradeModal({ isOpen, onClose, currentTier = 'free' }: 
               </label>
               <label
                 className={`cursor-pointer border rounded-lg px-4 py-2 flex items-center space-x-2 transition-all ${payWay === 'alipay'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
-                    : 'border-gray-200 hover:border-blue-300'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700 ring-1 ring-blue-500'
+                  : 'border-gray-200 hover:border-blue-300'
                   }`}
                 onClick={() => setPayWay('alipay')}
               >

@@ -116,7 +116,7 @@ yt_dlp_path = ""
 
   # CSP 策略配置
   # ⚠️ 注意：不要使用 'unsafe-inline' 和 'unsafe-eval'，会大幅降低安全性
-  csp_script_src = "'self'"        # 脚本源：'self' 表示仅允许同源
+  csp_script_src = "'self' 'unsafe-inline' 'unsafe-eval'" # 脚本源
                                    # 如需 CDN: "'self' https://cdn.example.com"
   csp_style_src = "'self' 'unsafe-inline'"  # 样式源：允许内联样式（某些 UI 框架需要）
 

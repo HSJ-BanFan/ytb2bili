@@ -13,8 +13,8 @@ var staticFiles embed.FS
 
 // GetStaticFS 返回嵌入的静态文件系统
 func GetStaticFS() fs.FS {
-	// 返回 bili-up-web/out 子目录（Next.js 静态导出目录）
-	sub, err := fs.Sub(staticFiles, "bili-up-web/out")
+	// 返回 bili-up-web 子目录
+	sub, err := fs.Sub(staticFiles, "bili-up-web")
 	if err != nil {
 		panic("failed to create sub filesystem: " + err.Error())
 	}

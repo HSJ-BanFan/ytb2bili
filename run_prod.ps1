@@ -1,6 +1,12 @@
 # run_prod.ps1 - 生产环境验证启动脚本
 # 此脚本用于通过 Week 2 安全加固的启动检查
 
+# 修复中文乱码：设置控制台代码页为 UTF-8
+chcp 65001 | Out-Null
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+
 # === 1. 核心安全凭证 (满足长度要求 >= 32字节) ===
 $env:JWT_SECRET = "12345678901234567890123456789012"      # 模拟32字节密钥
 $env:SESSION_SECRET = "12345678901234567890123456789012"  # 模拟32字节密钥
@@ -24,4 +30,4 @@ $env:PERMISSIONS_POLICY_ENABLED = "true"
 Write-Host "🚀 正在以生产模式启动 ytb2bili..." -ForegroundColor Cyan
 Write-Host "🔑 已注入临时安全凭证和 CORS 配置" -ForegroundColor Gray
 Write-Host "--------------------------------"
-.\ytb2bili.exe
+.\bili-up.exe

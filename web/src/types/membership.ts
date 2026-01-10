@@ -1,13 +1,34 @@
 // 会员等级
-export type MembershipTier = "free" | "basic" | "pro" | "enterprise";
+export type MembershipTier = "basic" | "pro" | "enterprise";
 
-// 会员等级配置
+// 会员功能特性
+export interface TierFeatures {
+  auto_upload: boolean;
+  subtitle_translation: boolean;
+  metadata_generation: boolean;
+  custom_templates: boolean;
+  priority_support: boolean;
+}
+
+// 会员限制
+export interface TierLimits {
+  max_concurrent_tasks: number;
+  daily_upload_limit: number; // 0 = 无限制
+  max_video_duration: number; // 0 = 无限制
+  storage_limit: number; // MB, 0 = 无限制
+}
+
+// 会员等级配置 (Backend)
 export interface TierConfig {
   tier: MembershipTier;
   name: string;
-  daily_limit: number;
-  batch_limit: number;
-  priority: number;
+  features: TierFeatures;
+  limits: TierLimits;
+
+  // 以前的字段 (可选保留兼容)
+  daily_limit?: number;
+  batch_limit?: number;
+  priority?: number;
   price?: number;
   description?: string;
 }
@@ -102,7 +123,6 @@ export const TIER_COLORS: Record<
   MembershipTier,
   { bg: string; text: string; border: string }
 > = {
-  free: { bg: "bg-gray-100", text: "text-gray-700", border: "border-gray-300" },
   basic: {
     bg: "bg-blue-100",
     text: "text-blue-700",
@@ -122,8 +142,36 @@ export const TIER_COLORS: Record<
 
 // 等级图标
 export const TIER_ICONS: Record<MembershipTier, string> = {
-  free: "🆓",
   basic: "⭐",
   pro: "💎",
   enterprise: "👑",
 };
+
+// VIP 商品（来自 pay-unify）
+export interface VipProduct {
+  product_id: string;
+  name: string;
+  description: string;
+  type: string;
+  price: number;
+  original_price: number;
+  vip_days: number;
+  icon: string;
+  status: string;
+}
+
+// 支付订单创建请求
+export interface CreatePaymentOrderRequest {
+  product_id: string;
+  pay_way: "wechat" | "alipay";
+}
+
+// 支付订单响应
+export interface PaymentOrderResponse {
+  order_no: string;
+  order_id: string; // 订单ID（用于轮询状态）
+  pay_url: string; // 支付URL或跳转链接
+  qr_code?: string; // 二维码URL（可选）
+  amount: number;
+  pay_way: string;
+}
