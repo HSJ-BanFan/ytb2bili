@@ -20,6 +20,10 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.ToolAIConfig{},
 		&model.ToolPreference{},
 		&model.AuditLog{},
+		&model.SourceChannel{},
+		&model.StrategyRule{},
+		&model.PublishFingerprint{},
+		&model.SystemGuardrail{},
 	); err != nil {
 		return err
 	}
