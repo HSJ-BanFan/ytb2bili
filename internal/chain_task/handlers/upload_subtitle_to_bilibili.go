@@ -13,7 +13,6 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/storage"
 	"github.com/difyz9/ytb2bili/pkg/cos"
-	"github.com/difyz9/ytb2bili/pkg/store/model"
 )
 
 type UploadSubtitleToBilibili struct {
@@ -44,44 +43,24 @@ func (t *UploadSubtitleToBilibili) Execute(context map[string]interface{}) bool 
 	// 1. 检查是否有BVID（视频已上传成功）
 	bvid, exists := context["bili_bvid"].(string)
 
-	// 2. 获取视频信息（为了获取 UserID 和 BVID）
-	var userID uint
+	// 获取视频信息和已上传的 BVID
 	savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
-	if err == nil {
-		userID = savedVideo.UserID
-		// 如果上下文没有 BVID，使用数据库中的
-		if (!exists || bvid == "") && savedVideo.BiliBVID != "" {
-			bvid = savedVideo.BiliBVID
-		}
+	if err == nil && (!exists || bvid == "") {
+		bvid = savedVideo.BiliBVID
 	}
 
 	if bvid == "" {
 		t.App.Logger.Warn("⚠️  没有找到BVID，跳过字幕上传")
-		return true // 不算失败，只是跳过
+		return true
 	}
 
 	t.App.Logger.Infof("📺 视频BVID: %s", bvid)
 
-	// 3. 获取登录信息（使用用户绑定的账号）
-	var loginInfo *bilibili.LoginInfo
-	if t.BiliAccountService != nil && userID > 0 {
-		var account *model.UserBiliAccount
-		loginInfo, account, err = t.BiliAccountService.GetLoginInfoForUser(userID)
-		if err == nil {
-			t.App.Logger.Infof("✓ 使用用户 %d 的 Bilibili 账号: %s", userID, account.BiliName)
-		} else {
-			t.App.Logger.Warnf("⚠️ 获取用户 %d 的 Bilibili 账号失败: %v，尝试使用全局账号", userID, err)
-		}
-	}
-
-	// 如果没有获取到用户账号，或者获取失败，尝试回退到旧逻辑（全局/默认账号）
-	if loginInfo == nil {
-		loginInfo, err = t.getLoginInfo()
-		if err != nil {
-			t.App.Logger.Errorf("❌ 没有有效的 Bilibili 登录信息，无法上传字幕: %v", err)
-			context["error"] = "未登录 Bilibili"
-			return false
-		}
+	loginInfo, err := t.getLoginInfo()
+	if err != nil {
+		t.App.Logger.Errorf("❌ 没有有效的 Bilibili 登录信息，无法上传字幕: %v", err)
+		context["error"] = "未登录 Bilibili"
+		return false
 	}
 
 	// 3. 查找字幕文件

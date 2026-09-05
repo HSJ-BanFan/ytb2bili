@@ -88,14 +88,7 @@ const getApiBaseUrl = () => {
   return 'http://localhost:8096';
 };
 
-// 获取认证头
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('jwt_token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-  };
-};
+const getRequestHeaders = () => ({ 'Content-Type': 'application/json' });
 
 export default function AIModelSettings() {
   // 状态
@@ -150,7 +143,7 @@ export default function AIModelSettings() {
     try {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {
@@ -166,7 +159,7 @@ export default function AIModelSettings() {
     try {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible/providers`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {
@@ -182,7 +175,7 @@ export default function AIModelSettings() {
     try {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/ai-services/status`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {
@@ -198,7 +191,7 @@ export default function AIModelSettings() {
     try {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {
@@ -236,7 +229,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify(updateData),
       });
       
@@ -286,7 +279,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/openai-compatible/test`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify(testData),
       });
       
@@ -336,7 +329,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/ai-services/primary`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify({ provider }),
       });
       
@@ -388,7 +381,7 @@ export default function AIModelSettings() {
 
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify(updateData),
       });
       
@@ -422,7 +415,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify({
           api_keys: [], // 发送空数组来清空
           clear_api_keys: true, // 明确标记要清空
@@ -453,7 +446,7 @@ export default function AIModelSettings() {
     try {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/models`, {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data?.models) {
@@ -477,7 +470,7 @@ export default function AIModelSettings() {
       const apiBaseUrl = getApiBaseUrl();
       const response = await fetch(`${apiBaseUrl}/api/v1/config/gemini/validate`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await response.json();
       if (data.code === 200 && data.data) {

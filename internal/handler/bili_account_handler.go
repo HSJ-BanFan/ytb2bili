@@ -6,9 +6,9 @@ import (
 	"strconv"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
-	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
+	"github.com/difyz9/ytb2bili/internal/storage"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/gin-gonic/gin"
 )
@@ -30,32 +30,22 @@ func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.Bil
 }
 
 // RegisterRoutes 注册路由
-func (h *BiliAccountHandler) RegisterRoutes(server *core.AppServer, authMiddleware *auth.AuthMiddleware) {
-	api := server.Engine.Group("/api/v1")
-
-	// B站账号管理（需要登录）
-	biliAccount := api.Group("/bili-accounts")
-	biliAccount.Use(authMiddleware.JWTAuth())
-	{
-		biliAccount.GET("", h.listAccounts)                     // 获取用户的所有B站账号
-		biliAccount.POST("/bind", h.bindAccount)                // 绑定新账号（传入 login_info）
-		biliAccount.POST("/bind-from-qrcode", h.bindFromQRCode) // 从扫码结果绑定
-		biliAccount.DELETE("/:id", h.unbindAccount)             // 解绑账号
-		biliAccount.PUT("/:id/primary", h.setPrimary)           // 设置主账号
-		biliAccount.PUT("/:id/enable", h.enableAccount)
-		biliAccount.PUT("/:id/disable", h.disableAccount)
-	}
+// RegisterRoutes 注册公开的 B站账号管理路由
+func (h *BiliAccountHandler) RegisterRoutes(server *core.AppServer) {
+	api := server.Engine.Group("/api/v1/bili-accounts")
+	api.GET("", h.listAccounts)
+	api.POST("/bind", h.bindAccount)
+	api.POST("/bind-from-qrcode", h.bindFromQRCode)
+	api.DELETE("/:id", h.unbindAccount)
+	api.PUT("/:id/primary", h.setPrimary)
+	api.PUT("/:id/enable", h.enableAccount)
+	api.PUT("/:id/disable", h.disableAccount)
 }
 
-// listAccounts 获取用户的所有B站账号
+// listAccounts 获取全局B站账号
 func (h *BiliAccountHandler) listAccounts(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
-	accounts, err := h.BiliAccountService.GetUserAccounts(userID)
+	accounts, err := h.BiliAccountService.GetAccounts()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "获取账号列表失败"})
 		return
@@ -93,11 +83,6 @@ type BindAccountRequest struct {
 
 // bindAccount 绑定B站账号
 func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	var req BindAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -105,11 +90,10 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 		return
 	}
 
-	// 所有用户都可以绑定多个账号，多账号上传限制在上传环节检查
-	account, err := h.BiliAccountService.BindAccount(userID, req.LoginInfo, req.IsPrimary)
+	account, err := h.BiliAccountService.BindAccount(req.LoginInfo, req.IsPrimary)
 	if err != nil {
 		h.AuditService.LogFailure(
-			userID, "",
+			0, "",
 			audit.ActionBindBiliAccount,
 			audit.ResourceBiliAccount,
 			fmt.Sprintf("%d", req.LoginInfo.TokenInfo.Mid),
@@ -122,7 +106,7 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 	}
 
 	h.AuditService.LogSuccess(
-		userID, "",
+		0, "",
 		audit.ActionBindBiliAccount,
 		audit.ResourceBiliAccount,
 		fmt.Sprintf("%d", account.BiliMid),
@@ -145,16 +129,11 @@ func (h *BiliAccountHandler) bindAccount(c *gin.Context) {
 	})
 }
 
-// bindFromQRCode 从B站扫码结果绑定账号（用户登录后扫码绑定）
+// bindFromQRCode 从B站扫码结果绑定账号
 func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	// 从全局 BiliStore 获取扫码登录信息
-	store := auth.GetBiliStore()
+	store := storage.GetDefaultStore()
 	if store == nil || !store.IsValid() {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
@@ -173,15 +152,13 @@ func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
 		return
 	}
 
-	// 绑定账号到当前用户
-	// 如果用户没有其他账号，设为主账号
-	existingAccounts, _ := h.BiliAccountService.GetUserAccounts(userID)
+	// 第一个账号自动设为主账号
+	existingAccounts, _ := h.BiliAccountService.GetAccounts()
 	isPrimary := len(existingAccounts) == 0
-
-	account, err := h.BiliAccountService.BindAccount(userID, loginInfo, isPrimary)
+	account, err := h.BiliAccountService.BindAccount(loginInfo, isPrimary)
 	if err != nil {
 		h.AuditService.LogFailure(
-			userID, "",
+			0, "",
 			audit.ActionBindBiliAccount,
 			audit.ResourceBiliAccount,
 			fmt.Sprintf("%d", loginInfo.TokenInfo.Mid),
@@ -194,7 +171,7 @@ func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
 	}
 
 	h.AuditService.LogSuccess(
-		userID, "",
+		0, "",
 		audit.ActionBindBiliAccount,
 		audit.ResourceBiliAccount,
 		fmt.Sprintf("%d", account.BiliMid),
@@ -219,11 +196,6 @@ func (h *BiliAccountHandler) bindFromQRCode(c *gin.Context) {
 
 // unbindAccount 解绑B站账号
 func (h *BiliAccountHandler) unbindAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	accountID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -231,9 +203,9 @@ func (h *BiliAccountHandler) unbindAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.UnbindAccount(userID, uint(accountID)); err != nil {
+	if err := h.BiliAccountService.UnbindAccount(uint(accountID)); err != nil {
 		h.AuditService.LogFailure(
-			userID, "",
+			0, "",
 			audit.ActionUnbindBiliAccount,
 			audit.ResourceBiliAccount,
 			c.Param("id"),
@@ -246,7 +218,7 @@ func (h *BiliAccountHandler) unbindAccount(c *gin.Context) {
 	}
 
 	h.AuditService.LogSuccess(
-		userID, "",
+		0, "",
 		audit.ActionUnbindBiliAccount,
 		audit.ResourceBiliAccount,
 		c.Param("id"),
@@ -260,11 +232,6 @@ func (h *BiliAccountHandler) unbindAccount(c *gin.Context) {
 
 // setPrimary 设置主账号
 func (h *BiliAccountHandler) setPrimary(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	accountID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -272,7 +239,7 @@ func (h *BiliAccountHandler) setPrimary(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.SetPrimaryAccount(userID, uint(accountID)); err != nil {
+	if err := h.BiliAccountService.SetPrimaryAccount(uint(accountID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "设置失败: " + err.Error()})
 		return
 	}
@@ -282,11 +249,6 @@ func (h *BiliAccountHandler) setPrimary(c *gin.Context) {
 
 // enableAccount 启用账号
 func (h *BiliAccountHandler) enableAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	accountID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -294,14 +256,7 @@ func (h *BiliAccountHandler) enableAccount(c *gin.Context) {
 		return
 	}
 
-	// 验证账号属于当前用户
-	account, err := h.BiliAccountService.GetAccountByID(uint(accountID))
-	if err != nil || account.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "无权操作此账号"})
-		return
-	}
-
-	if err := h.BiliAccountService.EnableAccount(userID, uint(accountID)); err != nil {
+	if err := h.BiliAccountService.EnableAccount(uint(accountID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "启用失败"})
 		return
 	}
@@ -311,11 +266,6 @@ func (h *BiliAccountHandler) enableAccount(c *gin.Context) {
 
 // disableAccount 禁用账号
 func (h *BiliAccountHandler) disableAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	accountID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -323,32 +273,10 @@ func (h *BiliAccountHandler) disableAccount(c *gin.Context) {
 		return
 	}
 
-	// 验证账号属于当前用户
-	account, err := h.BiliAccountService.GetAccountByID(uint(accountID))
-	if err != nil || account.UserID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"code": 403, "message": "无权操作此账号"})
-		return
-	}
-
-	if err := h.BiliAccountService.DisableAccount(userID, uint(accountID)); err != nil {
+	if err := h.BiliAccountService.DisableAccount(uint(accountID)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "禁用失败"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "禁用成功"})
-}
-
-// getUserID 从 context 获取用户ID
-func (h *BiliAccountHandler) getUserID(c *gin.Context) uint {
-	if userID, exists := c.Get("user_id"); exists {
-		switch v := userID.(type) {
-		case uint:
-			return v
-		case int:
-			return uint(v)
-		case float64:
-			return uint(v)
-		}
-	}
-	return 0
 }

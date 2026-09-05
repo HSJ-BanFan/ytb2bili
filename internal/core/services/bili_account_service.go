@@ -38,7 +38,7 @@ func NewBiliAccountService(db *gorm.DB) *BiliAccountService {
 }
 
 // BindAccount 绑定B站账号到用户
-func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginInfo, isPrimary bool) (*model.UserBiliAccount, error) {
+func (s *BiliAccountService) BindAccount(loginInfo *bilibili.LoginInfo, isPrimary bool) (*model.UserBiliAccount, error) {
 	if loginInfo == nil || loginInfo.TokenInfo.Mid == 0 {
 		return nil, errors.New("无效的登录信息")
 	}
@@ -69,7 +69,7 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 
 	// 检查是否已绑定该B站账号
 	var existing model.UserBiliAccount
-	err = s.db.Where("user_id = ? AND bili_mid = ?", userID, loginInfo.TokenInfo.Mid).First(&existing).Error
+	err = s.db.Where("bili_mid = ?", loginInfo.TokenInfo.Mid).First(&existing).Error
 	if err == nil {
 		// 已存在，更新凭证
 		if encryptionVersion == 2 {
@@ -96,7 +96,7 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 	// 如果设置为主账号，先取消其他主账号
 	if isPrimary {
 		s.db.Model(&model.UserBiliAccount{}).
-			Where("user_id = ? AND is_primary = ?", userID, true).
+			Where("is_primary = ?", true).
 			Update("is_primary", false)
 	}
 
@@ -105,7 +105,6 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 
 	// 创建新绑定
 	account := &model.UserBiliAccount{
-		UserID:            userID,
 		BiliMid:           loginInfo.TokenInfo.Mid,
 		BiliName:          loginInfo.TokenInfo.Uname,
 		BiliFace:          loginInfo.TokenInfo.Face,
@@ -130,39 +129,28 @@ func (s *BiliAccountService) BindAccount(userID uint, loginInfo *bilibili.LoginI
 }
 
 // GetUserAccounts 获取用户的所有B站账号
-func (s *BiliAccountService) GetUserAccounts(userID uint) ([]model.UserBiliAccount, error) {
+// GetAccounts 获取所有已绑定的B站账号
+func (s *BiliAccountService) GetAccounts() ([]model.UserBiliAccount, error) {
 	var accounts []model.UserBiliAccount
-	err := s.db.Where("user_id = ?", userID).Order("is_primary DESC, created_at ASC").Find(&accounts).Error
+	err := s.db.Order("is_primary DESC, created_at ASC").Find(&accounts).Error
 	return accounts, err
 }
 
-// GetAllEnabledAccounts 获取所有启用的B站账号（用于多账号上传）
-// ⚠️ 警告：此方法返回所有用户的账号，应该仅用于管理目的
-// 对于视频上传等场景，请使用 GetEnabledAccountsForUser(userID)
+// GetAllEnabledAccounts 获取所有启用的B站账号。
 func (s *BiliAccountService) GetAllEnabledAccounts() ([]model.UserBiliAccount, error) {
 	var accounts []model.UserBiliAccount
 	err := s.db.Where("is_enabled = ?", true).Order("is_primary DESC, created_at ASC").Find(&accounts).Error
 	return accounts, err
 }
 
-// GetEnabledAccountsForUser 获取指定用户的所有启用B站账号
-// 这是上传视频时应该使用的方法，确保账号隔离
-func (s *BiliAccountService) GetEnabledAccountsForUser(userID uint) ([]model.UserBiliAccount, error) {
-	var accounts []model.UserBiliAccount
-	err := s.db.Where("user_id = ? AND is_enabled = ?", userID, true).
-		Order("is_primary DESC, created_at ASC").
-		Find(&accounts).Error
-	return accounts, err
-}
-
-// GetPrimaryAccount 获取用户的主B站账号
-func (s *BiliAccountService) GetPrimaryAccount(userID uint) (*model.UserBiliAccount, error) {
+// GetPrimaryAccount 获取全局主B站账号
+func (s *BiliAccountService) GetPrimaryAccount() (*model.UserBiliAccount, error) {
 	var account model.UserBiliAccount
-	err := s.db.Where("user_id = ? AND is_primary = ? AND is_enabled = ?", userID, true, true).First(&account).Error
+	err := s.db.Where("is_primary = ? AND is_enabled = ?", true, true).First(&account).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// 没有主账号，尝试获取第一个启用的账号
-			err = s.db.Where("user_id = ? AND is_enabled = ?", userID, true).First(&account).Error
+			err = s.db.Where("is_enabled = ?", true).First(&account).Error
 		}
 		if err != nil {
 			return nil, err
@@ -208,86 +196,69 @@ func (s *BiliAccountService) GetLoginInfo(account *model.UserBiliAccount) (*bili
 	return &loginInfo, nil
 }
 
-// GetLoginInfoForUser 获取用户主账号的登录信息（便捷方法）
-func (s *BiliAccountService) GetLoginInfoForUser(userID uint) (*bilibili.LoginInfo, *model.UserBiliAccount, error) {
-	account, err := s.GetPrimaryAccount(userID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("获取主账号失败: %v", err)
-	}
-
-	loginInfo, err := s.GetLoginInfo(account)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return loginInfo, account, nil
-}
-
 // SetPrimaryAccount 设置主账号
-func (s *BiliAccountService) SetPrimaryAccount(userID uint, accountID uint) error {
+func (s *BiliAccountService) SetPrimaryAccount(accountID uint) error {
 	// 先取消所有主账号
 	if err := s.db.Model(&model.UserBiliAccount{}).
-		Where("user_id = ?", userID).
+		Where("is_primary = ?", true).
 		Update("is_primary", false).Error; err != nil {
 		return err
 	}
 
 	// 设置新的主账号
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("id = ? AND user_id = ?", accountID, userID).
+		Where("id = ?", accountID).
 		Update("is_primary", true).Error
 }
 
-// EnableAccount 启用账号（按用户隔离）
-func (s *BiliAccountService) EnableAccount(userID uint, accountID uint) error {
+func (s *BiliAccountService) EnableAccount(accountID uint) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("id = ? AND user_id = ?", accountID, userID).
+		Where("id = ?", accountID).
 		Update("is_enabled", true).Error
 }
 
-// DisableAccount 禁用账号（按用户隔离）
-func (s *BiliAccountService) DisableAccount(userID uint, accountID uint) error {
+func (s *BiliAccountService) DisableAccount(accountID uint) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("id = ? AND user_id = ?", accountID, userID).
+		Where("id = ?", accountID).
 		Update("is_enabled", false).Error
 }
 
 // UnbindAccount 解绑账号（通过数据库ID）
-func (s *BiliAccountService) UnbindAccount(userID uint, accountID uint) error {
-	return s.db.Where("id = ? AND user_id = ?", accountID, userID).Delete(&model.UserBiliAccount{}).Error
+func (s *BiliAccountService) UnbindAccount(accountID uint) error {
+	return s.db.Where("id = ?", accountID).Delete(&model.UserBiliAccount{}).Error
 }
 
 // UnbindAccountByMid 解绑账号（通过B站MID）
-func (s *BiliAccountService) UnbindAccountByMid(userID uint, biliMid int64) error {
-	return s.db.Where("bili_mid = ? AND user_id = ?", biliMid, userID).Delete(&model.UserBiliAccount{}).Error
+func (s *BiliAccountService) UnbindAccountByMid(biliMid int64) error {
+	return s.db.Where("bili_mid = ?", biliMid).Delete(&model.UserBiliAccount{}).Error
 }
 
 // EnableAccountByMid 启用账号（通过B站MID）
-func (s *BiliAccountService) EnableAccountByMid(userID uint, biliMid int64) error {
+func (s *BiliAccountService) EnableAccountByMid(biliMid int64) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Where("bili_mid = ?", biliMid).
 		Update("is_enabled", true).Error
 }
 
 // DisableAccountByMid 禁用账号（通过B站MID）
-func (s *BiliAccountService) DisableAccountByMid(userID uint, biliMid int64) error {
+func (s *BiliAccountService) DisableAccountByMid(biliMid int64) error {
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Where("bili_mid = ?", biliMid).
 		Update("is_enabled", false).Error
 }
 
 // SetPrimaryAccountByMid 设置主账号（通过B站MID）
-func (s *BiliAccountService) SetPrimaryAccountByMid(userID uint, biliMid int64) error {
+func (s *BiliAccountService) SetPrimaryAccountByMid(biliMid int64) error {
 	// 先取消所有主账号
 	if err := s.db.Model(&model.UserBiliAccount{}).
-		Where("user_id = ? AND is_primary = ?", userID, true).
+		Where("is_primary = ?", true).
 		Update("is_primary", false).Error; err != nil {
 		return err
 	}
 
 	// 设置新的主账号
 	return s.db.Model(&model.UserBiliAccount{}).
-		Where("bili_mid = ? AND user_id = ?", biliMid, userID).
+		Where("bili_mid = ?", biliMid).
 		Update("is_primary", true).Error
 }
 
@@ -301,10 +272,10 @@ func (s *BiliAccountService) UpdateLastUsed(accountID uint) error {
 
 // MigrateFromLegacyStore 从旧的单账号存储迁移到新系统
 // 用于兼容旧版本数据
-func (s *BiliAccountService) MigrateFromLegacyStore(userID uint) error {
+func (s *BiliAccountService) MigrateFromLegacyStore() error {
 	// 检查用户是否已有绑定账号
 	var count int64
-	s.db.Model(&model.UserBiliAccount{}).Where("user_id = ?", userID).Count(&count)
+	s.db.Model(&model.UserBiliAccount{}).Count(&count)
 	if count > 0 {
 		return nil // 已有账号，无需迁移
 	}
@@ -321,7 +292,7 @@ func (s *BiliAccountService) MigrateFromLegacyStore(userID uint) error {
 	}
 
 	// 迁移到新系统
-	_, err = s.BindAccount(userID, loginInfo, true)
+	_, err = s.BindAccount(loginInfo, true)
 	return err
 }
 

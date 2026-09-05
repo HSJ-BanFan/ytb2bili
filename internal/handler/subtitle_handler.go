@@ -3,13 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strconv"
-
-	internalAuth "github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/utils"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -17,7 +14,6 @@ import (
 
 type SubtitleHandler struct {
 	BaseHandler
-	authMiddleware *internalAuth.AuthMiddleware
 	// 任务取消管理器接口
 	CancelManager interface {
 		Cancel(id uint)
@@ -61,35 +57,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 		return
 	}
 
-	// 获取用户ID（从 JWT context 获取，JWT 中间件已验证）
-	var userID string
-	var userIDUint uint
-	if uid, exists := c.Get("user_id"); exists {
-		switch v := uid.(type) {
-		case uint:
-			userID = fmt.Sprintf("%d", v)
-			userIDUint = v
-		case string:
-			userID = v
-			if parsed, err := strconv.ParseUint(v, 10, 64); err == nil {
-				userIDUint = uint(parsed)
-			}
-		default:
-			userID = fmt.Sprintf("%v", v)
-		}
-	}
-
-	// 如果没有用户ID，说明 JWT 认证失败（理论上不会到这里，因为中间件会拦截）
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "请先登录",
-			"code":    "UNAUTHORIZED",
-		})
-		return
-	}
-
-	fmt.Printf("📋 视频提交请求 - UserID: '%s', URL: %s\n", userID, req.URL)
+	fmt.Printf("📋 视频提交请求 - URL: %s\n", req.URL)
 
 	fmt.Println("Received saveVideoSubtitles request for URL:", req.URL)
 	// 从 URL 中提取 videoId
@@ -145,7 +113,6 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 		existingVideo.SavedAt = req.SavedAt
 		existingVideo.Status = "001"               // 重置状态为待处理
 		existingVideo.DeletedAt = gorm.DeletedAt{} // 恢复记录（清除删除标记）
-		existingVideo.UserID = userIDUint          // 更新提交用户ID
 
 		// 更新到数据库（使用 Unscoped 以便更新已删除的记录）
 		if err := h.App.DB.Unscoped().Save(&existingVideo).Error; err != nil {
@@ -179,7 +146,6 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 			PlaylistID:    req.PlaylistID,
 			Timestamp:     req.Timestamp,
 			SavedAt:       req.SavedAt,
-			UserID:        userIDUint, // 保存提交用户ID
 		}
 
 		// 保存到数据库
@@ -221,15 +187,7 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 	})
 }
 
-// RegisterRoutes 注册上传相关路由
-func (h *SubtitleHandler) RegisterRoutes(server *core.AppServer, authMiddleware *internalAuth.AuthMiddleware) {
-	api := server.Engine.Group("/api/v1")
-
-	// /submit 接口需要 JWT 认证
-	// 使用 authGroup 包装，应用 JWT 中间件
-	authGroup := api.Group("/")
-	authGroup.Use(authMiddleware.JWTAuth())
-	{
-		authGroup.POST("/submit", h.saveVideoSubtitles)
-	}
+// RegisterRoutes 注册公开字幕提交路由
+func (h *SubtitleHandler) RegisterRoutes(server *core.AppServer) {
+	server.Engine.Group("/api/v1").POST("/submit", h.saveVideoSubtitles)
 }

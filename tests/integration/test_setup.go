@@ -45,13 +45,9 @@ func SetupTestApp(t *testing.T) *TestApp {
 
 	// 3. 自动迁移表结构
 	err = db.AutoMigrate(
-		&model.User{},
 		&model.SavedVideo{},
 		&model.TaskStep{},
-		&model.App{},
-		&model.UserToken{},
 		&model.UserBiliAccount{},
-		&model.EmailVerification{},
 		&model.AuditLog{},
 	)
 	if err != nil {
@@ -67,17 +63,6 @@ func SetupTestApp(t *testing.T) *TestApp {
 
 	// 5. 初始化审计服务
 	auditSvc := audit.NewAuditService(db)
-
-	// 6. 创建测试用户
-	user := &model.User{
-		Username:      "test_user",
-		Email:         "test@example.com",
-		Password:      "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
-		Role:          "user",
-		Status:        1,
-		EmailVerified: true,
-	}
-	db.Create(user)
 
 	// 7. 清理函数
 	cleanup := func() {
@@ -104,9 +89,8 @@ func (app *TestApp) Cleanup() {
 }
 
 // CreateTestVideo 创建测试视频
-func (app *TestApp) CreateTestVideo(t *testing.T, userID uint) *model.SavedVideo {
+func (app *TestApp) CreateTestVideo(t *testing.T) *model.SavedVideo {
 	video := &model.SavedVideo{
-		UserID:      userID,
 		VideoID:     fmt.Sprintf("test_%d", time.Now().UnixNano()),
 		Title:       "测试视频",
 		Description: "这是一个测试视频",
@@ -119,10 +103,9 @@ func (app *TestApp) CreateTestVideo(t *testing.T, userID uint) *model.SavedVideo
 }
 
 // CreateTestAccount 创建测试B站账号
-func (app *TestApp) CreateTestAccount(t *testing.T, userID uint) *model.UserBiliAccount {
+func (app *TestApp) CreateTestAccount(t *testing.T) *model.UserBiliAccount {
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	account := &model.UserBiliAccount{
-		UserID:    userID,
 		BiliMid:   123456789,
 		BiliName:  "测试账号",
 		Cookies:   "test_cookies",

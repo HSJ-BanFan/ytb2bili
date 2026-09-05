@@ -71,15 +71,6 @@ func ValidateSecurityConfig(config *types.AppConfig) []SecurityIssue {
 
 	// ========== 通用安全检查 ==========
 
-	// 检查 6: JWT 密钥强度
-	if len(config.Auth.JWTSecret) < 32 {
-		issues = append(issues, SecurityIssue{
-			Level:   "critical",
-			Message: fmt.Sprintf("JWT 密钥长度不足: %d 字节（需要 ≥ 32）", len(config.Auth.JWTSecret)),
-			Fix:     "使用 openssl rand -base64 32 生成新密钥",
-		})
-	}
-
 	// 检查 7: CSP 策略中是否有 unsafe-inline
 	if config.Security.CSPEnabled {
 		if strings.Contains(config.Security.CSPScriptSrc, "unsafe-inline") ||

@@ -1,5 +1,5 @@
-# run_prod.ps1 - 生产环境验证启动脚本
-# 此脚本用于通过 Week 2 安全加固的启动检查
+# run_prod.ps1 - 生产环境启动脚本
+# 此脚本用于启动生产环境配置
 
 # 修复中文乱码：设置控制台代码页为 UTF-8
 chcp 65001 | Out-Null
@@ -7,16 +7,12 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 
-# === 1. 核心安全凭证 (满足长度要求 >= 32字节) ===
-$env:JWT_SECRET = "12345678901234567890123456789012"      # 模拟32字节密钥
-$env:SESSION_SECRET = "12345678901234567890123456789012"  # 模拟32字节密钥
-$env:APP_AUTH_SECRET = "12345678901234567890123456789012" # Cookie加密密钥
 
-# === 2. 生产环境配置 ===
+# === 1. 生产环境配置 ===
 $env:ENVIRONMENT = "production"
 $env:DEBUG = "true"
 
-# === 3. 安全策略配置 (修复启动报错的关键) ===
+# === 2. 安全策略配置 ===
 # 必须配置 CORS 白名单
 $env:CORS_ALLOWED_ORIGINS = "http://localhost:3000,http://localhost:8096,https://yourdomain.com"
 
@@ -26,8 +22,8 @@ $env:CSP_SCRIPT_SRC = "'self' 'unsafe-inline' 'unsafe-eval'" # Next.js 需要这
 $env:HSTS_ENABLED = "true"
 $env:PERMISSIONS_POLICY_ENABLED = "true"
 
-# === 4. 启动应用 ===
+# === 3. 启动应用 ===
 Write-Host "🚀 正在以生产模式启动 ytb2bili..." -ForegroundColor Cyan
-Write-Host "🔑 已注入临时安全凭证和 CORS 配置" -ForegroundColor Gray
+Write-Host "🔒 已注入 CORS 和安全头配置" -ForegroundColor Gray
 Write-Host "--------------------------------"
 .\bili-up.exe

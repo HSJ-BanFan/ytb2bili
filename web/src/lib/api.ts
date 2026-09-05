@@ -6,7 +6,7 @@ import type {
   TaskStep,
   VideoFile,
   QRCodeResponse,
-  LoginStatus,
+  BiliLoginStatus,
   VideoSubmissionRequest,
   UploadValidation,
 } from "@/types";
@@ -25,34 +25,6 @@ const api = axios.create({
 });
 
 // 请求拦截器
-api.interceptors.request.use(
-  (config) => {
-    if (typeof window !== "undefined") {
-      // 优先使用 JWT Token 进行认证
-      const jwtToken = localStorage.getItem("jwt_token");
-      if (jwtToken) {
-        config.headers["Authorization"] = `Bearer ${jwtToken}`;
-
-        // 同时从 JWT 用户信息获取用户 ID
-        const jwtUserStr = localStorage.getItem("jwt_user");
-        if (jwtUserStr) {
-          try {
-            const jwtUser = JSON.parse(jwtUserStr);
-            if (jwtUser && jwtUser.id) {
-              config.headers["X-User-ID"] = jwtUser.id;
-            }
-          } catch (e) {
-            console.error("解析 JWT 用户信息失败:", e);
-          }
-        }
-      }
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
 
 // 响应拦截器
 api.interceptors.response.use(
@@ -78,41 +50,17 @@ api.interceptors.response.use(
   }
 );
 
-// JWT 用户信息类型
-interface JWTUser {
-  id: number;
-  username: string;
-  email: string;
-}
-
-// JWT Token 响应类型
-interface JWTTokenResponse {
-  access_token: string;
-  refresh_token: string;
-  expires_at: string;
-  token_type: string;
-}
-
-// JWT 登录响应类型
-interface JWTLoginResponse {
-  token: JWTTokenResponse;
-  user: JWTUser;
-}
 
 // B站认证相关 API（用于扫码绑定B站账户）
-export const authApi = {
+export const biliAccountApi = {
   // 获取登录二维码
   getQRCode: (): Promise<ApiResponse<QRCodeResponse>> => {
     return api.get("/auth/qrcode");
   },
 
-  // 检查登录状态
-  checkLoginStatus: (authCode: string): Promise<ApiResponse<LoginStatus>> => {
-    return api.post("/auth/check", { auth_code: authCode });
-  },
 
-  // 获取当前用户状态
-  getUserStatus: (): Promise<ApiResponse<LoginStatus>> => {
+  // 获取B站登录状态
+  getBiliLoginStatus: (): Promise<ApiResponse<BiliLoginStatus>> => {
     return api.get("/auth/status");
   },
 
@@ -121,72 +69,6 @@ export const authApi = {
     return api.post("/auth/logout");
   },
 
-  // JWT 用户注册
-  register: (data: {
-    username: string;
-    email: string;
-    password: string;
-    verification_code: string;
-  }): Promise<ApiResponse<JWTLoginResponse>> => {
-    return api.post("/user/register", data);
-  },
-
-  // 发送邮箱验证码
-  sendVerificationCode: (data: {
-    email: string;
-    type: "register" | "login" | "reset_password";
-  }): Promise<ApiResponse<{ email: string; expires_in: number; type: string }>> => {
-    return api.post("/user/send-verification-code", data);
-  },
-
-  // JWT 用户登录（邮箱+密码）
-  login: (data: {
-    email: string;
-    password: string;
-  }): Promise<ApiResponse<JWTLoginResponse>> => {
-    return api.post("/user/login", data);
-  },
-
-  // 验证码登录（邮箱+验证码）
-  loginWithCode: (data: {
-    email: string;
-    verification_code: string;
-  }): Promise<ApiResponse<JWTLoginResponse>> => {
-    return api.post("/user/login-with-code", data);
-  },
-
-  // 忘记密码（发送重置验证码）
-  forgotPassword: (data: {
-    email: string;
-  }): Promise<ApiResponse<{ email: string; expires_in: number }>> => {
-    return api.post("/user/forgot-password", data);
-  },
-
-  // 重置密码
-  resetPassword: (data: {
-    email: string;
-    verification_code: string;
-    new_password: string;
-  }): Promise<ApiResponse> => {
-    return api.post("/user/reset-password", data);
-  },
-
-  // JWT Token 刷新
-  refreshToken: (
-    refreshToken: string
-  ): Promise<ApiResponse<JWTLoginResponse>> => {
-    return api.post("/user/refresh", { refresh_token: refreshToken });
-  },
-
-  // JWT 获取当前用户信息
-  getJWTUser: (): Promise<ApiResponse<JWTUser>> => {
-    return api.get("/user/me");
-  },
-
-  // JWT 退出登录
-  jwtLogout: (): Promise<ApiResponse> => {
-    return api.post("/user/logout");
-  },
 
   // ============== B站账号管理 API (新接口) ==============
 

@@ -2,25 +2,23 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
-import { useAuth } from '@/hooks/useAuth';
-import { userConfigApi, UserAIConfig, UserPreference } from '@/lib/userConfig';
+import { toolConfigApi, ToolAIConfig, ToolPreference } from '@/lib/toolConfig';
 import {
     Settings, Bot, Sliders, Key, Save, RefreshCw,
     CheckCircle, AlertCircle, Eye, EyeOff, Sparkles
 } from 'lucide-react';
 
 export default function UserSettingsPage() {
-    const { user, loading, handleLogout } = useAuth();
     const [activeTab, setActiveTab] = useState<'ai' | 'preferences'>('ai');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     // AI 配置状态
-    const [aiConfig, setAiConfig] = useState<UserAIConfig | null>(null);
+    const [aiConfig, setAiConfig] = useState<ToolAIConfig | null>(null);
     const [aiLoading, setAiLoading] = useState(true);
 
     // 偏好设置状态
-    const [preferences, setPreferences] = useState<UserPreference | null>(null);
+    const [preferences, setPreferences] = useState<ToolPreference | null>(null);
     const [prefLoading, setPrefLoading] = useState(true);
 
     // 显示/隐藏 API Key
@@ -29,7 +27,7 @@ export default function UserSettingsPage() {
     // 加载 AI 配置
     const loadAIConfig = useCallback(async () => {
         setAiLoading(true);
-        const config = await userConfigApi.getAIConfig();
+        const config = await toolConfigApi.getAIConfig();
         setAiConfig(config);
         setAiLoading(false);
     }, []);
@@ -37,24 +35,22 @@ export default function UserSettingsPage() {
     // 加载偏好设置
     const loadPreferences = useCallback(async () => {
         setPrefLoading(true);
-        const prefs = await userConfigApi.getPreferences();
+        const prefs = await toolConfigApi.getPreferences();
         setPreferences(prefs);
         setPrefLoading(false);
     }, []);
 
     useEffect(() => {
-        if (user) {
-            loadAIConfig();
-            loadPreferences();
-        }
-    }, [user, loadAIConfig, loadPreferences]);
+        loadAIConfig();
+        loadPreferences();
+    }, [loadAIConfig, loadPreferences]);
 
     // 保存 AI 配置
     const saveAIConfig = async () => {
         if (!aiConfig) return;
         setSaving(true);
         setMessage(null);
-        const success = await userConfigApi.updateAIConfig(aiConfig);
+        const success = await toolConfigApi.updateAIConfig(aiConfig);
         setSaving(false);
         if (success) {
             setMessage({ type: 'success', text: 'AI 配置已保存' });
@@ -69,7 +65,7 @@ export default function UserSettingsPage() {
         if (!preferences) return;
         setSaving(true);
         setMessage(null);
-        const success = await userConfigApi.updatePreferences(preferences);
+        const success = await toolConfigApi.updatePreferences(preferences);
         setSaving(false);
         if (success) {
             setMessage({ type: 'success', text: '偏好设置已保存' });
@@ -80,13 +76,13 @@ export default function UserSettingsPage() {
     };
 
     // 更新 AI 配置字段
-    const updateAIField = (field: keyof UserAIConfig, value: any) => {
+    const updateAIField = (field: keyof ToolAIConfig, value: any) => {
         if (!aiConfig) return;
         setAiConfig({ ...aiConfig, [field]: value });
     };
 
     // 更新偏好设置字段
-    const updatePrefField = (field: keyof UserPreference, value: any) => {
+    const updatePrefField = (field: keyof ToolPreference, value: any) => {
         if (!preferences) return;
         setPreferences({ ...preferences, [field]: value });
     };
@@ -104,62 +100,25 @@ export default function UserSettingsPage() {
         return key.slice(0, 4) + '••••••••' + key.slice(-4);
     };
 
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <div className="text-center">
-                    <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="text-gray-600">加载中...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-                <div className="container mx-auto px-4">
-                    <div className="max-w-md mx-auto">
-                        <div className="bg-white rounded-xl shadow-xl p-8 text-center">
-                            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-                                <Settings className="w-8 h-8 text-blue-600" />
-                            </div>
-                            <h2 className="text-xl font-semibold text-gray-900">请先登录</h2>
-                            <p className="text-gray-500 mt-2 mb-6">登录后即可访问个人设置</p>
-                            <a
-                                href="/login"
-                                className="w-full flex items-center justify-center px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium"
-                            >
-                                登录 / 注册
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
     return (
-        <AppLayout userName={user?.name} onLogout={handleLogout}>
+        <AppLayout>
             <div className="space-y-6">
                 {/* 页面标题 */}
                 <div className="flex items-center justify-between">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
                             <Sparkles className="w-6 h-6 text-purple-500" />
-                            个人设置
+                            工具设置
                         </h1>
-                        <p className="text-gray-500 mt-1">配置您的个人 AI 服务和偏好</p>
+                        <p className="text-gray-500 mt-1">配置全局 AI 服务和偏好</p>
                     </div>
-                    {user.role === 'admin' && (
-                        <a
-                            href="/settings"
-                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm flex items-center gap-2"
-                        >
-                            <Settings className="w-4 h-4" />
-                            系统设置
-                        </a>
-                    )}
+                    <a
+                        href="/settings"
+                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm flex items-center gap-2"
+                    >
+                        <Settings className="w-4 h-4" />
+                        系统设置
+                    </a>
                 </div>
 
                 {/* 消息提示 */}
@@ -185,7 +144,7 @@ export default function UserSettingsPage() {
                                     }`}
                             >
                                 <Bot className="w-4 h-4 inline mr-2" />
-                                我的 AI 配置
+                                AI 配置
                             </button>
                             <button
                                 onClick={() => setActiveTab('preferences')}
@@ -208,7 +167,7 @@ export default function UserSettingsPage() {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center space-x-3">
                                     <Key className="w-5 h-5 text-purple-600" />
-                                    <h2 className="text-lg font-medium text-gray-900">我的 AI API 密钥</h2>
+                                    <h2 className="text-lg font-medium text-gray-900">AI API 密钥</h2>
                                 </div>
                                 <div className="flex gap-2">
                                     <button
@@ -403,7 +362,7 @@ export default function UserSettingsPage() {
                                 {/* 提示信息 */}
                                 <div className="bg-purple-50 p-4 rounded-lg">
                                     <p className="text-sm text-purple-800">
-                                        <strong>优先级说明：</strong>您的个人配置将优先于系统配置使用。如果您未配置某项服务，系统将自动使用系统默认配置。
+                                        <strong>配置优先级：</strong>此处配置将优先于系统默认值使用。未配置的服务会自动使用系统默认配置。
                                     </p>
                                 </div>
                             </div>
@@ -535,24 +494,6 @@ export default function UserSettingsPage() {
                                     </div>
                                 </div>
 
-                                {/* 通知设置 */}
-                                <div className="border rounded-lg p-4">
-                                    <h3 className="font-medium text-gray-900 mb-4">通知设置</h3>
-                                    <div className="space-y-3">
-                                        <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={preferences.email_notifications_enabled}
-                                                onChange={(e) => updatePrefField('email_notifications_enabled', e.target.checked)}
-                                                className="w-4 h-4 text-purple-600 rounded"
-                                            />
-                                            <div>
-                                                <span className="font-medium text-gray-700">邮件通知</span>
-                                                <p className="text-xs text-gray-500">接收任务完成和异常通知邮件</p>
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
                             </div>
                         ) : (
                             <div className="p-8 text-center text-gray-500">

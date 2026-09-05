@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { RefreshCw, Clock, Upload, Play, CheckCircle, AlertCircle, Calendar } from 'lucide-react';
-import { authFetch } from '@/lib/authFetch';
+import { publicFetch } from '@/lib/publicFetch';
 
 interface Video {
   id: number;
@@ -46,7 +46,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
   const fetchVideos = async () => {
     try {
       setRefreshing(true);
-      const response = await authFetch('/api/v1/videos?page=1&limit=1000');
+      const response = await publicFetch('/api/v1/videos?page=1&limit=1000');
       const data = await response.json();
 
       if ((data.code === 0 || data.code === 200) && data.data) {
@@ -95,7 +95,7 @@ export default function ScheduleManager({ onVideoSelect }: ScheduleManagerProps)
     try {
       setExecutingTasks(prev => new Set(prev).add(taskKey));
 
-      const response = await authFetch(`/api/v1/videos/${videoId}/upload/${taskType}`, {
+      const response = await publicFetch(`/api/v1/videos/${videoId}/upload/${taskType}`, {
         method: 'POST',
       });
 

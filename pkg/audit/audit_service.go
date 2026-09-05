@@ -11,9 +11,6 @@ import (
 
 // 审计操作常量
 const (
-	ActionUserLogin         = "user_login"
-	ActionUserLogout        = "user_logout"
-	ActionUserRegister      = "user_register"
 	ActionBindBiliAccount   = "bind_bili_account"
 	ActionUnbindBiliAccount = "unbind_bili_account"
 	ActionUploadVideo       = "upload_video"
@@ -22,7 +19,6 @@ const (
 
 // 资源类型常量
 const (
-	ResourceUser        = "user"
 	ResourceBiliAccount = "bili_account"
 	ResourceVideo       = "video"
 )
@@ -47,7 +43,7 @@ func NewAuditService(db *gorm.DB) *AuditService {
 
 // LogEntry 审计日志条目
 type LogEntry struct {
-	UserID     uint
+	UserID     uint // legacy column; anonymous tool operations use 0
 	Username   string
 	Action     string
 	Resource   string
@@ -141,9 +137,9 @@ func (s *AuditService) flushWithRetry(entries []LogEntry) {
 }
 
 // LogSuccess 记录成功操作
-func (s *AuditService) LogSuccess(userID uint, username, action, resource, resourceID, ip, userAgent, message string) {
+func (s *AuditService) LogSuccess(actorID uint, username, action, resource, resourceID, ip, userAgent, message string) {
 	s.Log(LogEntry{
-		UserID:     userID,
+		UserID:     actorID,
 		Username:   username,
 		Action:     action,
 		Resource:   resource,
@@ -156,9 +152,9 @@ func (s *AuditService) LogSuccess(userID uint, username, action, resource, resou
 }
 
 // LogFailure 记录失败操作
-func (s *AuditService) LogFailure(userID uint, username, action, resource, resourceID, ip, userAgent, message string) {
+func (s *AuditService) LogFailure(actorID uint, username, action, resource, resourceID, ip, userAgent, message string) {
 	s.Log(LogEntry{
-		UserID:     userID,
+		UserID:     actorID,
 		Username:   username,
 		Action:     action,
 		Resource:   resource,
@@ -172,21 +168,12 @@ func (s *AuditService) LogFailure(userID uint, username, action, resource, resou
 
 // QueryFilter 查询过滤器
 type QueryFilter struct {
-	UserID    uint
 	Action    string
 	Resource  string
 	IP        string
 	StartDate *time.Time
 	EndDate   *time.Time
 	Success   *bool
-}
-
-// GetLogs 查询审计日志 (保留旧接口兼容性)
-func (s *AuditService) GetLogs(userID uint, action string, limit, offset int) ([]model.AuditLog, int64, error) {
-	return s.Query(QueryFilter{
-		UserID: userID,
-		Action: action,
-	}, limit, offset)
 }
 
 // Query 高级查询接口
@@ -196,9 +183,6 @@ func (s *AuditService) Query(filter QueryFilter, limit, offset int) ([]model.Aud
 
 	query := s.db.Model(&model.AuditLog{})
 
-	if filter.UserID > 0 {
-		query = query.Where("user_id = ?", filter.UserID)
-	}
 	if filter.Action != "" {
 		query = query.Where("action = ?", filter.Action)
 	}

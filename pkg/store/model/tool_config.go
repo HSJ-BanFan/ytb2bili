@@ -4,10 +4,9 @@ import (
 	"time"
 )
 
-// UserAIConfig 用户AI配置
-type UserAIConfig struct {
+// ToolAIConfig 工具AI配置
+type ToolAIConfig struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
-	UserID    uint      `gorm:"uniqueIndex;not null" json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -42,16 +41,11 @@ type UserAIConfig struct {
 	Notes string `gorm:"type:text" json:"notes,omitempty"`
 }
 
-// UserPreference 用户个人偏好
-type UserPreference struct {
+// ToolPreference 工具全局偏好
+type ToolPreference struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
-	UserID    uint      `gorm:"uniqueIndex;not null" json:"user_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-
-	// 通知设置
-	EmailNotificationsEnabled bool   `gorm:"default:true" json:"email_notifications_enabled"`
-	NotificationEmail         string `gorm:"size:255" json:"notification_email,omitempty"`
 
 	// 任务默认设置
 	DefaultAutoUpload    bool   `gorm:"default:true" json:"default_auto_upload"`
@@ -72,10 +66,10 @@ type UserPreference struct {
 }
 
 // TableName 指定表名
-func (UserAIConfig) TableName() string {
+func (ToolAIConfig) TableName() string {
 	return "cw_user_ai_configs"
 }
 
-func (UserPreference) TableName() string {
+func (ToolPreference) TableName() string {
 	return "cw_user_preferences"
 }

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/crypto"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -31,7 +30,6 @@ type TestContext struct {
 	TempDir       string
 	EncryptionSvc *crypto.EncryptionService
 	AuditSvc      *audit.AuditService
-	JWTService    *auth.JWTService
 	CleanupFuncs  []func()
 }
 
@@ -58,22 +56,12 @@ func Setup(t *testing.T) *TestContext {
 	// 4. 初始化审计服务
 	auditSvc := audit.NewAuditService(db)
 
-	// 5. 初始化 JWT 服务
-	jwtConfig := auth.JWTConfig{
-		SecretKey:     "test_secret_key_for_testing_only",
-		Issuer:        "bili-up-test",
-		AccessExpiry:  24 * time.Hour,
-		RefreshExpiry: 7 * 24 * time.Hour,
-	}
-	jwtService := auth.NewJWTService(jwtConfig)
-
 	ctx := &TestContext{
 		T:             t,
 		DB:            db,
 		TempDir:       tempDir,
 		EncryptionSvc: encSvc,
 		AuditSvc:      auditSvc,
-		JWTService:    jwtService,
 		CleanupFuncs:  make([]func(), 0),
 	}
 
@@ -114,13 +102,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 
 	// 自动迁移所有模型
 	err = db.AutoMigrate(
-		&model.User{},
 		&model.SavedVideo{},
 		&model.TaskStep{},
-		&model.App{},
-		&model.UserToken{},
 		&model.UserBiliAccount{},
-		&model.EmailVerification{},
 		&model.AuditLog{},
 	)
 	require.NoError(t, err, "数据库迁移失败")
@@ -129,67 +113,14 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 }
 
 // ============================================================================
-// 用户相关
-// ============================================================================
-
-// CreateTestUser 创建测试用户
-func (ctx *TestContext) CreateTestUser(opts ...UserOption) *model.User {
-	ctx.T.Helper()
-
-	user := &model.User{
-		Username:      "test_user_" + uuid.New().String()[:8],
-		Email:         fmt.Sprintf("test_%s@example.com", uuid.New().String()[:8]),
-		Password:      "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
-		Role:          "user",
-		Status:        1,
-		EmailVerified: true,
-	}
-
-	// 应用选项
-	for _, opt := range opts {
-		opt(user)
-	}
-
-	err := ctx.DB.Create(user).Error
-	require.NoError(ctx.T, err, "创建测试用户失败")
-
-	return user
-}
-
-// UserOption 用户选项函数类型
-type UserOption func(*model.User)
-
-// WithUsername 设置用户名
-func WithUsername(username string) UserOption {
-	return func(u *model.User) {
-		u.Username = username
-	}
-}
-
-// WithEmail 设置邮箱
-func WithEmail(email string) UserOption {
-	return func(u *model.User) {
-		u.Email = email
-	}
-}
-
-// WithRole 设置角色
-func WithRole(role string) UserOption {
-	return func(u *model.User) {
-		u.Role = role
-	}
-}
-
-// ============================================================================
 // 视频相关
 // ============================================================================
 
 // CreateTestVideo 创建测试视频
-func (ctx *TestContext) CreateTestVideo(userID uint, opts ...VideoOption) *model.SavedVideo {
+func (ctx *TestContext) CreateTestVideo(opts ...VideoOption) *model.SavedVideo {
 	ctx.T.Helper()
 
 	video := &model.SavedVideo{
-		UserID:      userID,
 		VideoID:     "test_" + uuid.New().String()[:8],
 		URL:         "https://www.youtube.com/watch?v=test123",
 		Title:       "测试视频标题",
@@ -252,13 +183,12 @@ func WithBiliInfo(bvid string, aid int64) VideoOption {
 // ============================================================================
 
 // CreateTestBiliAccount 创建测试B站账号
-func (ctx *TestContext) CreateTestBiliAccount(userID uint, opts ...BiliAccountOption) *model.UserBiliAccount {
+func (ctx *TestContext) CreateTestBiliAccount(opts ...BiliAccountOption) *model.UserBiliAccount {
 	ctx.T.Helper()
 
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 	account := &model.UserBiliAccount{
-		UserID:    userID,
-		BiliMid:   123456789 + int64(userID), // 确保唯一
+		BiliMid:   123456789,
 		BiliName:  "测试B站账号",
 		Cookies:   "test_cookies_" + uuid.New().String()[:8],
 		ExpiresAt: &expiresAt,
@@ -344,50 +274,16 @@ func WithTaskStatus(status string) TaskStepOption {
 }
 
 // ============================================================================
-// JWT 和认证相关
-// ============================================================================
-
-// GenerateTestToken 生成测试 JWT Token
-func (ctx *TestContext) GenerateTestToken(user *model.User) string {
-	ctx.T.Helper()
-
-	token, err := ctx.JWTService.GenerateAccessToken(
-		user.ID,
-		user.Username,
-		user.Role,
-		"test_app",
-	)
-	require.NoError(ctx.T, err, "生成测试Token失败")
-
-	return token
-}
-
-// GenerateTestTokenPair 生成测试 Token 对
-func (ctx *TestContext) GenerateTestTokenPair(user *model.User) *auth.TokenPair {
-	ctx.T.Helper()
-
-	tokenPair, err := ctx.JWTService.GenerateTokenPair(
-		user.ID,
-		user.Username,
-		user.Role,
-		"test_app",
-	)
-	require.NoError(ctx.T, err, "生成测试TokenPair失败")
-
-	return tokenPair
-}
-
-// ============================================================================
 // 文件和目录相关
 // ============================================================================
 
 // CreateTestVideoDir 创建测试视频目录结构
 // 返回目录路径
-func (ctx *TestContext) CreateTestVideoDir(userID uint, videoID string) string {
+func (ctx *TestContext) CreateTestVideoDir(videoID string) string {
 	ctx.T.Helper()
 
 	dateStr := time.Now().Format("2006-01-02")
-	videoDir := filepath.Join(ctx.TempDir, fmt.Sprintf("user_%d", userID), dateStr, videoID)
+	videoDir := filepath.Join(ctx.TempDir, dateStr, videoID)
 
 	err := os.MkdirAll(videoDir, 0755)
 	require.NoError(ctx.T, err, "创建测试视频目录失败")
@@ -409,16 +305,6 @@ func (ctx *TestContext) CreateTestFile(dir, filename, content string) string {
 // ============================================================================
 // 断言辅助函数
 // ============================================================================
-
-// AssertUserIsolation 验证用户隔离
-// 确保 userB 无法访问 userA 的资源
-func (ctx *TestContext) AssertUserIsolation(resourceUserID, accessUserID uint) {
-	ctx.T.Helper()
-
-	if resourceUserID == accessUserID {
-		ctx.T.Fatal("用户隔离测试: 资源所有者和访问者应该是不同用户")
-	}
-}
 
 // AssertVideoStatus 验证视频状态
 func (ctx *TestContext) AssertVideoStatus(videoID string, expectedStatus string) {
@@ -485,8 +371,6 @@ func (ctx *TestContext) ClearAllData() {
 		"cw_user_bili_accounts",
 		"cw_task_steps",
 		"cw_saved_videos",
-		"cw_user_tokens",
-		"cw_users",
 	}
 
 	for _, table := range tables {

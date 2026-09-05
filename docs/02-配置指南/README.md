@@ -4,12 +4,6 @@
 
 ## 📚 文档列表
 
-### [管理员系统指南](./管理员系统指南.md)
-管理员后台功能配置
-- 用户管理
-- 系统监控
-- 权限配置
-
 ### [Cookies配置指南](./cookies-setup.md)
 YouTube访问配置
 - 从浏览器提取Cookies
@@ -22,13 +16,6 @@ YouTube访问配置
 - SOCKS5代理
 - 代理回退机制
 
-### [B站配置指南](./bilibili-config.md)
-Bilibili上传配置
-- 账号绑定
-- 上传参数设置
-- 分区选择
-
 ## 🔗 快速链接
 
 - [返回文档中心](../README.md)
-- [项目架构文档](../../ARCHITECTURE.md)

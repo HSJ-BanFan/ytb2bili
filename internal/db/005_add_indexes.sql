@@ -7,11 +7,6 @@
 -- 2. 执行后请用 EXPLAIN 验证索引是否生效
 -- 3. 大表场景下，索引创建可能会锁表，建议在低峰期执行
 
--- 1. 用户+状态 复合索引
--- 用途: 查询特定用户的特定状态视频（如 user_id = 1 AND status = '200'）
--- 场景: 用户视频列表、权限检查
--- 验证: EXPLAIN SELECT * FROM cw_saved_videos WHERE user_id = 1 AND status = '200';
-CREATE INDEX IF NOT EXISTS idx_user_status ON cw_saved_videos(user_id, status);
 
 -- 2. 状态+创建时间 复合索引
 -- 用途: 按状态查询并按时间排序（如 UploadScheduler 查询待上传视频）

@@ -46,14 +46,12 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-// CreateTestVideo 创建测试用视频记录
-func CreateTestVideo(t *testing.T, db *gorm.DB, videoID string, status string, userID uint) *model.SavedVideo {
+func CreateTestVideo(t *testing.T, db *gorm.DB, videoID string, status string) *model.SavedVideo {
 	video := &model.SavedVideo{
 		VideoID: videoID,
 		URL:     "https://www.youtube.com/watch?v=" + videoID,
 		Title:   "Test Video: " + videoID,
 		Status:  status,
-		UserID:  userID,
 	}
 	err := db.Create(video).Error
 	require.NoError(t, err, "创建测试视频失败")
@@ -154,9 +152,9 @@ func TestTaskStepService_GetPendingSteps(t *testing.T) {
 	svc := services.NewTaskStepService(db)
 
 	// 创建测试数据：必须先创建 SavedVideo，因为 GetPendingSteps 使用 INNER JOIN
-	CreateTestVideo(t, db, "vid1", "002", 1)
-	CreateTestVideo(t, db, "vid2", "002", 1)
-	CreateTestVideo(t, db, "vid3", "002", 1)
+	CreateTestVideo(t, db, "vid1", "002")
+	CreateTestVideo(t, db, "vid2", "002")
+	CreateTestVideo(t, db, "vid3", "002")
 
 	CreateTestTaskStep(t, db, "vid1", "下载视频", "pending", true)
 	CreateTestTaskStep(t, db, "vid2", "翻译字幕", "completed", false)

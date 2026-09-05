@@ -411,7 +411,7 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 	result, err := uploadClient.SubmitVideo(studio)
 	if err != nil {
 		t.AuditService.LogFailure(
-			t.StateManager.UserID, "",
+			0, "",
 			audit.ActionUploadVideo,
 			audit.ResourceVideo,
 			filepath.Base(videoPath),
@@ -423,7 +423,7 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 
 	if result.Code != 0 {
 		t.AuditService.LogFailure(
-			t.StateManager.UserID, "",
+			0, "",
 			audit.ActionUploadVideo,
 			audit.ResourceVideo,
 			filepath.Base(videoPath),
@@ -453,7 +453,7 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 
 	// 记录审计日志
 	t.AuditService.LogSuccess(
-		t.StateManager.UserID, "",
+		0, "",
 		audit.ActionUploadVideo,
 		audit.ResourceVideo,
 		bvid,
@@ -469,147 +469,55 @@ func (t *UploadToBilibili) uploadToAccount(account *storage.BiliAccount, videoPa
 }
 
 // getAllEnabledAccounts 获取当前视频所属用户的所有启用B站账号
-// ⚠️ 重要：确保账号隔离，只返回当前用户绑定的账号
+// getAllEnabledAccounts returns every enabled Bilibili account configured for the tool.
 func (t *UploadToBilibili) getAllEnabledAccounts() []*storage.BiliAccount {
 	var accounts []*storage.BiliAccount
-
-	// 1. 获取当前视频所属的用户ID
-	userID := t.StateManager.UserID
-	if userID == 0 && t.StateManager.VideoID != "" {
-		// 如果 StateManager 没有 UserID，从数据库查询
-		savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
-		if err == nil && savedVideo.UserID > 0 {
-			userID = savedVideo.UserID
-		}
-	}
-
-	if userID == 0 {
-		t.App.Logger.Warn("⚠️ 无法确定视频所属用户，将不使用任何账号")
+	if t.BiliAccountService == nil {
 		return accounts
 	}
 
-	t.App.Logger.Infof("🔍 获取用户 %d 的 B 站账号...", userID)
-
-	// 2. 从数据库获取该用户的所有启用账号
-	if t.BiliAccountService != nil {
-		dbAccounts, err := t.BiliAccountService.GetEnabledAccountsForUser(userID)
-		if err == nil && len(dbAccounts) > 0 {
-			t.App.Logger.Infof("📦 从数据库获取到用户 %d 的 %d 个启用账号", userID, len(dbAccounts))
-			for _, dbAccount := range dbAccounts {
-				// 解析账号登录信息（自动处理解密）
-				loginInfo, err := t.BiliAccountService.GetLoginInfo(&dbAccount)
-				if err != nil {
-					t.App.Logger.Warnf("获取账号 %s 的登录信息失败: %v", dbAccount.BiliName, err)
-					continue
-				}
-				if loginInfo == nil {
-					t.App.Logger.Warnf("账号 %s 没有有效的登录信息", dbAccount.BiliName)
-					continue
-				}
-				account := &storage.BiliAccount{
-					ID:        fmt.Sprintf("%d", dbAccount.BiliMid),
-					Mid:       dbAccount.BiliMid,
-					Name:      dbAccount.BiliName,
-					Face:      dbAccount.BiliFace,
-					IsEnabled: dbAccount.IsEnabled,
-					IsPrimary: dbAccount.IsPrimary,
-					LoginInfo: loginInfo,
-				}
-				accounts = append(accounts, account)
-			}
-			if len(accounts) > 0 {
-				return accounts
-			}
-		} else if err != nil {
-			t.App.Logger.Warnf("获取用户 %d 的账号失败: %v", userID, err)
-		} else {
-			t.App.Logger.Warnf("用户 %d 没有绑定任何 B 站账号", userID)
-		}
+	dbAccounts, err := t.BiliAccountService.GetAllEnabledAccounts()
+	if err != nil {
+		t.App.Logger.Warnf("获取 B 站账号失败: %v", err)
+		return accounts
 	}
-
-	// 3. 如果用户没有绑定账号，返回空列表（不再回退到全局账号）
-	t.App.Logger.Warn("⚠️ 用户没有绑定有效的 B 站账号，无法上传")
+	for _, dbAccount := range dbAccounts {
+		loginInfo, err := t.BiliAccountService.GetLoginInfo(&dbAccount)
+		if err != nil || loginInfo == nil {
+			t.App.Logger.Warnf("获取账号 %s 的登录信息失败: %v", dbAccount.BiliName, err)
+			continue
+		}
+		accounts = append(accounts, &storage.BiliAccount{
+			ID:        fmt.Sprintf("%d", dbAccount.BiliMid),
+			Mid:       dbAccount.BiliMid,
+			Name:      dbAccount.BiliName,
+			Face:      dbAccount.BiliFace,
+			IsEnabled: dbAccount.IsEnabled,
+			IsPrimary: dbAccount.IsPrimary,
+			LoginInfo: loginInfo,
+		})
+	}
 	return accounts
 }
 
-// getLoginInfo 获取登录信息（支持多用户）
-func (t *UploadToBilibili) getLoginInfo(context map[string]interface{}) (*bilibili.LoginInfo, error) {
-	t.App.Logger.Info("🔍 开始获取B站登录信息...")
-	t.App.Logger.Infof("   BiliAccountService 是否存在: %v", t.BiliAccountService != nil)
-
-	// 1. 尝试从 context 获取用户ID
-	var userID uint
-	if uid, ok := context["user_id"]; ok {
-		switch v := uid.(type) {
-		case uint:
-			userID = v
-		case int:
-			userID = uint(v)
-		case float64:
-			userID = uint(v)
-		}
-	}
-	t.App.Logger.Infof("   从 context 获取的用户ID: %d", userID)
-
-	// 2. 如果有用户ID且有账号服务，尝试获取用户的B站账号
-	if userID > 0 && t.BiliAccountService != nil {
-		loginInfo, account, err := t.BiliAccountService.GetLoginInfoForUser(userID)
-		if err == nil {
-			t.App.Logger.Infof("✓ 使用用户 %d 的B站账号: %s (MID: %d)", userID, account.BiliName, account.BiliMid)
-			// 更新最后使用时间
-			t.BiliAccountService.UpdateLastUsed(account.ID)
-			return loginInfo, nil
-		}
-		t.App.Logger.Warnf("⚠️ 获取用户 %d 的B站账号失败: %v，尝试使用全局账号", userID, err)
-	}
-
-	// 3. 尝试从视频记录获取用户ID
-	if userID == 0 && t.StateManager != nil && t.StateManager.VideoID != "" {
-		t.App.Logger.Infof("   尝试从视频记录获取用户ID, VideoID: %s", t.StateManager.VideoID)
-		savedVideo, err := t.SavedVideoService.GetVideoByVideoID(t.StateManager.VideoID)
-		if err == nil && savedVideo.UserID > 0 {
-			userID = savedVideo.UserID
-			t.App.Logger.Infof("   从视频记录获取的用户ID: %d", userID)
-			if t.BiliAccountService != nil {
-				loginInfo, account, err := t.BiliAccountService.GetLoginInfoForUser(userID)
-				if err == nil {
-					t.App.Logger.Infof("✓ 使用视频所属用户 %d 的B站账号: %s", userID, account.BiliName)
-					t.BiliAccountService.UpdateLastUsed(account.ID)
-					return loginInfo, nil
-				}
-				t.App.Logger.Warnf("   获取用户 %d 的B站账号失败: %v", userID, err)
-			}
-		} else if err != nil {
-			t.App.Logger.Warnf("   获取视频记录失败: %v", err)
-		}
-	}
-
-	// 4. 回退到全局账号服务
-	t.App.Logger.Info("   尝试获取全局B站账号...")
+// getLoginInfo 获取全局登录信息
+func (t *UploadToBilibili) getLoginInfo(_ map[string]interface{}) (*bilibili.LoginInfo, error) {
 	if t.BiliAccountService != nil {
 		loginInfo, err := t.BiliAccountService.GetGlobalLoginInfo()
 		if err == nil {
-			t.App.Logger.Infof("✓ 使用全局B站账号 (MID: %d)", loginInfo.TokenInfo.Mid)
 			return loginInfo, nil
 		}
-		t.App.Logger.Warnf("   获取全局账号失败: %v", err)
+		t.App.Logger.Warnf("获取已配置的 B 站账号失败: %v", err)
 	}
 
-	// 5. 最后回退到旧的单账号存储
-	t.App.Logger.Info("   尝试使用旧版单账号存储...")
 	loginStore := storage.GetDefaultStore()
 	if !loginStore.IsValid() {
-		t.App.Logger.Error("   旧版存储无效")
 		return nil, fmt.Errorf("没有有效的 Bilibili 登录信息，请先绑定B站账号")
 	}
-
 	loginInfo, err := loginStore.Load()
 	if err != nil {
-		t.App.Logger.Errorf("   加载旧版存储失败: %v", err)
 		return nil, fmt.Errorf("加载登录信息失败: %v", err)
 	}
-
-	t.App.Logger.Infof("✓ 使用旧版单账号存储的登录信息 (MID: %d)", loginInfo.TokenInfo.Mid)
 	return loginInfo, nil
 }
 

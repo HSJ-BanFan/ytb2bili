@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Upload, FileText, AlertCircle, CheckCircle, Loader2, Trash2 } from 'lucide-react';
-import { authFetch } from '@/lib/authFetch';
+import { publicFetch } from '@/lib/publicFetch';
 
 interface VideoActionsProps {
   videoId: string;
@@ -25,7 +25,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await authFetch(`/api/v1/videos/${videoId}/upload/video`, {
+      const response = await publicFetch(`/api/v1/videos/${videoId}/upload/video`, {
         method: 'POST',
       });
 
@@ -57,7 +57,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await authFetch(`/api/v1/videos/${videoId}/upload/subtitle`, {
+      const response = await publicFetch(`/api/v1/videos/${videoId}/upload/subtitle`, {
         method: 'POST',
       });
 
@@ -89,7 +89,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
     setSuccess(null);
 
     try {
-      const response = await authFetch(`/api/v1/videos/${videoId}`, {
+      const response = await publicFetch(`/api/v1/videos/${videoId}`, {
         method: 'DELETE',
       });
 
@@ -114,7 +114,7 @@ export default function VideoActions({ videoId, status, onSuccess }: VideoAction
 
   // 根据状态决定显示哪些操作按钮
   // 200: 准备就绪（可自动上传）
-  // 205: 等待手动上传（Free 用户或手动上传模式）
+  // 205: 等待手动上传（手动上传模式）
   // 299: 上传失败（可重试）
   const canUploadVideo = ['200', '205', '299'].includes(status);
   // 300: 视频已上传，等待字幕上传

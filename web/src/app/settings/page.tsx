@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import AIModelSettings from '@/components/settings/AIModelSettings';
-import { useAuth } from '@/hooks/useAuth';
-import { authApi, BiliAccount } from '@/lib/api';
+import { biliAccountApi, BiliAccount } from '@/lib/api';
 import { Settings, Bot, Upload, User, Link2, CheckCircle, AlertCircle, Trash2, Star, ToggleLeft, ToggleRight, Plus, RefreshCw, XCircle } from 'lucide-react';
 
 // 扫码绑定组件
@@ -53,7 +52,7 @@ function QRBindComponent({ onBindSuccess, onCancel }: QRBindComponentProps) {
           setMessage('扫码成功，正在绑定...');
 
           // 调用绑定接口
-          const bindResponse = await authApi.bindBiliAccountFromQRCode();
+          const bindResponse = await biliAccountApi.bindBiliAccountFromQRCode();
           if (bindResponse.code === 0) {
             setTimeout(() => onBindSuccess(), 500);
           } else {
@@ -172,7 +171,6 @@ function QRBindComponent({ onBindSuccess, onCancel }: QRBindComponentProps) {
 }
 
 export default function SettingsPage() {
-  const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
   const [activeTab, setActiveTab] = useState<'general' | 'ai' | 'account'>('general');
   const [showBindQR, setShowBindQR] = useState(false);
   const [biliStatus, setBiliStatus] = useState<{ isLoggedIn: boolean; user?: { name: string; mid: string; avatar?: string } } | null>(null);
@@ -189,20 +187,13 @@ export default function SettingsPage() {
   const [accountsLoading, setAccountsLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
 
-  // 获取认证头
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('jwt_token');
-    return {
-      'Content-Type': 'application/json',
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    };
-  };
+  const getRequestHeaders = () => ({ 'Content-Type': 'application/json' });
 
   // Fetch download config from backend
   const fetchDownloadConfig = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/config/download', {
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
       });
       const data = await res.json();
       if (data.code === 200) {
@@ -236,7 +227,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch('/api/v1/config/download', {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify(newConfig),
       });
       const data = await res.json();
@@ -258,17 +249,15 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchDownloadConfig();
-    }
-  }, [user, fetchDownloadConfig]);
+    fetchDownloadConfig();
+  }, [fetchDownloadConfig]);
 
   // 加载账号列表
   const loadAccounts = useCallback(async () => {
     setAccountsLoading(true);
     setAccountError(null);
     try {
-      const res = await authApi.getAccounts() as any;
+      const res = await biliAccountApi.getAccounts() as any;
       if (res.code === 0 && res.accounts) {
         setAccounts(res.accounts);
       } else if (res.code === 0 && res.data?.accounts) {
@@ -301,19 +290,15 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      checkBiliStatus();
-      loadAccounts();
-    }
-  }, [user, loadAccounts]);
+    checkBiliStatus();
+    loadAccounts();
+  }, [loadAccounts]);
 
   // B站扫码绑定成功回调
   const handleBiliBindSuccess = async () => {
     setShowBindQR(false);
     await checkBiliStatus();
     await loadAccounts();
-    // 同时刷新 JWT 用户信息（关联 bili_mid）
-    await handleRefreshStatus();
   };
 
   // 删除账号
@@ -321,7 +306,7 @@ export default function SettingsPage() {
     console.log('[handleRemoveAccount] 被调用, mid =', mid);
     if (!confirm('确定要删除此账号吗？')) return;
     try {
-      await authApi.removeAccount(String(mid));
+      await biliAccountApi.removeAccount(String(mid));
       await loadAccounts();
       await checkBiliStatus();
     } catch (e) {
@@ -333,7 +318,7 @@ export default function SettingsPage() {
   // 切换账号启用状态
   const handleToggleEnabled = async (mid: number, currentEnabled: boolean) => {
     try {
-      await authApi.setAccountEnabled(String(mid), !currentEnabled);
+      await biliAccountApi.setAccountEnabled(String(mid), !currentEnabled);
       await loadAccounts();
     } catch (e) {
       console.error('切换账号状态失败:', e);
@@ -344,7 +329,7 @@ export default function SettingsPage() {
   // 设置主账号
   const handleSetPrimary = async (mid: number) => {
     try {
-      await authApi.setPrimaryAccount(String(mid));
+      await biliAccountApi.setPrimaryAccount(String(mid));
       await loadAccounts();
       await checkBiliStatus();
     } catch (e) {
@@ -353,55 +338,8 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-600">加载中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="container mx-auto px-4">
-          <div className="max-w-md mx-auto">
-            <div className="text-center mb-8">
-              <h1 className="text-4xl font-bold text-gray-900 mb-3">
-                Bili-Up Web
-              </h1>
-              <p className="text-gray-600 text-lg">
-                Bilibili 视频管理平台
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-xl p-8">
-              <div className="text-center mb-6">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-                  <Settings className="w-8 h-8 text-blue-600" />
-                </div>
-                <h2 className="text-xl font-semibold text-gray-900">请先登录</h2>
-                <p className="text-gray-500 mt-2">登录后即可访问设置页面</p>
-              </div>
-
-              <a
-                href="/login"
-                className="w-full flex items-center justify-center px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium shadow-md hover:shadow-lg"
-              >
-                登录 / 注册
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <AppLayout userName={user?.name} onLogout={handleLogout}>
+    <AppLayout>
       <div className="space-y-6">
         {/* 标签页导航 */}
         <div className="bg-white rounded-lg shadow-md">
@@ -717,7 +655,6 @@ export default function SettingsPage() {
                         setShowBindQR(false);
                         checkBiliStatus();
                         loadAccounts();
-                        handleRefreshStatus();
                       }}
                       onCancel={() => setShowBindQR(false)}
                     />

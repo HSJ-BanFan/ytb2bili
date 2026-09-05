@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/difyz9/ytb2bili/internal/core/types"
-	"github.com/difyz9/ytb2bili/pkg/store/model"
 
 	"github.com/glebarez/sqlite" // Pure-Go SQLite driver (no CGO required)
 	"gorm.io/driver/mysql"
@@ -111,12 +110,5 @@ func NewDatabase(config *types.AppConfig) (*gorm.DB, error) {
 
 // AutoMigrate 自动迁移数据库表
 func AutoMigrate(db *gorm.DB) error {
-	// 导入所有模型并执行迁移
-	return db.AutoMigrate(
-		&model.User{},
-		&model.SavedVideo{},
-		&model.App{},
-		&model.UserToken{},
-		&model.TaskStep{}, // 添加 TaskStep 迁移支持
-	)
+	return MigrateDatabase(db)
 }

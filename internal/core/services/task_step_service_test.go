@@ -27,17 +27,16 @@ func setupTaskStepTestDB(t *testing.T) *gorm.DB {
 	})
 	require.NoError(t, err)
 
-	err = db.AutoMigrate(&model.TaskStep{}, &model.SavedVideo{}, &model.User{})
+	err = db.AutoMigrate(&model.TaskStep{}, &model.SavedVideo{})
 	require.NoError(t, err)
 
 	return db
 }
 
-func createTaskStepTestVideo(t *testing.T, db *gorm.DB, userID uint, videoID string) *model.SavedVideo {
+func createTaskStepTestVideo(t *testing.T, db *gorm.DB, videoID string) *model.SavedVideo {
 	t.Helper()
 
 	video := &model.SavedVideo{
-		UserID:  userID,
 		VideoID: videoID,
 		Title:   "Test Video - " + videoID,
 		Status:  "001",
@@ -163,36 +162,6 @@ func TestTaskStepService_GetTaskStepsByVideoID_Empty(t *testing.T) {
 	assert.Empty(t, steps)
 }
 
-// ============================================================================
-// GetTaskStepsByVideoIDForUser 测试
-// ============================================================================
-
-func TestTaskStepService_GetTaskStepsByVideoIDForUser(t *testing.T) {
-	db := setupTaskStepTestDB(t)
-	service := NewTaskStepService(db)
-
-	// 创建用户 1 的视频
-	video := createTaskStepTestVideo(t, db, 1, "user1_video")
-	service.InitTaskSteps(video.VideoID)
-
-	// 用户 1 访问自己的视频 - 成功
-	steps, err := service.GetTaskStepsByVideoIDForUser(video.VideoID, 1)
-	assert.NoError(t, err)
-	assert.Len(t, steps, 9)
-
-	// 用户 2 访问用户 1 的视频 - 失败
-	steps, err = service.GetTaskStepsByVideoIDForUser(video.VideoID, 2)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "视频不存在或无权访问")
-	assert.Nil(t, steps)
-
-	// userID=0 可以访问所有
-	steps, err = service.GetTaskStepsByVideoIDForUser(video.VideoID, 0)
-	assert.NoError(t, err)
-	assert.Len(t, steps, 9)
-}
-
-// ============================================================================
 // UpdateTaskStepStatus 测试
 // ============================================================================
 
@@ -384,11 +353,11 @@ func TestTaskStepService_ResetAllRunningTasks(t *testing.T) {
 	createTestTaskStep(t, db, "video3", "步骤3", model.TaskStepStatusCompleted, 1) // 不应被重置
 
 	// 创建处理中的视频
-	video1 := createTaskStepTestVideo(t, db, 1, "video1")
+	video1 := createTaskStepTestVideo(t, db, "video1")
 	db.Model(video1).Update("status", "002")
-	video2 := createTaskStepTestVideo(t, db, 1, "video2")
+	video2 := createTaskStepTestVideo(t, db, "video2")
 	db.Model(video2).Update("status", "002")
-	video3 := createTaskStepTestVideo(t, db, 1, "video3")
+	video3 := createTaskStepTestVideo(t, db, "video3")
 	db.Model(video3).Update("status", "200") // 不应被重置
 
 	err := service.ResetAllRunningTasks()
@@ -423,7 +392,7 @@ func TestTaskStepService_GetPendingSteps(t *testing.T) {
 	service := NewTaskStepService(db)
 
 	// 创建有效的视频和步骤
-	createTaskStepTestVideo(t, db, 1, "pending_video")
+	createTaskStepTestVideo(t, db, "pending_video")
 	createTestTaskStep(t, db, "pending_video", "待执行步骤", model.TaskStepStatusPending, 1)
 	createTestTaskStep(t, db, "pending_video", "已完成步骤", model.TaskStepStatusCompleted, 2)
 

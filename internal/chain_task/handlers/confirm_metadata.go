@@ -61,7 +61,7 @@ func (t *ConfirmMetadata) Execute(ctx map[string]interface{}) bool {
 	}
 
 	// 2. 获取用户配置
-	biliConfig := t.getBiliUploadConfig(savedVideo.UserID)
+	biliConfig := t.getBiliUploadConfig()
 
 	// 3. 决定元数据来源
 	metadataSource := "original" // 默认使用原始数据
@@ -286,7 +286,7 @@ func (t *ConfirmMetadata) applyTemplate(template string, video *model.SavedVideo
 }
 
 // getBiliUploadConfig 获取B站上传配置
-func (t *ConfirmMetadata) getBiliUploadConfig(userID uint) interface{} {
+func (t *ConfirmMetadata) getBiliUploadConfig() interface{} {
 	if t.App.Config == nil || t.App.Config.BilibiliConfig == nil {
 		return nil
 	}

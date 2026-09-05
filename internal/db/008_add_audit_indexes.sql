@@ -1,8 +1,5 @@
 -- Add indexes to cw_audit_logs table for better query performance
 
--- Create composite index for user and creation time (common for user's own history)
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON cw_audit_logs (user_id, created_at);
-
 -- Create composite index for action and creation time (filtering by action type)
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action_created ON cw_audit_logs (action, created_at);
 

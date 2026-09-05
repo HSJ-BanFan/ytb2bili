@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/difyz9/bilibili-go-sdk/bilibili"
-	internalAuth "github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/storage"
@@ -40,46 +39,21 @@ func NewAuthHandler(app *core.AppServer, biliAccountService *services.BiliAccoun
 	}
 }
 
-// getUserID 从 context 获取用户ID
-func (h *AuthHandler) getUserID(c *gin.Context) uint {
-	if userID, exists := c.Get("user_id"); exists {
-		switch v := userID.(type) {
-		case uint:
-			return v
-		case int:
-			return uint(v)
-		case float64:
-			return uint(v)
-		}
-	}
-	return 0
-}
-
-// RegisterRoutes 注册认证相关路由
-func (h *AuthHandler) RegisterRoutes(server *core.AppServer, authMiddleware *internalAuth.AuthMiddleware) {
-	api := server.Engine.Group("/api/v1")
-
-	authGroup := api.Group("/auth")
-	{
-		authGroup.GET("/qrcode", h.getQRCode)
-		authGroup.GET("/qrcode/image/:authCode", h.getQRCodeImage)
-		authGroup.POST("/poll", h.pollQRCode)
-		authGroup.GET("/login", h.loadLoginInfo)
-		authGroup.GET("/status", h.checkLoginStatus)
-		authGroup.GET("/userinfo", h.getUserInfo)
-		authGroup.POST("/logout", h.logout)
-
-		// 多账号管理 API（需要 JWT 认证，按用户隔离）
-		accounts := authGroup.Group("/accounts")
-		accounts.Use(authMiddleware.JWTAuth())
-		{
-			accounts.GET("", h.getAccounts)
-			accounts.POST("", h.addAccount)
-			accounts.DELETE("/:mid", h.removeAccount)
-			accounts.PUT("/:mid/enable", h.setAccountEnabled)
-			accounts.PUT("/:mid/primary", h.setPrimaryAccount)
-		}
-	}
+// RegisterRoutes 注册 B站扫码登录和账号管理路由
+func (h *AuthHandler) RegisterRoutes(server *core.AppServer) {
+	api := server.Engine.Group("/api/v1/auth")
+	api.GET("/qrcode", h.getQRCode)
+	api.GET("/qrcode/image/:authCode", h.getQRCodeImage)
+	api.POST("/poll", h.pollQRCode)
+	api.GET("/login", h.loadLoginInfo)
+	api.GET("/status", h.checkLoginStatus)
+	api.GET("/userinfo", h.getUserInfo)
+	api.POST("/logout", h.logout)
+	api.GET("/accounts", h.getAccounts)
+	api.POST("/accounts", h.addAccount)
+	api.DELETE("/accounts/:mid", h.removeAccount)
+	api.PUT("/accounts/:mid/enable", h.setAccountEnabled)
+	api.PUT("/accounts/:mid/primary", h.setPrimaryAccount)
 }
 
 // QRCodeRequest 二维码请求
@@ -268,7 +242,7 @@ func (h *AuthHandler) pollQRCode(c *gin.Context) {
 	}
 
 	// 扫码成功，保存登录信息到 BiliStore 供 bindFromQRCode 使用
-	biliStore := internalAuth.GetBiliStore()
+	biliStore := storage.GetDefaultStore()
 	if biliStore != nil {
 		biliStore.Save(loginInfo)
 		log.Printf("[pollQRCode] 登录信息已保存到 BiliStore")
@@ -537,18 +511,12 @@ type AccountInfo struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// getAccounts 获取当前用户的所有账号列表（按用户隔离）
+// getAccounts 获取全局账号列表
 func (h *AuthHandler) getAccounts(c *gin.Context) {
-	userID := h.getUserID(c)
-	log.Printf("[getAccounts] 获取用户账号列表, userID=%d", userID)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
+	log.Printf("[getAccounts] 获取全局账号列表")
 
-	// 从数据库获取当前用户的账号
-	accounts, err := h.BiliAccountService.GetUserAccounts(userID)
-	log.Printf("[getAccounts] 查询结果: userID=%d, 账号数量=%d, err=%v", userID, len(accounts), err)
+	accounts, err := h.BiliAccountService.GetAccounts()
+	log.Printf("[getAccounts] 查询结果: 账号数量=%d, err=%v", len(accounts), err)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -592,14 +560,9 @@ type AddAccountRequest struct {
 	LoginInfo *bilibili.LoginInfo `json:"login_info"`
 }
 
-// addAccount 添加新账号（通过扫码登录后调用，按用户隔离）
+// addAccount 添加新账号（通过扫码登录后调用）
 func (h *AuthHandler) addAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	log.Printf("[addAccount] 添加账号, userID=%d", userID)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
+	log.Printf("[addAccount] 添加全局账号")
 
 	// 先读取原始请求体用于调试
 	bodyBytes, _ := c.GetRawData()
@@ -632,14 +595,10 @@ func (h *AuthHandler) addAccount(c *gin.Context) {
 	log.Printf("[addAccount] 收到 login_info, Mid=%d, Name=%s", loginInfo.TokenInfo.Mid, loginInfo.TokenInfo.Uname)
 
 	// 获取现有账号数量（用于判断是否设为主账号）
-	existingAccounts, _ := h.BiliAccountService.GetUserAccounts(userID)
-	// 注意：所有用户都可以绑定多个账号，只是非企业版上传时只用主账号
-
-	// 检查是否为第一个账号（设为主账号）
+	existingAccounts, _ := h.BiliAccountService.GetAccounts()
+	// 第一个账号自动设为主账号
 	isPrimary := len(existingAccounts) == 0
-
-	// 保存到数据库
-	account, err := h.BiliAccountService.BindAccount(userID, loginInfo, isPrimary)
+	account, err := h.BiliAccountService.BindAccount(loginInfo, isPrimary)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -676,13 +635,8 @@ func (h *AuthHandler) addAccount(c *gin.Context) {
 	})
 }
 
-// removeAccount 删除账号（按用户隔离，通过B站MID）
+// removeAccount 删除账号（通过B站MID）
 func (h *AuthHandler) removeAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	midStr := c.Param("mid")
 	biliMid, err := strconv.ParseInt(midStr, 10, 64)
@@ -694,7 +648,7 @@ func (h *AuthHandler) removeAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.UnbindAccountByMid(userID, biliMid); err != nil {
+	if err := h.BiliAccountService.UnbindAccountByMid(biliMid); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "Failed to remove account: " + err.Error(),
@@ -713,13 +667,8 @@ type SetAccountEnabledRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
-// setAccountEnabled 设置账号启用/禁用状态（按用户隔离，通过B站MID）
+// setAccountEnabled 设置账号启用/禁用状态（通过B站MID）
 func (h *AuthHandler) setAccountEnabled(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	midStr := c.Param("mid")
 	biliMid, err := strconv.ParseInt(midStr, 10, 64)
@@ -742,9 +691,9 @@ func (h *AuthHandler) setAccountEnabled(c *gin.Context) {
 
 	var updateErr error
 	if req.Enabled {
-		updateErr = h.BiliAccountService.EnableAccountByMid(userID, biliMid)
+		updateErr = h.BiliAccountService.EnableAccountByMid(biliMid)
 	} else {
-		updateErr = h.BiliAccountService.DisableAccountByMid(userID, biliMid)
+		updateErr = h.BiliAccountService.DisableAccountByMid(biliMid)
 	}
 
 	if updateErr != nil {
@@ -761,13 +710,8 @@ func (h *AuthHandler) setAccountEnabled(c *gin.Context) {
 	})
 }
 
-// setPrimaryAccount 设置主账号（按用户隔离，通过B站MID）
+// setPrimaryAccount 设置主账号（通过B站MID）
 func (h *AuthHandler) setPrimaryAccount(c *gin.Context) {
-	userID := h.getUserID(c)
-	if userID == 0 {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "未登录"})
-		return
-	}
 
 	midStr := c.Param("mid")
 	biliMid, err := strconv.ParseInt(midStr, 10, 64)
@@ -779,7 +723,7 @@ func (h *AuthHandler) setPrimaryAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.BiliAccountService.SetPrimaryAccountByMid(userID, biliMid); err != nil {
+	if err := h.BiliAccountService.SetPrimaryAccountByMid(biliMid); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
 			"message": "Failed to set primary account: " + err.Error(),

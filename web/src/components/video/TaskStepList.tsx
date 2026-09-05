@@ -74,7 +74,7 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
     return step.can_retry && (step.status === 'failed' || step.status === 'skipped');
   };
 
-  // 允许手动执行 pending 状态的上传步骤（Free 用户手动上传）
+  // 允许手动执行 pending 状态的上传步骤
   const canExecuteStep = (step: TaskStep) => {
     // 支持中文和英文步骤名
     const uploadSteps = [

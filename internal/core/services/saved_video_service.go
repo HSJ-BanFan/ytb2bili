@@ -1,8 +1,6 @@
 package services
 
 import (
-	"errors"
-
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"gorm.io/gorm"
 )
@@ -143,67 +141,4 @@ func (s *SavedVideoService) UpdateVideoFields(id uint, fields map[string]interfa
 	return s.DB.Model(&model.SavedVideo{}).
 		Where("id = ?", id).
 		Updates(fields).Error
-}
-
-// ========== 带用户隔离的方法 ==========
-
-// GetVideoByIDForUser 根据ID获取视频（带用户隔离，userID=0 时查看所有）
-func (s *SavedVideoService) GetVideoByIDForUser(id, userID uint) (*model.SavedVideo, error) {
-	var video model.SavedVideo
-	query := s.DB.Where("id = ?", id)
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
-	err := query.First(&video).Error
-	if err != nil {
-		return nil, err
-	}
-	return &video, nil
-}
-
-// GetVideoByVideoIDForUser 根据 VideoID 获取视频（带用户隔离，userID=0 时查看所有）
-func (s *SavedVideoService) GetVideoByVideoIDForUser(videoID string, userID uint) (*model.SavedVideo, error) {
-	var video model.SavedVideo
-	query := s.DB.Where("video_id = ?", videoID)
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
-	err := query.First(&video).Error
-	if err != nil {
-		return nil, err
-	}
-	return &video, nil
-}
-
-// GetVideosPaginatedForUser 获取分页视频列表（带用户隔离，userID=0 时查看所有）
-func (s *SavedVideoService) GetVideosPaginatedForUser(offset, limit int, userID uint) ([]model.SavedVideo, int, error) {
-	var videos []model.SavedVideo
-	var total int64
-
-	query := s.DB.Model(&model.SavedVideo{})
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
-
-	// 获取总数
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	// 分页查询
-	err := query.Order("created_at DESC").
-		Offset(offset).
-		Limit(limit).
-		Find(&videos).Error
-
-	return videos, int(total), err
-}
-
-// DeleteVideoForUser 删除视频（带用户隔离）
-func (s *SavedVideoService) DeleteVideoForUser(id, userID uint) error {
-	result := s.DB.Where("id = ? AND user_id = ?", id, userID).Delete(&model.SavedVideo{})
-	if result.RowsAffected == 0 {
-		return errors.New("视频不存在或无权删除")
-	}
-	return result.Error
 }

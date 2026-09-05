@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/google/generative-ai-go/genai"
@@ -34,41 +33,26 @@ func NewConfigHandler(app *core.AppServer) *ConfigHandler {
 }
 
 // RegisterRoutes 注册配置相关路由
-func (h *ConfigHandler) RegisterRoutes(server *core.AppServer, authMiddleware *auth.AuthMiddleware) {
-	api := server.Engine.Group("/api/v1")
+// RegisterRoutes 注册公开配置路由。工具模式没有用户/角色认证。
+func (h *ConfigHandler) RegisterRoutes(server *core.AppServer) {
+	api := server.Engine.Group("/api/v1/config")
 
-	// 先进行JWT认证，确保用户已登录
-	api.Use(authMiddleware.JWTAuth())
-
-	// 然后加载用户角色（JWTAuth已包含角色加载，这里再调用一次也无妨）
-	api.Use(auth.LoadUserRole(h.db))
-
-	config := api.Group("/config")
-	{
-		// 公开端点（所有登录用户可读取）
-		config.GET("/deepseek", h.getDeepSeekConfig)
-		config.GET("/proxy", h.getProxyConfig)
-		config.GET("/openai-compatible", h.getOpenAICompatibleConfig)
-		config.GET("/openai-compatible/providers", h.getOpenAICompatibleProviders)
-		config.GET("/ai-services/status", h.getAIServicesStatus)
-		config.GET("/gemini", h.getGeminiConfig)
-		config.GET("/gemini/models", h.getGeminiModels)
-		config.GET("/download", h.getDownloadConfig)
-
-		// 管理员端点（仅管理员可修改）
-		adminConfig := config.Group("")
-		adminConfig.Use(auth.RequireAdmin())
-		{
-			adminConfig.PUT("/deepseek", h.updateDeepSeekConfig)
-			adminConfig.PUT("/proxy", h.updateProxyConfig)
-			adminConfig.PUT("/openai-compatible", h.updateOpenAICompatibleConfig)
-			adminConfig.POST("/openai-compatible/test", h.testOpenAICompatibleAPI)
-			adminConfig.PUT("/ai-services/primary", h.setPrimaryAIService)
-			adminConfig.PUT("/gemini", h.updateGeminiConfig)
-			adminConfig.POST("/gemini/validate", h.validateGeminiApiKeys)
-			adminConfig.PUT("/download", h.updateDownloadConfig)
-		}
-	}
+	api.GET("/deepseek", h.getDeepSeekConfig)
+	api.PUT("/deepseek", h.updateDeepSeekConfig)
+	api.GET("/proxy", h.getProxyConfig)
+	api.PUT("/proxy", h.updateProxyConfig)
+	api.GET("/openai-compatible", h.getOpenAICompatibleConfig)
+	api.PUT("/openai-compatible", h.updateOpenAICompatibleConfig)
+	api.POST("/openai-compatible/test", h.testOpenAICompatibleAPI)
+	api.GET("/openai-compatible/providers", h.getOpenAICompatibleProviders)
+	api.GET("/ai-services/status", h.getAIServicesStatus)
+	api.PUT("/ai-services/primary", h.setPrimaryAIService)
+	api.GET("/gemini", h.getGeminiConfig)
+	api.PUT("/gemini", h.updateGeminiConfig)
+	api.POST("/gemini/validate", h.validateGeminiApiKeys)
+	api.GET("/gemini/models", h.getGeminiModels)
+	api.GET("/download", h.getDownloadConfig)
+	api.PUT("/download", h.updateDownloadConfig)
 }
 
 // DownloadConfigRequest 下载配置请求

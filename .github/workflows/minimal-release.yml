@@ -60,9 +60,6 @@ jobs:
         cat > win64/start.bat << 'EOF'
         @echo off
         echo Starting YTB2BILI Server...
-        set JWT_SECRET=12345678901234567890123456789012
-        set SESSION_SECRET=12345678901234567890123456789012
-        set APP_AUTH_SECRET=12345678901234567890123456789012
         set ENVIRONMENT=production
         set DEBUG=true
         set CORS_ALLOWED_ORIGINS=http://localhost:8096,http://localhost:3000
@@ -80,9 +77,6 @@ jobs:
         cat > linux64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
-        export JWT_SECRET="12345678901234567890123456789012"
-        export SESSION_SECRET="12345678901234567890123456789012"
-        export APP_AUTH_SECRET="12345678901234567890123456789012"
         export ENVIRONMENT="production"
         export DEBUG="true"
         export CORS_ALLOWED_ORIGINS="http://localhost:8096,http://localhost:3000"
@@ -101,9 +95,6 @@ jobs:
         cat > linux-arm64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
-        export JWT_SECRET="12345678901234567890123456789012"
-        export SESSION_SECRET="12345678901234567890123456789012"
-        export APP_AUTH_SECRET="12345678901234567890123456789012"
         export ENVIRONMENT="production"
         export DEBUG="true"
         export CORS_ALLOWED_ORIGINS="http://localhost:8096,http://localhost:3000"
@@ -122,9 +113,6 @@ jobs:
         cat > macos-intel/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
-        export JWT_SECRET="12345678901234567890123456789012"
-        export SESSION_SECRET="12345678901234567890123456789012"
-        export APP_AUTH_SECRET="12345678901234567890123456789012"
         export ENVIRONMENT="production"
         export DEBUG="true"
         export CORS_ALLOWED_ORIGINS="http://localhost:8096,http://localhost:3000"
@@ -143,9 +131,6 @@ jobs:
         cat > macos-arm64/start.sh << 'EOF'
         #!/bin/bash
         echo "Starting YTB2BILI Server..."
-        export JWT_SECRET="12345678901234567890123456789012"
-        export SESSION_SECRET="12345678901234567890123456789012"
-        export APP_AUTH_SECRET="12345678901234567890123456789012"
         export ENVIRONMENT="production"
         export DEBUG="true"
         export CORS_ALLOWED_ORIGINS="http://localhost:8096,http://localhost:3000"

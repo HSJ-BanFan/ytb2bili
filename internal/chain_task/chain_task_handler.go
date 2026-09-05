@@ -12,7 +12,6 @@ import (
 	models2 "github.com/difyz9/ytb2bili/internal/core/models"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
-	applogger "github.com/difyz9/ytb2bili/internal/logger"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -163,7 +162,6 @@ func (h *ChainTaskHandler) SetUp() {
 		// 遍历所有待处理任务，尝试并发执行
 		for _, task := range pendingTasks {
 			videoID := task.VideoId
-			userID := task.UserID
 
 			// 检查是否已在执行中（内存级快速检查）
 			if _, loaded := h.inFlightTasks.LoadOrStore(videoID, true); loaded {
@@ -194,26 +192,16 @@ func (h *ChainTaskHandler) SetUp() {
 			select {
 			case h.workerPool <- struct{}{}:
 				// 获取到 slot，启动 goroutine 执行
-				go func(t models2.TbVideo, uid uint) {
+				go func(t models2.TbVideo) {
 					defer func() {
 						<-h.workerPool
 						h.inFlightTasks.Delete(t.VideoId)
 					}()
 
-					// 创建用户日志助手
-					userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), uid)
-					userLogger.TaskLog(t.VideoId, "schedule", "started",
-						map[string]interface{}{
-							"title": t.Title,
-							"mode":  "concurrent",
-						})
+					h.App.Logger.Infof("任务 %s 开始处理 (mode=concurrent): %s", t.VideoId, t.Title)
 					h.RunTaskChain(t)
-					userLogger.TaskLog(t.VideoId, "schedule", "completed",
-						map[string]interface{}{
-							"title": t.Title,
-							"mode":  "concurrent",
-						})
-				}(*task, userID)
+					h.App.Logger.Infof("任务 %s 处理完成 (mode=concurrent): %s", t.VideoId, t.Title)
+				}(*task)
 			default:
 				// worker pool 已满，回滚状态并跳过本次调度
 				h.updateSavedVideoStatus(task.Id, "001")
@@ -256,7 +244,6 @@ func (h *ChainTaskHandler) getPendingTasks() ([]*models2.TbVideo, error) {
 		task := &models2.TbVideo{
 			Id:        sv.ID,
 			URL:       sv.URL,
-			UserID:    sv.UserID,
 			Title:     sv.Title,
 			VideoId:   sv.VideoID,
 			Status:    sv.Status,
@@ -303,23 +290,14 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 	}
 	defer h.CancelManager.Deregister(video.Id, runID)
 
-	// 创建用户日志助手
-	userLogger := applogger.NewUserLogger(h.App.Logger.Desugar(), video.UserID)
-	userLogger.TaskLog(video.VideoId, "task_chain", "started",
-		map[string]interface{}{
-			"title": video.Title,
-			"url":   video.URL,
-		})
+	h.App.Logger.Infof("任务链开始: %s (%s)", video.VideoId, video.Title)
 
 	// 初始化任务步骤
 	if err := h.TaskStepService.InitTaskSteps(video.VideoId); err != nil {
-		userLogger.Errorm("初始化任务步骤失败",
-			map[string]interface{}{
-				"error": err.Error(),
-			})
+		h.App.Logger.Errorf("初始化任务步骤失败: %v", err)
 	}
 
-	stateManager := manager.NewStateManager(video.Id, video.UserID, video.VideoId, currentDir, video.CreatedAt)
+	stateManager := manager.NewStateManager(video.Id, video.VideoId, currentDir, video.CreatedAt)
 
 	// 创建任务链并设置日志、视频ID和取消上下文
 	chain := manager.NewTaskChain().
@@ -399,11 +377,7 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 
 	// 检查是否被取消
 	if canceled, exists := result["canceled"]; exists && canceled.(bool) {
-		userLogger.TaskLog(video.VideoId, "task_chain", "canceled",
-			map[string]interface{}{
-				"duration_seconds": duration.Seconds(),
-				"reason":           "用户删除视频",
-			})
+		h.App.Logger.Infof("任务链已取消: %s (%.1f秒)", video.VideoId, duration.Seconds())
 		// 更新状态为取消（998）
 		if err := h.updateSavedVideoStatus(video.Id, "998"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为取消时出错: %v", err)
@@ -425,21 +399,13 @@ func (h *ChainTaskHandler) RunTaskChain(video models2.TbVideo) {
 		}).Error; err != nil {
 			h.App.Logger.Errorf("更新任务状态为完成时出错: %v", err)
 		}
-		userLogger.TaskLog(video.VideoId, "task_chain", "completed",
-			map[string]interface{}{
-				"duration_seconds": duration.Seconds(),
-				"failed_tasks":     len(chain.FailedTasks),
-			})
+		h.App.Logger.Infof("✅ 任务链完成: %s (%.1f秒, 失败任务: %d)", video.VideoId, duration.Seconds(), len(chain.FailedTasks))
 		h.App.Logger.Infof("✅ 任务链完成，视频准备就绪 (处理完成时间: %s)", now.Format("15:04:05"))
 	} else {
 		if err := h.updateSavedVideoStatus(video.Id, "999"); err != nil {
 			h.App.Logger.Errorf("更新任务状态为失败时出错: %v", err)
 		}
-		userLogger.TaskLog(video.VideoId, "task_chain", "failed",
-			map[string]interface{}{
-				"duration_seconds": duration.Seconds(),
-				"failed_tasks":     len(chain.FailedTasks),
-			})
+		h.App.Logger.Errorf("任务链失败: %s (%.1f秒, 失败任务: %d)", video.VideoId, duration.Seconds(), len(chain.FailedTasks))
 	}
 
 	// 记录最终结果
@@ -471,7 +437,6 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	video := models2.TbVideo{
 		Id:        savedVideo.ID,
 		URL:       savedVideo.URL,
-		UserID:    savedVideo.UserID,
 		Title:     savedVideo.Title,
 		VideoId:   savedVideo.VideoID,
 		Status:    savedVideo.Status,
@@ -499,7 +464,7 @@ func (h *ChainTaskHandler) RunSingleTaskStep(videoID, stepName string) error {
 	}
 
 	// 创建状态管理器
-	stateManager := manager.NewStateManager(video.Id, video.UserID, video.VideoId, currentDir, video.CreatedAt)
+	stateManager := manager.NewStateManager(video.Id, video.VideoId, currentDir, video.CreatedAt)
 
 	// 重置步骤状态
 	if err := h.TaskStepService.ResetTaskStep(videoID, stepName); err != nil {

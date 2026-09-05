@@ -82,13 +82,13 @@ func (c *Client) TrackEvent(ctx context.Context, eventName string, properties ma
 	return nil
 }
 
-// TrackUserAction 跟踪用户操作
-func (c *Client) TrackUserAction(ctx context.Context, userID, deviceID, action string, properties map[string]interface{}) error {
+// TrackUserAction 跟踪匿名访问者操作
+func (c *Client) TrackUserAction(ctx context.Context, visitorID, deviceID, action string, properties map[string]interface{}) error {
 	if properties == nil {
 		properties = make(map[string]interface{})
 	}
 
-	properties["user_id"] = userID
+	properties["user_id"] = visitorID
 	properties["device_id"] = deviceID
 	properties["timestamp"] = time.Now().Unix()
 
@@ -96,14 +96,14 @@ func (c *Client) TrackUserAction(ctx context.Context, userID, deviceID, action s
 }
 
 // TrackAPIRequest 跟踪API请求
-func (c *Client) TrackAPIRequest(ctx context.Context, endpoint, method, userID, deviceID string, statusCode int, duration time.Duration) error {
+func (c *Client) TrackAPIRequest(ctx context.Context, endpoint, method, visitorID, deviceID string, statusCode int, duration time.Duration) error {
 	properties := map[string]interface{}{
 		"endpoint":     endpoint,
 		"method":       method,
 		"status_code":  statusCode,
 		"duration_ms":  duration.Milliseconds(),
 		"request_time": time.Now().Format(time.RFC3339),
-		"user_id":      userID,
+		"user_id":      visitorID,
 		"device_id":    deviceID,
 	}
 
@@ -111,13 +111,13 @@ func (c *Client) TrackAPIRequest(ctx context.Context, endpoint, method, userID, 
 }
 
 // TrackVideoUpload 跟踪视频上传事件
-func (c *Client) TrackVideoUpload(ctx context.Context, userID, deviceID, videoID, title string, size int64) error {
+func (c *Client) TrackVideoUpload(ctx context.Context, visitorID, deviceID, videoID, title string, size int64) error {
 	properties := map[string]interface{}{
 		"video_id":   videoID,
 		"title":      title,
 		"size_bytes": size,
 		"size_mb":    float64(size) / 1024.0 / 1024.0,
-		"user_id":    userID,
+		"user_id":    visitorID,
 		"device_id":  deviceID,
 		"timestamp":  time.Now().Unix(),
 	}
@@ -125,13 +125,13 @@ func (c *Client) TrackVideoUpload(ctx context.Context, userID, deviceID, videoID
 	return c.TrackEvent(ctx, "video_upload", properties)
 }
 
-// TrackError 跟踪错误事件
-func (c *Client) TrackError(ctx context.Context, userID, deviceID, errorType, errorMessage, stackTrace string) error {
+// TrackError 跟踪匿名访问者错误
+func (c *Client) TrackError(ctx context.Context, visitorID, deviceID, errorType, errorMessage, stackTrace string) error {
 	properties := map[string]interface{}{
 		"error_type":    errorType,
 		"error_message": errorMessage,
 		"stack_trace":   stackTrace,
-		"user_id":       userID,
+		"user_id":       visitorID,
 		"device_id":     deviceID,
 		"timestamp":     time.Now().Unix(),
 	}

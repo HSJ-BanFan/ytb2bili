@@ -1,10 +1,3 @@
-export interface User {
-  id: string;
-  name: string;
-  mid: string;
-  avatar?: string;
-  isLoggedIn: boolean;
-}
 
 export interface Video {
   id: number;
@@ -104,9 +97,8 @@ export interface QRCodeResponse {
   auth_code: string;
 }
 
-export interface LoginStatus {
+export interface BiliLoginStatus {
   is_logged_in: boolean;
-  user?: User;
   message?: string;
 }
 

@@ -2,7 +2,6 @@ package services
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -97,22 +96,6 @@ func (s *TaskStepService) GetTaskStepsByVideoID(videoID string) ([]model.TaskSte
 		Order("step_order ASC").
 		Find(&steps).Error
 	return steps, err
-}
-
-// GetTaskStepsByVideoIDForUser 根据视频ID获取任务步骤列表（带用户隔离）
-// 先校验视频归属，再返回任务步骤
-func (s *TaskStepService) GetTaskStepsByVideoIDForUser(videoID string, userID uint) ([]model.TaskStep, error) {
-	// 先校验视频归属
-	var video model.SavedVideo
-	query := s.DB.Where("video_id = ?", videoID)
-	if userID > 0 {
-		query = query.Where("user_id = ?", userID)
-	}
-	if err := query.First(&video).Error; err != nil {
-		return nil, errors.New("视频不存在或无权访问")
-	}
-	// 返回任务步骤
-	return s.GetTaskStepsByVideoID(videoID)
 }
 
 // UpdateTaskStepStatus 更新任务步骤状态

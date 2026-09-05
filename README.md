@@ -61,9 +61,9 @@
 - **🌐 百度翻译 API** - 专业机器翻译服务
 - **🤖 DeepSeek AI** - 先进的AI翻译和内容生成
 - **🔮 Gemini AI** - Google 原生多模态 AI，支持视频内容分析和元数据生成
-- **📺 Bilibili SDK** - 官方视频上传和用户认证API
+- **📺 Bilibili SDK** - 官方视频上传和账号凭证管理 API
 - **☁️ 腾讯云 COS** - 企业级对象存储服务
-- **📊 数据分析** - 可选的用户行为分析和统计
+- **📊 数据分析** - 可选的匿名使用统计
 
 ---
 
@@ -102,7 +102,6 @@ internal/                        # 🏠 内部业务逻辑
 │   ├── models/                  # 📊 数据模型
 │   │   ├── tb_video.go          # 视频表模型
 │   │   ├── tb_task_step.go      # 任务步骤模型
-│   │   ├── tb_user.go           # 用户模型
 │   │   └── ...
 │   ├── services/                # 🔄 业务服务层
 │   │   ├── tb_video_service.go  # 视频业务逻辑
@@ -112,7 +111,7 @@ internal/                        # 🏠 内部业务逻辑
 │       ├── app_config.go        # 应用配置定义
 │       └── task_interface.go    # 任务接口定义
 ├── handler/                     # 🌐 HTTP 请求处理器
-│   ├── auth_handler.go          # 认证相关 API
+│   ├── auth_handler.go          # B站扫码和凭证 API
 │   ├── video_handler.go         # 视频管理 API
 │   ├── upload_handler.go        # 上传相关 API
 │   ├── subtitle_handler.go      # 字幕处理 API
@@ -164,7 +163,7 @@ pkg/                             # 📚 可重用组件库
 
 ```bash
 # 克隆项目 (需要前端项目在同级目录)
-git clone https://github.com/difyz9/ytb2bili.git
+git clone https://github.com/HSJ-BanFan/ytb2bili.git
 cd ytb2bili/bili-up-api
 
 # 一键构建 (自动构建前端+后端并打包成单个可执行文件)
@@ -409,7 +408,7 @@ POST /api/v1/videos/:id/upload/subtitle  # 手动上传字幕
 **用途**: 绕过定时调度，立即执行上传任务
 </details>
 
-### 🔐 B站认证 API
+### 🔐 B站账号凭证 API
 
 <details>
 <summary><strong>📱 获取登录二维码</strong></summary>
@@ -489,7 +488,7 @@ GET /api/v1/auth/status
 <summary><strong>💾 保存视频到处理队列</strong></summary>
 
 ```http
-POST /api/v1/subtitles/save
+POST /api/v1/submit
 Content-Type: application/json
 
 {
@@ -601,7 +600,7 @@ curl http://localhost:8096/api/v1/auth/status
 curl http://localhost:8096/api/v1/auth/qrcode
 
 # 3. 添加视频到处理队列
-curl -X POST http://localhost:8096/api/v1/subtitles/save \
+curl -X POST http://localhost:8096/api/v1/submit \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","operation_type":"auto_process"}'
 
@@ -688,27 +687,6 @@ CREATE TABLE `task_steps` (
 ```
 </details>
 
-<details>
-<summary><strong>👤 tb_users - 用户表</strong></summary>
-
-```sql
-CREATE TABLE `tb_users` (
-  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `username` varchar(100) NOT NULL COMMENT '用户名',
-  `bilibili_uid` bigint DEFAULT NULL COMMENT 'B站UID',
-  `avatar_url` varchar(500) DEFAULT NULL COMMENT '头像URL',
-  `access_token` text COMMENT '访问令牌',
-  `refresh_token` text COMMENT '刷新令牌',  
-  `cookies` text COMMENT '登录Cookie',
-  `login_status` tinyint(1) DEFAULT '0' COMMENT '登录状态',
-  `last_login_at` timestamp NULL DEFAULT NULL,
-  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_bilibili_uid` (`bilibili_uid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
-```
-</details>
 
 ### 状态流转图
 
@@ -897,7 +875,7 @@ go tool pprof http://localhost:8096/debug/pprof/heap
    tail -n 100 logs/app.log
    ```
 
-2. **🐛 提交Issue**: 访问 [GitHub Issues](https://github.com/difyz9/ytb2bili/issues)
+2. **🐛 提交Issue**: 访问 [GitHub Issues](https://github.com/HSJ-BanFan/ytb2bili/issues)
 3. **💬 QQ交流群**: 773066052 (技术交流和问题讨论)
 4. **💬 社区讨论**: 加入项目讨论群组
 5. **📧 微信联系**: 扫描下方二维码添加微信
@@ -917,23 +895,23 @@ go tool pprof http://localhost:8096/debug/pprof/heap
 
 > **🎉 自动构建**: 项目已配置 GitHub Actions，每次发布都会自动构建多平台二进制文件
 
-[![Build Test](https://github.com/difyz9/ytb2bili/actions/workflows/test.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/test.yml)
-[![Release](https://github.com/difyz9/ytb2bili/actions/workflows/minimal-release.yml/badge.svg)](https://github.com/difyz9/ytb2bili/actions/workflows/minimal-release.yml)
+[![Build Test](https://github.com/HSJ-BanFan/ytb2bili/actions/workflows/test.yml/badge.svg)](https://github.com/HSJ-BanFan/ytb2bili/actions/workflows/test.yml)
+[![Release](https://github.com/HSJ-BanFan/ytb2bili/actions/workflows/minimal-release.yml/badge.svg)](https://github.com/HSJ-BanFan/ytb2bili/actions/workflows/minimal-release.yml)
 
 **📥 快速下载** (免编译，开箱即用):
 
 | 平台 | 架构 | 下载链接 | 说明 |
 |------|------|----------|------|
-| 🪟 **Windows** | x64 | [下载 .zip](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-windows-amd64.zip) | 包含 `start.bat` 启动脚本 |
-| 🐧 **Linux** | x64 | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz) | 适用于大多数 Linux 发行版 |
-| 🐧 **Linux** | ARM64 | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-arm64.tar.gz) | 适用于树莓派、ARM 服务器 |
-| 🍎 **macOS** | Intel | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-darwin-amd64.tar.gz) | Intel 芯片的 Mac |
-| 🍎 **macOS** | Apple Silicon | [下载 .tar.gz](https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-darwin-arm64.tar.gz) | M1/M2/M3 芯片的 Mac |
+| 🪟 **Windows** | x64 | [下载 .zip](https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-windows-amd64.zip) | 包含 `start.bat` 启动脚本 |
+| 🐧 **Linux** | x64 | [下载 .tar.gz](https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz) | 适用于大多数 Linux 发行版 |
+| 🐧 **Linux** | ARM64 | [下载 .tar.gz](https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-linux-arm64.tar.gz) | 适用于树莓派、ARM 服务器 |
+| 🍎 **macOS** | Intel | [下载 .tar.gz](https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-darwin-amd64.tar.gz) | Intel 芯片的 Mac |
+| 🍎 **macOS** | Apple Silicon | [下载 .tar.gz](https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-darwin-arm64.tar.gz) | M1/M2/M3 芯片的 Mac |
 
 **🚀 快速部署步骤**:
 ```bash
 # 1. 下载并解压
-wget https://github.com/difyz9/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz
+wget https://github.com/HSJ-BanFan/ytb2bili/releases/latest/download/ytb2bili-linux-amd64.tar.gz
 tar -xzf ytb2bili-linux-amd64.tar.gz
 cd ytb2bili-linux-amd64
 
@@ -949,7 +927,7 @@ nano config.toml
 ```
 
 > **💡 自动更新**: 
-> - 🏷️ **稳定版**: 关注 [Releases](https://github.com/difyz9/ytb2bili/releases) 获取最新稳定版本
+> - 🏷️ **稳定版**: 关注 [Releases](https://github.com/HSJ-BanFan/ytb2bili/releases) 获取最新稳定版本
 > - 🔄 **自动构建**: 每次代码提交都会触发自动构建和测试
 > - 📊 **构建状态**: 点击上方徽章查看构建状态和历史
 
@@ -1096,7 +1074,7 @@ scrape_configs:
 我们欢迎各种形式的贡献！
 
 **🐛 报告问题**:
-- 使用 [GitHub Issues](https://github.com/difyz9/ytb2bili/issues)
+- 使用 [GitHub Issues](https://github.com/HSJ-BanFan/ytb2bili/issues)
 - 提供详细的错误信息和重现步骤
 - 包含系统环境和版本信息
 
@@ -1121,11 +1099,11 @@ scrape_configs:
 
 如果这个项目对你有帮助，请给我们一个 ⭐️ 
 
-[🐛 报告问题](https://github.com/difyz9/ytb2bili/issues) • 
-[💡 功能建议](https://github.com/difyz9/ytb2bili/issues) • 
-[📖 文档](https://github.com/difyz9/ytb2bili/wiki) • 
+[🐛 报告问题](https://github.com/HSJ-BanFan/ytb2bili/issues) •
+[💡 功能建议](https://github.com/HSJ-BanFan/ytb2bili/issues) •
+[📖 文档](https://github.com/HSJ-BanFan/ytb2bili/wiki) •
 [💬 QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=773066052) • 
-[💬 讨论](https://github.com/difyz9/ytb2bili/discussions)
+[💬 讨论](https://github.com/HSJ-BanFan/ytb2bili/discussions)
 
 </div>
 

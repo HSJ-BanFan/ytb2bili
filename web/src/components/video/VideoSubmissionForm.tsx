@@ -7,14 +7,7 @@ interface VideoSubmissionFormProps {
   onSubmit?: (data: any) => void;
 }
 
-// 获取认证头
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('jwt_token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-  };
-};
+const getRequestHeaders = () => ({ 'Content-Type': 'application/json' });
 
 export default function VideoSubmissionForm({ onSubmit }: VideoSubmissionFormProps) {
   const [formData, setFormData] = useState({
@@ -89,7 +82,7 @@ export default function VideoSubmissionForm({ onSubmit }: VideoSubmissionFormPro
     try {
       const response = await fetch('/api/v1/submit', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getRequestHeaders(),
         body: JSON.stringify(formData),
       });
 

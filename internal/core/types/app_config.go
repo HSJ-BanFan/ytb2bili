@@ -13,15 +13,13 @@ import (
 
 // AppConfig 应用程序配置
 type AppConfig struct {
-	Path        string        `toml:"-"`
-	Listen      string        `toml:"listen"`
-	Environment string        `toml:"environment"`
-	Debug       bool          `toml:"debug"`
-	Database    Database      `toml:"database"`
-	Auth        AuthConfig    `toml:"auth"`
-	AppAuth     AppAuthConfig `toml:"app_auth"` // 应用启动认证配置
-	FileUpDir   string        `toml:"fileUpDir"`
-	YtDlpPath   string        `toml:"yt_dlp_path"` // yt-dlp 安装路径
+	Path        string   `toml:"-"`
+	Listen      string   `toml:"listen"`
+	Environment string   `toml:"environment"`
+	Debug       bool     `toml:"debug"`
+	Database    Database `toml:"database"`
+	FileUpDir   string   `toml:"fileUpDir"`
+	YtDlpPath   string   `toml:"yt_dlp_path"` // yt-dlp 安装路径
 
 	TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`           // 腾讯云 COS 存储配置
 	BaiduTransConfig       *BaiduTransConfig       `toml:"BaiduTransConfig"`       // 百度翻译服务配置
@@ -33,11 +31,9 @@ type AppConfig struct {
 	DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`         // 下载配置
 	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
 	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
-	SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`             // SMTP邮件服务配置
 
 	// AI服务选择配置
-	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
-
+	PrimaryAIService string `toml:"primary_ai_service"` // 工具选择的首选AI服务: openai_compatible, deepseek, gemini
 	// 安全配置
 	Security SecurityConfig `toml:"security"`
 }
@@ -109,23 +105,6 @@ type Database struct {
 	Database string `toml:"database"` // 对于 sqlite，这是文件名
 	SSLMode  string `toml:"ssl_mode"` // sqlite 不需要
 	Timezone string `toml:"timezone"`
-}
-
-// AuthConfig 认证配置
-type AuthConfig struct {
-	JWTSecret     string `toml:"jwt_secret"`
-	JWTExpiration int    `toml:"jwt_expiration"` // 小时
-	SessionSecret string `toml:"session_secret"`
-}
-
-// AppAuthConfig 应用启动认证配置
-type AppAuthConfig struct {
-	Enabled       bool   `toml:"enabled"`        // 是否启用应用认证
-	APIURL        string `toml:"api_url"`        // 认证API地址
-	AppID         string `toml:"app_id"`         // 应用ID
-	AppSecret     string `toml:"app_secret"`     // 应用密钥
-	CheckInterval int    `toml:"check_interval"` // 定期检查间隔（分钟），0表示只在启动时检查
-	SkipOnError   bool   `toml:"skip_on_error"`  // 认证失败时是否跳过（开发环境可设置为true）
 }
 
 // GetDSN 获取数据库连接字符串
@@ -294,17 +273,6 @@ type AnalyticsConfig struct {
 	EncryptionKey string `toml:"encryption_key"` // AES加密密钥（可选，16/24/32字节）
 }
 
-// SMTPConfig SMTP邮件服务配置
-type SMTPConfig struct {
-	Enabled  bool   `toml:"enabled"`   // 是否启用邮件服务
-	Host     string `toml:"host"`      // SMTP 主机 (如: smtp.gmail.com:587)
-	From     string `toml:"from"`      // 发件人邮箱
-	FromName string `toml:"from_name"` // 发件人名称
-	Username string `toml:"username"`  // SMTP 用户名
-	Password string `toml:"password"`  // SMTP 密码（优先从环境变量读取）
-	UseTLS   bool   `toml:"use_tls"`   // 是否使用 TLS
-}
-
 // NewDefaultConfig 创建默认配置
 func NewDefaultConfig() *AppConfig {
 	return &AppConfig{
@@ -320,12 +288,6 @@ func NewDefaultConfig() *AppConfig {
 			Database: "bili_up_db",
 			SSLMode:  "disable",
 			Timezone: "Asia/Shanghai",
-		},
-
-		Auth: AuthConfig{
-			JWTSecret:     "your-jwt-secret-key",
-			JWTExpiration: 24,
-			SessionSecret: "your-session-secret",
 		},
 
 		// 腾讯云 COS 配置（默认值，可被 config.toml 覆盖）
@@ -424,17 +386,6 @@ func NewDefaultConfig() *AppConfig {
 			UpCloseReply:       0,         // 默认开启评论
 			UpCloseReward:      0,         // 默认开启打赏
 		},
-
-		// SMTP 邮件服务配置（默认值，可被 config.toml 覆盖）
-		SMTPConfig: &SMTPConfig{
-			Enabled:  false, // 默认禁用，开发环境验证码打印到日志
-			Host:     "",
-			From:     "",
-			FromName: "YTB2Bili",
-			Username: "",
-			Password: "",
-			UseTLS:   true,
-		},
 	}
 }
 
@@ -457,7 +408,6 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		Environment            string                  `toml:"environment"`
 		Debug                  bool                    `toml:"debug"`
 		Database               Database                `toml:"database"`
-		Auth                   AuthConfig              `toml:"auth"`
 		FileUpDir              string                  `toml:"fileUpDir"`
 		YtDlpPath              string                  `toml:"yt_dlp_path"`
 		TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`
@@ -468,7 +418,6 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
-		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
 		Security               SecurityConfig          `toml:"security"`
 	}
 
@@ -483,7 +432,6 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	config.Environment = fileConfig.Environment
 	config.Debug = fileConfig.Debug
 	config.Database = fileConfig.Database
-	config.Auth = fileConfig.Auth
 	config.FileUpDir = fileConfig.FileUpDir
 	config.YtDlpPath = fileConfig.YtDlpPath
 	if fileConfig.TenCosConfig != nil {
@@ -510,9 +458,6 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.BilibiliConfig != nil {
 		config.BilibiliConfig = fileConfig.BilibiliConfig
 	}
-	if fileConfig.SMTPConfig != nil {
-		config.SMTPConfig = fileConfig.SMTPConfig
-	}
 
 	// 应用安全配置
 	if len(fileConfig.Security.CORSAllowedOrigins) > 0 || fileConfig.Security.CSPEnabled || fileConfig.Security.HSTSEnabled {
@@ -533,7 +478,6 @@ func SaveConfig(config *AppConfig) error {
 		Environment            string                  `toml:"environment"`
 		Debug                  bool                    `toml:"debug"`
 		Database               Database                `toml:"database"`
-		Auth                   AuthConfig              `toml:"auth"`
 		FileUpDir              string                  `toml:"fileUpDir"`
 		YtDlpPath              string                  `toml:"yt_dlp_path"`
 		TenCosConfig           *TencentCosConfig       `toml:"TenCosConfig"`
@@ -544,14 +488,12 @@ func SaveConfig(config *AppConfig) error {
 		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
-		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
 		Security               SecurityConfig          `toml:"security"`
 	}{
 		Listen:                 config.Listen,
 		Environment:            config.Environment,
 		Debug:                  config.Debug,
 		Database:               config.Database,
-		Auth:                   config.Auth,
 		FileUpDir:              config.FileUpDir,
 		YtDlpPath:              config.YtDlpPath,
 		TenCosConfig:           config.TenCosConfig,
@@ -562,7 +504,6 @@ func SaveConfig(config *AppConfig) error {
 		DownloadConfig:         config.DownloadConfig,
 		AnalyticsConfig:        config.AnalyticsConfig,
 		BilibiliConfig:         config.BilibiliConfig,
-		SMTPConfig:             config.SMTPConfig,
 		Security:               config.Security,
 	}
 
@@ -572,7 +513,6 @@ func SaveConfig(config *AppConfig) error {
 	buf.WriteString("# Bilibili 视频上传后端 - 配置文件\n\n")
 	buf.WriteString("# 注意：以下配置已硬编码在代码中，无需在此配置：\n")
 	buf.WriteString("# - BaiduTransConfig (百度翻译)\n")
-	buf.WriteString("# - app_auth (应用认证)\n")
 	buf.WriteString("# \n")
 	buf.WriteString("# 所有配置都可以通过 config.toml 或 API 接口动态配置\n\n")
 
@@ -602,14 +542,6 @@ func applyEnvOverrides(config *AppConfig) {
 	// 数据库密码
 	if v := os.Getenv("DATABASE_PASSWORD"); v != "" {
 		config.Database.Password = v
-	}
-
-	// 认证配置
-	if v := os.Getenv("JWT_SECRET"); v != "" {
-		config.Auth.JWTSecret = v
-	}
-	if v := os.Getenv("SESSION_SECRET"); v != "" {
-		config.Auth.SessionSecret = v
 	}
 
 	// DeepSeek API Key
@@ -652,25 +584,12 @@ func applyEnvOverrides(config *AppConfig) {
 		config.TenCosConfig.CosSecretKey = v
 	}
 
-	// SMTP 密码
-	if v := os.Getenv("SMTP_PASSWORD"); v != "" {
-		if config.SMTPConfig == nil {
-			config.SMTPConfig = &SMTPConfig{}
-		}
-		config.SMTPConfig.Password = v
-	}
-
 	// 数据分析加密密钥
 	if v := os.Getenv("ANALYTICS_ENCRYPTION_KEY"); v != "" {
 		if config.AnalyticsConfig == nil {
 			config.AnalyticsConfig = &AnalyticsConfig{}
 		}
 		config.AnalyticsConfig.EncryptionKey = v
-	}
-
-	// 应用认证密钥
-	if v := os.Getenv("APP_AUTH_SECRET"); v != "" {
-		config.AppAuth.AppSecret = v
 	}
 
 	// ========== 安全配置环境变量 ==========

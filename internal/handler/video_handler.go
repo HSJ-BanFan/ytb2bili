@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/pkg/audit"
@@ -61,9 +60,8 @@ func (h *VideoHandler) SetCancelManager(cancelManager interface {
 }
 
 // RegisterRoutes 注册视频相关路由
-func (h *VideoHandler) RegisterRoutes(api *gin.RouterGroup, authMiddleware *auth.AuthMiddleware) {
+func (h *VideoHandler) RegisterRoutes(api *gin.RouterGroup) {
 	video := api.Group("/videos")
-	video.Use(authMiddleware.JWTAuth())
 	{
 		video.GET("", h.getVideoList)
 		video.GET("/:id", h.getVideoDetail)
@@ -128,15 +126,6 @@ type TaskStepInfo struct {
 
 // getVideoList 获取视频列表
 func (h *VideoHandler) getVideoList(c *gin.Context) {
-	// 获取用户ID进行权限验证
-	userID, exists := auth.GetUserID(c)
-	if !exists || userID == 0 {
-		c.JSON(http.StatusUnauthorized, VideoListResponse{
-			Code:    401,
-			Message: "未登录",
-		})
-		return
-	}
 
 	// 解析分页参数
 	pageStr := c.DefaultQuery("page", "1")
@@ -155,8 +144,7 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 	// 计算偏移量
 	offset := (page - 1) * limit
 
-	// 获取视频列表（带用户隔离）
-	savedVideos, total, err := h.SavedVideoService.GetVideosPaginatedForUser(offset, limit, userID)
+	savedVideos, total, err := h.SavedVideoService.GetVideosPaginated(offset, limit)
 	if err != nil {
 		h.App.Logger.Errorf("获取视频列表失败: %v", err)
 		c.JSON(http.StatusInternalServerError, VideoListResponse{
@@ -202,26 +190,14 @@ func (h *VideoHandler) getVideoList(c *gin.Context) {
 func (h *VideoHandler) getVideoDetail(c *gin.Context) {
 	idStr := c.Param("id")
 
-	// 获取用户ID进行权限验证
-	userID, exists := auth.GetUserID(c)
-	if !exists || userID == 0 {
-		c.JSON(http.StatusUnauthorized, VideoListResponse{
-			Code:    401,
-			Message: "未登录",
-		})
-		return
-	}
-
 	// 尝试解析为数字ID，如果失败则当作video_id（字符串）处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		// 如果可以解析为数字，则按ID查询（带用户隔离）
-		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByID(uint(id))
 	} else {
-		// 否则按video_id查询（带用户隔离）
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
 	}
 
 	if err != nil {
@@ -233,8 +209,7 @@ func (h *VideoHandler) getVideoDetail(c *gin.Context) {
 		return
 	}
 
-	// 获取任务步骤（带用户隔离）
-	taskSteps, err := h.TaskStepService.GetTaskStepsByVideoIDForUser(savedVideo.VideoID, userID)
+	taskSteps, err := h.TaskStepService.GetTaskStepsByVideoID(savedVideo.VideoID)
 	if err != nil {
 		h.App.Logger.Errorf("获取任务步骤失败: %v", err)
 	}
@@ -312,24 +287,14 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 	idStr := c.Param("id")
 	stepName := c.Param("stepName")
 
-	// 获取用户ID进行权限验证
-	userID, exists := auth.GetUserID(c)
-	if !exists || userID == 0 {
-		c.JSON(http.StatusUnauthorized, VideoListResponse{
-			Code:    401,
-			Message: "未登录",
-		})
-		return
-	}
-
 	// 尝试解析为数字ID，如果失败则当作video_id处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByID(uint(id))
 	} else {
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
 	}
 
 	if err != nil {
@@ -360,7 +325,7 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 	}
 
 	// 重新执行任务步骤
-	h.App.Logger.Infof("🔄 用户请求重试任务步骤: %s - %s", savedVideo.VideoID, stepName)
+	h.App.Logger.Infof("🔄 请求重试任务步骤: %s - %s", savedVideo.VideoID, stepName)
 
 	// 重置任务步骤状态为待执行
 	err = h.TaskStepService.UpdateTaskStepStatus(savedVideo.VideoID, stepName, "pending")
@@ -399,7 +364,7 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 	}
 
 	// 清除取消状态，允许任务重新运行
-	// 无论重试哪个步骤，只要用户请求重试，就应该清除之前的取消标记
+	// 清除之前的取消标记，允许任务重新运行
 	if h.CancelManager != nil {
 		h.CancelManager.ClearCancel(savedVideo.ID)
 	}
@@ -409,7 +374,7 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 	// ✅ 记录审计日志
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"retry_task_step",
 		"task_step",
@@ -435,36 +400,26 @@ func (h *VideoHandler) retryTaskStep(c *gin.Context) {
 func (h *VideoHandler) deleteVideo(c *gin.Context) {
 	idStr := c.Param("id")
 
-	// 获取用户ID进行权限验证
-	userID, exists := auth.GetUserID(c)
-	if !exists || userID == 0 {
-		c.JSON(http.StatusUnauthorized, VideoListResponse{
-			Code:    401,
-			Message: "未登录",
-		})
-		return
-	}
-
 	// 尝试解析为数字ID，如果失败则当作video_id处理
 	var savedVideo *model.SavedVideo
 	var err error
 
 	if id, parseErr := strconv.ParseUint(idStr, 10, 32); parseErr == nil {
-		savedVideo, err = h.SavedVideoService.GetVideoByIDForUser(uint(id), userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByID(uint(id))
 	} else {
-		savedVideo, err = h.SavedVideoService.GetVideoByVideoIDForUser(idStr, userID)
+		savedVideo, err = h.SavedVideoService.GetVideoByVideoID(idStr)
 	}
 
 	if err != nil {
 		h.App.Logger.Errorf("获取视频详情失败: %v", err)
 		c.JSON(http.StatusNotFound, VideoListResponse{
 			Code:    404,
-			Message: "视频不存在或无权操作",
+			Message: "视频不存在",
 		})
 		return
 	}
 
-	h.App.Logger.Infof("🗑️ 用户请求删除视频: %s (ID: %d)", savedVideo.VideoID, savedVideo.ID)
+	h.App.Logger.Infof("🗑️ 请求删除视频: %s (ID: %d)", savedVideo.VideoID, savedVideo.ID)
 
 	// 0. 取消正在执行的任务（如果有）
 	if h.CancelManager != nil {
@@ -496,8 +451,8 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 		}
 	}
 
-	// 3. 删除数据库记录（带用户隔离）
-	if err := h.SavedVideoService.DeleteVideoForUser(savedVideo.ID, userID); err != nil {
+	// 3. 删除数据库记录
+	if err := h.SavedVideoService.DeleteVideo(savedVideo.ID); err != nil {
 		h.App.Logger.Errorf("删除视频记录失败: %v", err)
 		c.JSON(http.StatusInternalServerError, VideoListResponse{
 			Code:    500,
@@ -509,7 +464,7 @@ func (h *VideoHandler) deleteVideo(c *gin.Context) {
 	// ✅ 记录审计日志
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"delete_video",     // action
 		"video",            // resource
@@ -624,9 +579,8 @@ func (h *VideoHandler) getVideoDirectory(videoID string) string {
 	// 根据配置获取文件上传目录
 	baseDir := h.App.Config.FileUpDir
 
-	// 按日期组织的目录结构：/file_upload/media/2025-10-13/videoID/
-	// 这里简化处理，实际需要根据创建时间确定日期
-	return filepath.Join(baseDir, "media", "*", videoID)
+	// 目录结构：{FileUpDir}/{date}/{videoID}/
+	return filepath.Join(baseDir, "*", videoID)
 }
 
 // listVideoFiles 列出视频目录中的所有文件
@@ -729,7 +683,7 @@ func (h *VideoHandler) manualUploadVideo(c *gin.Context) {
 		return
 	}
 
-	h.App.Logger.Infof("🚀 用户手动触发视频上传: %s (%s)", savedVideo.VideoID, savedVideo.Title)
+	h.App.Logger.Infof("🚀 手动触发视频上传: %s (%s)", savedVideo.VideoID, savedVideo.Title)
 
 	// 更新状态为上传中
 	if err := h.SavedVideoService.UpdateStatus(savedVideo.ID, "201"); err != nil {
@@ -755,10 +709,9 @@ func (h *VideoHandler) manualUploadVideo(c *gin.Context) {
 	}()
 
 	// ✅ 记录审计日志
-	userID, _ := auth.GetUserID(c)
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"manual_upload_video",
 		"video",
@@ -821,7 +774,7 @@ func (h *VideoHandler) resetAllFailedSteps(c *gin.Context) {
 	for _, step := range failedSteps {
 		stepNames = append(stepNames, step.StepName)
 	}
-	h.App.Logger.Infof("🔄 用户请求重置所有失败步骤: %s - %v", savedVideo.VideoID, stepNames)
+	h.App.Logger.Infof("🔄 请求重置所有失败步骤: %s - %v", savedVideo.VideoID, stepNames)
 
 	// 重置所有失败的步骤
 	resetCount, err := h.TaskStepService.ResetFailedSteps(savedVideo.VideoID)
@@ -872,10 +825,9 @@ func (h *VideoHandler) resetAllFailedSteps(c *gin.Context) {
 	}
 
 	// ✅ 记录审计日志
-	userID, _ := auth.GetUserID(c)
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"reset_failed_steps",
 		"video",
@@ -951,7 +903,7 @@ func (h *VideoHandler) resetAllSteps(c *gin.Context) {
 		h.App.Logger.Warnf("重置视频状态失败: %v", err)
 	}
 
-	h.App.Logger.Infof("🔄 用户请求重置所有步骤: %s - 已重置 %d 个步骤", savedVideo.VideoID, resetCount)
+	h.App.Logger.Infof("🔄 请求重置所有步骤: %s - 已重置 %d 个步骤", savedVideo.VideoID, resetCount)
 
 	// 清除取消状态，允许任务重新运行
 	if h.CancelManager != nil {
@@ -960,10 +912,9 @@ func (h *VideoHandler) resetAllSteps(c *gin.Context) {
 	}
 
 	// ✅ 记录审计日志
-	userID, _ := auth.GetUserID(c)
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"reset_all_steps",
 		"video",
@@ -1035,7 +986,7 @@ func (h *VideoHandler) manualUploadSubtitle(c *gin.Context) {
 		return
 	}
 
-	h.App.Logger.Infof("🚀 用户手动触发字幕上传: %s (%s)", savedVideo.VideoID, savedVideo.Title)
+	h.App.Logger.Infof("🚀 手动触发字幕上传: %s (%s)", savedVideo.VideoID, savedVideo.Title)
 
 	// 更新状态为上传字幕中
 	if err := h.SavedVideoService.UpdateStatus(savedVideo.ID, "301"); err != nil {
@@ -1061,10 +1012,9 @@ func (h *VideoHandler) manualUploadSubtitle(c *gin.Context) {
 	}()
 
 	// ✅ 记录审计日志
-	userID, _ := auth.GetUserID(c)
 	username := getUsername(c)
 	h.AuditService.LogSuccess(
-		userID,
+		0,
 		username,
 		"manual_upload_subtitle",
 		"video",

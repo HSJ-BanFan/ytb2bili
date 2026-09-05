@@ -26,7 +26,7 @@
 - **Whisper AI** - 语音识别和字幕生成
 - **百度翻译 API** - 机器翻译服务
 - **DeepSeek AI** - AI翻译和内容生成
-- **Bilibili SDK** - 视频上传和用户认证
+- **Bilibili SDK** - 视频上传和账号凭证管理
 - **腾讯云 COS** - 对象存储服务
 
 ## 📦 Dependencies

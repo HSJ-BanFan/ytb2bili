@@ -1,14 +1,11 @@
 "use client";
 
 import AppLayout from '@/components/layout/AppLayout';
-import { useAuth } from '@/hooks/useAuth';
 import { videoApi } from '@/lib/api';
-import { Plus, Youtube, Video, Globe, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Plus, Youtube, Video, Globe, AlertCircle, CheckCircle } from 'lucide-react';
 import { useState } from 'react';
-import Link from 'next/link';
 
 export default function HomePage() {
-  const { user, loading, handleLoginSuccess, handleRefreshStatus, handleLogout } = useAuth();
   const [videoUrl, setVideoUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState('');
@@ -106,67 +103,8 @@ export default function HomePage() {
     return '未知平台';
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-600">加载中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="container mx-auto px-4">
-          <div className="max-w-md mx-auto">
-            <div className="text-center mb-8">
-              <h1 className="text-4xl font-bold text-gray-900 mb-3">
-                Bili-Up Web
-              </h1>
-              <p className="text-gray-600 text-lg">
-                多平台视频下载与管理平台
-              </p>
-            </div>
-
-            {/* 登录入口 */}
-            <div className="bg-white rounded-xl shadow-xl p-8">
-              <div className="text-center mb-6">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-                  <LogIn className="w-8 h-8 text-blue-600" />
-                </div>
-                <h2 className="text-xl font-semibold text-gray-900">欢迎使用</h2>
-                <p className="text-gray-500 mt-2">登录后即可使用视频下载和上传功能</p>
-              </div>
-
-              {/* 登录按钮 */}
-              <Link
-                href="/login"
-                className="w-full flex items-center justify-center px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium shadow-md hover:shadow-lg"
-              >
-                <LogIn className="w-5 h-5 mr-2" />
-                登录 / 注册
-              </Link>
-
-              <p className="text-center text-sm text-gray-500 mt-6">
-                登录后可在设置中绑定 B站账号进行视频上传
-              </p>
-            </div>
-
-            {/* 功能介绍 */}
-            <div className="mt-8 text-center text-gray-600">
-              <p className="text-sm">支持 YouTube、Bilibili、Twitter、TikTok 等平台</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <AppLayout userName={user?.name} onLogout={handleLogout}>
+    <AppLayout>
       <div className="max-w-4xl mx-auto space-y-6">
         {/* 主要功能区域 - 视频链接提交 */}
         <div className="bg-white rounded-lg shadow-md p-8">

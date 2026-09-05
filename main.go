@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/chain_task"
 	"github.com/difyz9/ytb2bili/internal/core"
 	"github.com/difyz9/ytb2bili/internal/core/services"
@@ -56,22 +55,12 @@ func main() {
 	taskStepService := services.NewTaskStepService(dbConn)
 	biliAccountService := services.NewBiliAccountService(dbConn) // 只需要 db
 	auditService := audit.NewAuditService(dbConn)
-	userConfigService := services.NewUserConfigService(dbConn, appLogger) // 需要 db 和 logger
+	toolConfigService := services.NewToolConfigService(dbConn, appLogger) // 需要 db 和 logger
 
 	// 创建 AppServer 实例
 	server := core.NewServer(cfg, appLogger) // 使用 NewServer 而不是 NewAppServer
 	server.Init(dbConn)
 
-	// 初始化中间件（使用 go-auth 适配器）
-	jwtConfig := auth.JWTConfig{
-		SecretKey:     cfg.Auth.JWTSecret,
-		Issuer:        "ytb2bili",
-		AccessExpiry:  time.Duration(cfg.Auth.JWTExpiration) * time.Hour,
-		RefreshExpiry: time.Duration(cfg.Auth.JWTExpiration*7) * time.Hour,
-	}
-	jwtService := auth.NewGoAuthJWTService(jwtConfig) // 使用 go-auth 适配器
-	authMiddleware := auth.NewAuthMiddleware(dbConn, jwtService)
-	// 初始化 Cron 任务调度
 	cronTask := cron.New(cron.WithSeconds())
 
 	// 初始化 Handlers
@@ -81,15 +70,8 @@ func main() {
 	biliAccountHandler := handler.NewBiliAccountHandler(server, biliAccountService, auditService)
 	uploadHandler := handler.NewUploadHandler(server) // 只需要 app
 	configHandler := handler.NewConfigHandler(server) // 只需要 app
-	userConfigHandler := handler.NewUserConfigHandler(server, userConfigService)
+	toolConfigHandler := handler.NewToolConfigHandler(server, toolConfigService)
 	cronHandler := handler.NewCronHandler(server, dbConn, cronTask)
-
-	// 初始化邮件服务（用于发送验证码）
-	emailService := services.NewEmailService(cfg.SMTPConfig)
-
-	// 注册用户认证路由（邮箱/密码登录、注册等）
-	userAuthHandler := auth.NewAuthHandler(dbConn, jwtService, emailService, auditService)
-	userAuthHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
 
 	// 初始化链式任务处理器
 	chainTaskHandler := chain_task.NewChainTaskHandler(
@@ -121,13 +103,14 @@ func main() {
 	cronHandler.SetUp()
 
 	// 注册 API 路由
-	authHandler.RegisterRoutes(server, authMiddleware)
-	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"), authMiddleware)
-	subtitleHandler.RegisterRoutes(server, authMiddleware)
-	biliAccountHandler.RegisterRoutes(server, authMiddleware)
-	uploadHandler.RegisterRoutes(server, authMiddleware)
-	configHandler.RegisterRoutes(server, authMiddleware)
-	userConfigHandler.RegisterRoutes(server, authMiddleware)
+	// 注册公开 API 路由（工具模式不需要应用认证）
+	authHandler.RegisterRoutes(server)
+	videoHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
+	subtitleHandler.RegisterRoutes(server)
+	biliAccountHandler.RegisterRoutes(server)
+	uploadHandler.RegisterRoutes(server)
+	configHandler.RegisterRoutes(server)
+	toolConfigHandler.RegisterRoutes(server)
 
 	// HTTP 服务器配置
 	srv := &http.Server{

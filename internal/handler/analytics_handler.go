@@ -30,7 +30,7 @@ func (h *AnalyticsHandler) TrackVideoOperation(c *gin.Context, operation string,
 		return
 	}
 
-	userID := h.getUserID(c)
+	visitorID := h.getAnonymousID(c)
 	deviceID := h.getDeviceID(c)
 
 	properties := map[string]interface{}{
@@ -49,7 +49,7 @@ func (h *AnalyticsHandler) TrackVideoOperation(c *gin.Context, operation string,
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := h.analyticsClient.TrackUserAction(ctx, userID, deviceID, "video_"+operation, properties)
+		err := h.analyticsClient.TrackUserAction(ctx, visitorID, deviceID, "video_"+operation, properties)
 		if err != nil {
 			h.logger.Errorf("Failed to track video operation %s: %v", operation, err)
 		}
@@ -62,7 +62,7 @@ func (h *AnalyticsHandler) TrackVideoUpload(c *gin.Context, videoID string, file
 		return
 	}
 
-	userID := h.getUserID(c)
+	visitorID := h.getAnonymousID(c)
 	deviceID := h.getDeviceID(c)
 
 	videoInfo := map[string]interface{}{
@@ -81,7 +81,7 @@ func (h *AnalyticsHandler) TrackVideoUpload(c *gin.Context, videoID string, file
 		title, _ := videoInfo["title"].(string)
 		size, _ := videoInfo["size_bytes"].(int64)
 
-		err := h.analyticsClient.TrackVideoUpload(ctx, userID, deviceID, videoID, title, size)
+		err := h.analyticsClient.TrackVideoUpload(ctx, visitorID, deviceID, videoID, title, size)
 		if err != nil {
 			h.logger.Errorf("Failed to track video upload: %v", err)
 		}
@@ -94,7 +94,7 @@ func (h *AnalyticsHandler) TrackError(c *gin.Context, errorType string, errorMes
 		return
 	}
 
-	userID := h.getUserID(c)
+	visitorID := h.getAnonymousID(c)
 	deviceID := h.getDeviceID(c)
 
 	properties := map[string]interface{}{
@@ -119,35 +119,15 @@ func (h *AnalyticsHandler) TrackError(c *gin.Context, errorType string, errorMes
 			}
 		}
 
-		err := h.analyticsClient.TrackError(ctx, userID, deviceID, errorType, errorMessage, stackTrace)
+		err := h.analyticsClient.TrackError(ctx, visitorID, deviceID, errorType, errorMessage, stackTrace)
 		if err != nil {
 			h.logger.Errorf("Failed to track error: %v", err)
 		}
 	}()
 }
 
-// getUserID 从请求中获取用户ID
-func (h *AnalyticsHandler) getUserID(c *gin.Context) string {
-	// 尝试从多个地方获取用户ID
-
-	// 1. 从JWT token中获取
-	if userID, exists := c.Get("user_id"); exists {
-		if uid, ok := userID.(string); ok {
-			return uid
-		}
-	}
-
-	// 2. 从请求头中获取
-	if userID := c.GetHeader("X-User-ID"); userID != "" {
-		return userID
-	}
-
-	// 3. 从查询参数中获取
-	if userID := c.Query("user_id"); userID != "" {
-		return userID
-	}
-
-	// 4. 使用IP地址作为匿名用户标识
+// getAnonymousID returns an anonymous analytics identifier.
+func (h *AnalyticsHandler) getAnonymousID(c *gin.Context) string {
 	return "anonymous_" + c.ClientIP()
 }
 

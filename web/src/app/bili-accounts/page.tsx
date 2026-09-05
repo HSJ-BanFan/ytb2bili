@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { authApi, BiliAccount } from "@/lib/api";
+import { biliAccountApi, BiliAccount } from "@/lib/api";
 
 export default function BiliAccountsPage() {
     const router = useRouter();
@@ -20,7 +20,7 @@ export default function BiliAccountsPage() {
     // 加载账户列表
     const loadAccounts = useCallback(async () => {
         try {
-            const response = await authApi.getBiliAccounts();
+            const response = await biliAccountApi.getBiliAccounts();
             if (response.code === 0 && response.data) {
                 setAccounts(response.data);
             }
@@ -32,19 +32,13 @@ export default function BiliAccountsPage() {
     }, []);
 
     useEffect(() => {
-        // 检查登录状态
-        const token = localStorage.getItem("jwt_token");
-        if (!token) {
-            router.push("/login");
-            return;
-        }
         loadAccounts();
 
         // 清理函数：组件卸载时停止轮询
         return () => {
             pollingStoppedRef.current = true;
         };
-    }, [loadAccounts, router]);
+    }, [loadAccounts]);
 
     // 开始扫码绑定
     const startQRCodeBinding = async () => {
@@ -139,7 +133,7 @@ export default function BiliAccountsPage() {
     // 从扫码结果绑定账户
     const bindAccountFromQRCode = async () => {
         try {
-            const response = await authApi.bindBiliAccountFromQRCode();
+            const response = await biliAccountApi.bindBiliAccountFromQRCode();
             if (response.code === 0) {
                 setSuccess("B站账户绑定成功！");
                 setQrCode(null);
@@ -160,7 +154,7 @@ export default function BiliAccountsPage() {
         if (!confirm(`确定要解绑 ${account.bili_name} 吗？`)) return;
 
         try {
-            const response = await authApi.unbindBiliAccount(Number(account.id));
+            const response = await biliAccountApi.unbindBiliAccount(Number(account.id));
             if (response.code === 0) {
                 setSuccess("解绑成功");
                 loadAccounts();
@@ -175,7 +169,7 @@ export default function BiliAccountsPage() {
     // 设为主账户
     const handleSetPrimary = async (account: BiliAccount) => {
         try {
-            const response = await authApi.setBiliAccountPrimary(Number(account.id));
+            const response = await biliAccountApi.setBiliAccountPrimary(Number(account.id));
             if (response.code === 0) {
                 setSuccess(`已将 ${account.bili_name} 设为主账户`);
                 loadAccounts();

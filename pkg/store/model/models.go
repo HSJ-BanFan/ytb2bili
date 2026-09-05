@@ -43,31 +43,6 @@ type VideoProcessingRequest struct {
 	TranslationSettings TranslationSettings `json:"translation_settings"`
 }
 
-// User 用户模型
-type User struct {
-	BaseModel
-	Username    string     `gorm:"size:50;not null" json:"username"`           // 显示名称（可重复）
-	Email       string     `gorm:"uniqueIndex;size:100;not null" json:"email"` // 邮箱（唯一标识）
-	Phone       string     `gorm:"size:20" json:"phone"`
-	Password    string     `gorm:"size:100" json:"-"` // B站用户可为空
-	Avatar      string     `gorm:"size:255" json:"avatar"`
-	Status      int        `gorm:"default:1" json:"status"` // 1:正常 0:禁用
-	LastLoginAt *time.Time `json:"last_login_at"`
-	BiliMid     string     `gorm:"index;size:50" json:"bili_mid"` // B站用户MID，用于关联B站账号（允许为空）
-
-	// 邮箱验证
-	EmailVerified   bool       `gorm:"default:false" json:"email_verified"` // 邮箱是否已验证
-	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`         // 邮箱验证时间
-
-	// 权限和角色
-	Role string `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user
-}
-
-// TableName 指定表名
-func (User) TableName() string {
-	return "cw_users"
-}
-
 type SubtitleItem struct {
 	SID      int     `json:"sid" gorm:"column:sid"`           // 字幕ID
 	From     float64 `json:"from" gorm:"column:from_time"`    // 开始时间
@@ -114,7 +89,6 @@ type SavedVideo struct {
 	PlaylistID     string `gorm:"type:varchar(100);index" json:"playlist_id"` // 播放列表ID
 	Timestamp      string `gorm:"type:varchar(50)" json:"timestamp"`          // 时间戳
 	SavedAt        string `gorm:"type:varchar(50)" json:"saved_at"`           // 保存时间
-	UserID         uint   `gorm:"index" json:"user_id"`                       // 提交用户ID
 
 	// 字幕上传调度字段
 	VideoSizeMB           float64    `gorm:"type:decimal(10,2)" json:"video_size_mb"`                  // 视频大小(MB)
@@ -141,47 +115,9 @@ func (SavedVideo) TableName() string {
 	return "cw_saved_videos"
 }
 
-// App 应用/客户端模型 (用于 appId + appSecret 鉴权)
-type App struct {
-	BaseModel
-	AppID       string `gorm:"uniqueIndex;size:64;not null" json:"app_id"` // 应用ID
-	AppSecret   string `gorm:"size:128;not null" json:"-"`                 // 应用密钥 (不返回给前端)
-	Name        string `gorm:"size:100;not null" json:"name"`              // 应用名称
-	Description string `gorm:"size:500" json:"description"`                // 描述
-	Status      int    `gorm:"default:1" json:"status"`                    // 状态: 1=启用, 0=禁用
-	RateLimit   int    `gorm:"default:1000" json:"rate_limit"`             // 每日请求限制
-	AllowedIPs  string `gorm:"type:text" json:"allowed_ips"`               // 允许的IP白名单 (JSON数组)
-	OwnerID     *uint  `gorm:"index" json:"owner_id"`                      // 所属用户ID (可选)
-	Owner       *User  `gorm:"foreignKey:OwnerID" json:"owner,omitempty"`  // 所属用户
-}
-
-// TableName 指定表名
-func (App) TableName() string {
-	return "cw_apps"
-}
-
-// UserToken 用户 Token 记录 (用于 JWT 黑名单/刷新等)
-type UserToken struct {
-	BaseModel
-	UserID       uint      `gorm:"index;not null" json:"user_id"`
-	User         User      `gorm:"foreignKey:UserID" json:"-"`
-	TokenHash    string    `gorm:"uniqueIndex;size:64;not null" json:"-"` // Token 哈希 (用于黑名单)
-	RefreshToken string    `gorm:"size:256" json:"-"`                     // 刷新 Token
-	DeviceInfo   string    `gorm:"size:255" json:"device_info"`           // 设备信息
-	IP           string    `gorm:"size:45" json:"ip"`                     // 登录IP
-	ExpiresAt    time.Time `json:"expires_at"`                            // 过期时间
-	IsRevoked    bool      `gorm:"default:false" json:"is_revoked"`       // 是否已撤销
-}
-
-// TableName 指定表名
-func (UserToken) TableName() string {
-	return "cw_user_tokens"
-}
-
 // UserBiliAccount 用户绑定的B站账号
 type UserBiliAccount struct {
 	BaseModel
-	UserID     uint       `gorm:"index;not null" json:"user_id"`   // 系统用户ID
 	BiliMid    int64      `gorm:"index;not null" json:"bili_mid"`  // B站用户MID
 	BiliName   string     `gorm:"size:100" json:"bili_name"`       // B站用户名
 	BiliFace   string     `gorm:"size:500" json:"bili_face"`       // B站头像URL
@@ -202,29 +138,11 @@ type UserBiliAccount struct {
 	RefreshTokenEncrypted string `gorm:"type:text" json:"-"` // 加密的 Refresh Token
 	EncryptionVersion     int    `gorm:"default:0" json:"-"` // 加密版本: 0=明文, 2=AES-256-GCM
 
-	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"` // 关联用户
 }
 
 // TableName 指定表名
 func (UserBiliAccount) TableName() string {
 	return "cw_user_bili_accounts"
-}
-
-// EmailVerification 邮箱验证码记录
-type EmailVerification struct {
-	BaseModel
-	Email         string     `gorm:"index;not null;size:100" json:"email"` // 邮箱地址
-	Code          string     `gorm:"not null;size:10" json:"-"`            // 验证码（不返回给前端）
-	ExpiresAt     time.Time  `gorm:"not null" json:"expires_at"`           // 过期时间
-	Used          bool       `gorm:"default:false" json:"used"`            // 是否已使用
-	Type          string     `gorm:"size:20;default:register" json:"type"` // 类型: register, login, reset_password
-	AttemptCount  int        `gorm:"default:0" json:"-"`                   // 验证尝试次数（不返回给前端）
-	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`            // 最后尝试时间
-}
-
-// TableName 指定表名
-func (EmailVerification) TableName() string {
-	return "cw_email_verifications"
 }
 
 // AuditLog 审计日志模型
@@ -233,12 +151,12 @@ type AuditLog struct {
 	CreatedAt time.Time `gorm:"index" json:"created_at"` // 操作时间
 
 	// 操作者信息
-	UserID   uint   `gorm:"index" json:"user_id"`     // 用户ID (0 表示匿名/未登录)
-	Username string `gorm:"size:100" json:"username"` // 用户名快照
+	UserID   uint   `gorm:"index" json:"user_id"`     // 保留旧审计列，工具模式固定为0
+	Username string `gorm:"size:100" json:"username"` // 可选的操作者快照
 
 	// 操作信息
-	Action     string `gorm:"size:50;not null;index" json:"action"` // 操作类型: user_login, user_logout, bind_bili_account, upload_video 等
-	Resource   string `gorm:"size:100" json:"resource"`             // 资源类型: user, bili_account, video 等
+	Action     string `gorm:"size:50;not null;index" json:"action"` // 操作类型: bind_bili_account, upload_video 等
+	Resource   string `gorm:"size:100" json:"resource"`             // 资源类型: bili_account, video 等
 	ResourceID string `gorm:"size:100" json:"resource_id"`          // 资源ID
 
 	// 请求信息

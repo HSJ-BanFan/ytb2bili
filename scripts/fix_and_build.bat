@@ -34,10 +34,10 @@ echo 📝 下一步操作：
 echo    1. 停止当前运行的服务器（Ctrl+C）
 echo    2. 运行: ytb2bili.exe
 echo    3. 清除浏览器缓存（Ctrl+Shift+R）
-echo    4. 使用 Free 账户测试手动上传功能
+echo    4. 测试手动模式上传功能
 echo.
 echo ✅ 修复内容：
 echo    - 状态 205 现在会显示"立即上传"按钮
-echo    - Free 用户可以手动上传视频
+echo    - 手动模式可以手动上传视频
 echo.
 pause

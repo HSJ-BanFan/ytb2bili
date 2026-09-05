@@ -35,9 +35,6 @@ CREATE TABLE IF NOT EXISTS cw_audit_logs (
 
 -- 说明：
 -- action 可能的值:
---   user_login: 用户登录
---   user_logout: 用户登出
---   user_register: 用户注册
 --   bind_bili_account: 绑定B站账号
 --   unbind_bili_account: 解绑B站账号
 --   upload_video: 上传视频

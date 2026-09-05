@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"fmt"
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 // StateManager 任务状态管理器
 type StateManager struct {
 	Id          uint
-	UserID      uint // 用户ID，用于多用户文件隔离
 	VideoID     string
 	ProjectRoot string
 	CurrentDir  string
@@ -44,10 +42,9 @@ type StateManager struct {
 }
 
 // NewStateManager 创建状态管理器
-func NewStateManager(Id uint, userID uint, videoID, projectRoot string, createTim time.Time) *StateManager {
-	// 按用户隔离目录结构：{projectRoot}/user_{userID}/{date}/{videoID}
-	userDir := fmt.Sprintf("user_%d", userID)
-	currentDir := filepath.Join(projectRoot, userDir, GetCurrentDateYYYYMMDD(createTim), videoID)
+// NewStateManager creates a state manager under {projectRoot}/{date}/{videoID}.
+func NewStateManager(Id uint, videoID, projectRoot string, createTim time.Time) *StateManager {
+	currentDir := filepath.Join(projectRoot, GetCurrentDateYYYYMMDD(createTim), videoID)
 
 	os.MkdirAll(currentDir, os.ModePerm)
 
@@ -59,7 +56,6 @@ func NewStateManager(Id uint, userID uint, videoID, projectRoot string, createTi
 
 	return &StateManager{
 		Id:             Id,
-		UserID:         userID,
 		VideoID:        videoID,
 		ProjectRoot:    projectRoot,
 		CurrentDir:     currentDir,

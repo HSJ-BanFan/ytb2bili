@@ -42,8 +42,8 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 		// 计算请求duration
 		duration := time.Since(startTime)
 
-		// 获取用户ID和设备ID（从请求头或上下文中）
-		userID := m.getUserID(c)
+		// 使用匿名标识和设备ID跟踪请求
+		visitorID := m.getAnonymousID(c)
 		deviceID := m.getDeviceID(c)
 
 		// 跟踪API请求
@@ -55,7 +55,7 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 				ctx,
 				c.Request.URL.Path,
 				c.Request.Method,
-				userID,
+				visitorID,
 				deviceID,
 				c.Writer.Status(),
 				duration,
@@ -84,28 +84,8 @@ func (m *Middleware) Handler() gin.HandlerFunc {
 	}
 }
 
-// getUserID 从请求中获取用户ID
-func (m *Middleware) getUserID(c *gin.Context) string {
-	// 尝试从多个地方获取用户ID
-
-	// 1. 从JWT token中获取
-	if userID, exists := c.Get("user_id"); exists {
-		if uid, ok := userID.(string); ok {
-			return uid
-		}
-	}
-
-	// 2. 从请求头中获取
-	if userID := c.GetHeader("X-User-ID"); userID != "" {
-		return userID
-	}
-
-	// 3. 从查询参数中获取
-	if userID := c.Query("user_id"); userID != "" {
-		return userID
-	}
-
-	// 4. 使用IP地址作为匿名用户标识
+// getAnonymousID returns an anonymous analytics identifier.
+func (m *Middleware) getAnonymousID(c *gin.Context) string {
 	return "anonymous_" + c.ClientIP()
 }
 
@@ -144,14 +124,14 @@ func (m *Middleware) TrackCustomEvent(c *gin.Context, eventName string, properti
 		return
 	}
 
-	userID := m.getUserID(c)
+	visitorID := m.getAnonymousID(c)
 	deviceID := m.getDeviceID(c)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := m.client.TrackUserAction(ctx, userID, deviceID, eventName, properties)
+		err := m.client.TrackUserAction(ctx, visitorID, deviceID, eventName, properties)
 		if err != nil {
 			// 使用新的错误处理系统
 			var netErr *analysis.NetworkError

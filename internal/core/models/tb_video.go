@@ -4,7 +4,6 @@ import "time"
 
 type TbVideo struct {
 	Id      uint   `gorm:"primarykey;column:id" json:"id"`
-	UserID  uint   `gorm:"index" json:"user_id"` // 提交用户ID，用于多用户隔离
 	URL     string `gorm:"column:url;type:varchar(255);not null" json:"url"`
 	Title   string `gorm:"column:title;type:text;not null" json:"title"`
 	VideoId string `gorm:"column:video_id;type:varchar(255);not null" json:"videoId"`
@@ -23,8 +22,6 @@ type TbVideo struct {
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
 	PlaylistId string    `gorm:"column:playlist_id;type:varchar(255)" json:"playlistId"`
-	CourseID   uint      `gorm:"not null;index" json:"courseId"`
-	Course     TbCourse  `gorm:"foreignKey:CourseID" json:"course"`
 }
 
 // TableName TbChannel's table name

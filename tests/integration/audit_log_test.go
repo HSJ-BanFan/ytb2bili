@@ -20,10 +20,10 @@ func TestAuditLog_Integration(t *testing.T) {
 
 	// 记录一条审计日志
 	app.AuditSvc.LogSuccess(
-		1,
-		"test_user",
-		audit.ActionUserLogin,
-		audit.ResourceUser,
+		0,
+		"anonymous",
+		audit.ActionBindBiliAccount,
+		audit.ResourceBiliAccount,
 		"1",
 		"127.0.0.1",
 		"TestAgent/1.0",
@@ -40,10 +40,10 @@ func TestAuditLog_Integration(t *testing.T) {
 
 	// 查询日志
 	var log model.AuditLog
-	err := app.DB.Where("action = ?", audit.ActionUserLogin).First(&log).Error
+	err := app.DB.Where("action = ?", audit.ActionBindBiliAccount).First(&log).Error
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), log.UserID)
-	assert.Equal(t, "test_user", log.Username)
+	assert.Equal(t, uint(0), log.UserID)
+	assert.Equal(t, "anonymous", log.Username)
 	assert.True(t, log.Success)
 }
 
@@ -56,7 +56,7 @@ func TestAuditLog_FailureLogging(t *testing.T) {
 
 	// 使用原始SQL插入以避免gorm默认值问题
 	app.DB.Exec(`INSERT INTO cw_audit_logs (user_id, username, action, resource, ip, user_agent, success, message, created_at) 
-		VALUES (0, 'unknown', 'user_login', 'user', '192.168.1.1', 'BadAgent', 0, '密码错误', datetime('now'))`)
+		VALUES (0, 'unknown', 'bind_bili_account', 'bili_account', '192.168.1.1', 'BadAgent', 0, '密码错误', datetime('now'))`)
 
 	// 验证
 	var log model.AuditLog
@@ -75,9 +75,9 @@ func TestAuditLog_Query(t *testing.T) {
 
 	// 直接插入测试数据（绕过异步）
 	testLogs := []model.AuditLog{
-		{UserID: 1, Username: "user1", Action: "login", Success: true, CreatedAt: time.Now()},
-		{UserID: 2, Username: "user2", Action: "logout", Success: true, CreatedAt: time.Now()},
-		{UserID: 1, Username: "user1", Action: "upload", Success: false, CreatedAt: time.Now()},
+		{UserID: 0, Username: "anonymous", Action: "login", Success: true, CreatedAt: time.Now()},
+		{UserID: 0, Username: "anonymous", Action: "logout", Success: true, CreatedAt: time.Now()},
+		{UserID: 0, Username: "anonymous", Action: "upload", Success: false, CreatedAt: time.Now()},
 	}
 	for _, log := range testLogs {
 		app.DB.Create(&log)
@@ -88,11 +88,6 @@ func TestAuditLog_Query(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), total)
 	assert.Len(t, logs, 3)
-
-	// 按用户ID查询
-	logs, total, err = app.AuditSvc.Query(audit.QueryFilter{UserID: 1}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), total)
 
 	// 按操作查询
 	logs, total, err = app.AuditSvc.Query(audit.QueryFilter{Action: "login"}, 10, 0)
@@ -109,12 +104,12 @@ func TestAuditLog_Cleanup(t *testing.T) {
 
 	// 插入一条旧日志和一条新日志
 	oldLog := model.AuditLog{
-		UserID:    1,
+		UserID:    0,
 		Action:    "old_action",
 		CreatedAt: time.Now().AddDate(0, 0, -100),
 	}
 	newLog := model.AuditLog{
-		UserID:    2,
+		UserID:    0,
 		Action:    "new_action",
 		CreatedAt: time.Now(),
 	}

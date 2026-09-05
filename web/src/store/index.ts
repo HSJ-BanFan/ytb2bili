@@ -1,13 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { User, Video } from '@/types';
-
-interface AuthState {
-  user: User | null;
-  isLoggedIn: boolean;
-  setUser: (user: User | null) => void;
-  logout: () => void;
-}
+import type { Video } from '@/types';
 
 interface VideoState {
   videos: Video[];
@@ -19,20 +11,6 @@ interface VideoState {
   removeVideo: (id: number) => void;
 }
 
-// 认证状态管理
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      user: null,
-      isLoggedIn: false,
-      setUser: (user) => set({ user, isLoggedIn: !!user }),
-      logout: () => set({ user: null, isLoggedIn: false }),
-    }),
-    {
-      name: 'auth-storage',
-    }
-  )
-);
 
 // 视频状态管理
 export const useVideoStore = create<VideoState>((set) => ({
