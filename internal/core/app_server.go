@@ -90,7 +90,6 @@ func (s *AppServer) setupStaticFileServing() {
 		"/dashboard",
 		"/bili-accounts",
 		"/extension",
-		"/membership",
 		"/schedule",
 		"/settings",
 		"/user-settings",

@@ -9,27 +9,16 @@ import (
 const TableNameTbUser = "tb_user"
 
 type TBUser struct {
-	Id        string    `gorm:"column:id;primaryKey;comment:主键" json:"id"` // 参数主键
-	Username  string    `gorm:"size:500;column:user_name;comment:登录名" json:"user_name"`
-	Email     string    `gorm:"size:255;column:email;comment:邮箱" json:"email"`
-	PassWord  string    `gorm:"size:255;column:pass_word;comment:视频id" json:"pass_word"` // 参数主键
-	NickName  string    `gorm:"size:64;column:nick_name;comment:昵称" json:"nick_name"`    // 频道ID
-	Status    string    `gorm:"size:10;column:status;comment:状态" json:"status"`
-	VipExpire time.Time `gorm:"column:vip_expire;comment:会员到期时间" json:"vip_expire"`    // 会员到期时间（兼容旧字段）
-	Phone     string    `gorm:"size:20;column:phone;comment:手机号" json:"phone"`         // 手机号
-	Avatar    string    `gorm:"size:255;column:avatar;comment:头像" json:"avatar"`       // gorm:"-" 表示该字段不会映射到数据库
-	IsVip     bool      `gorm:"size:6;column:is_vip;comment: 是否 VIP 会员" json:"is_vip"` // 是否 VIP 会员（兼容旧字段）
-	Platform  string    `gorm:"size:255;column:platform;comment://平台" json:"platform"` //平台
-	Credit    int64     `gorm:"size:255;column:credit;comment:积分" json:"credit"`       //积分
-
-	// 会员系统字段（新增）
-	MembershipTier   string    `gorm:"size:20;column:membership_tier;default:free;comment:会员等级" json:"membership_tier"` // 会员等级: free/basic/pro/enterprise
-	MembershipExpire time.Time `gorm:"column:membership_expire;comment:会员到期时间" json:"membership_expire"`                // 会员到期时间
-	SubscriptionID   string    `gorm:"size:100;column:subscription_id;comment:支付订阅ID" json:"subscription_id"`           // 支付平台订阅ID
-	BoostPackVideos  int       `gorm:"column:boost_pack_videos;default:0;comment:加油包剩余视频数" json:"boost_pack_videos"`    // 加油包剩余视频数
-	BoostPackExpire  time.Time `gorm:"column:boost_pack_expire;comment:加油包到期时间" json:"boost_pack_expire"`               // 加油包到期时间
-	DailyUsageCount  int       `gorm:"column:daily_usage_count;default:0;comment:今日使用量" json:"daily_usage_count"`       // 今日使用量
-	DailyUsageDate   string    `gorm:"size:10;column:daily_usage_date;comment:使用量统计日期" json:"daily_usage_date"`         // 使用量统计日期 (YYYY-MM-DD)
+	Id       string `gorm:"column:id;primaryKey;comment:主键" json:"id"` // 参数主键
+	Username string `gorm:"size:500;column:user_name;comment:登录名" json:"user_name"`
+	Email    string `gorm:"size:255;column:email;comment:邮箱" json:"email"`
+	PassWord string `gorm:"size:255;column:pass_word;comment:视频id" json:"pass_word"` // 参数主键
+	NickName string `gorm:"size:64;column:nick_name;comment:昵称" json:"nick_name"`    // 频道ID
+	Status   string `gorm:"size:10;column:status;comment:状态" json:"status"`
+	Phone    string `gorm:"size:20;column:phone;comment:手机号" json:"phone"`         // 手机号
+	Avatar   string `gorm:"size:255;column:avatar;comment:头像" json:"avatar"`       // gorm:"-" 表示该字段不会映射到数据库
+	Platform string `gorm:"size:255;column:platform;comment://平台" json:"platform"` //平台
+	Credit   int64  `gorm:"size:255;column:credit;comment:积分" json:"credit"`       //积分
 
 	CreateBy   string    `gorm:"size:32;column:create_by;comment:创建者" json:"create_by"` // 创建者
 	CreateTime time.Time `gorm:"column:create_time;comment:创建时间" json:"create_time"`    // 创建时间

@@ -39,7 +39,7 @@ func DefaultJWTConfig() JWTConfig {
 type UserClaims struct {
 	UserID   uint   `json:"user_id"`
 	Username string `json:"username"`
-	Tier     string `json:"tier"`   // 会员等级
+	Role     string `json:"role"`   // 用户角色
 	AppID    string `json:"app_id"` // 来源应用
 	jwt.RegisteredClaims
 }
@@ -76,12 +76,12 @@ func NewJWTService(config JWTConfig) *JWTService {
 }
 
 // GenerateAccessToken 生成 Access Token
-func (s *JWTService) GenerateAccessToken(userID uint, username, tier, appID string) (string, error) {
+func (s *JWTService) GenerateAccessToken(userID uint, username, role, appID string) (string, error) {
 	now := time.Now()
 	claims := UserClaims{
 		UserID:   userID,
 		Username: username,
-		Tier:     tier,
+		Role:     role,
 		AppID:    appID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    s.config.Issuer,
@@ -135,8 +135,8 @@ func (s *JWTService) ParseToken(tokenString string) (*UserClaims, error) {
 }
 
 // GenerateTokenPair 生成 Token 对
-func (s *JWTService) GenerateTokenPair(userID uint, username, tier, appID string) (*TokenPair, error) {
-	accessToken, err := s.GenerateAccessToken(userID, username, tier, appID)
+func (s *JWTService) GenerateTokenPair(userID uint, username, role, appID string) (*TokenPair, error) {
+	accessToken, err := s.GenerateAccessToken(userID, username, role, appID)
 	if err != nil {
 		return nil, err
 	}

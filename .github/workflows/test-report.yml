@@ -44,12 +44,13 @@ jobs:
         id: test-summary
         run: |
           # 提取单元测试结果（确保返回数字）
-          UNIT_PASS=$(grep -c "^PASS:" test_result_unit.txt 2>/dev/null || echo "0")
-          UNIT_FAIL=$(grep -c "^FAIL:" test_result_unit.txt 2>/dev/null || echo "0")
+          # grep -c 输出 0 后仍以退出码 1 结束；不要再追加第二个 0。
+          UNIT_PASS=$(grep -c "^--- PASS:" test_result_unit.txt 2>/dev/null || :)
+          UNIT_FAIL=$(grep -c "^--- FAIL:" test_result_unit.txt 2>/dev/null || :)
 
-          # 提取集成测试结果（确保返回数字）
-          INT_PASS=$(grep -c "^PASS:" test_result_integration.txt 2>/dev/null || echo "0")
-          INT_FAIL=$(grep -c "^FAIL:" test_result_integration.txt 2>/dev/null || echo "0")
+          # 提取集成测试结果
+          INT_PASS=$(grep -c "^--- PASS:" test_result_integration.txt 2>/dev/null || :)
+          INT_FAIL=$(grep -c "^--- FAIL:" test_result_integration.txt 2>/dev/null || :)
 
           # 计算覆盖率（移除 % 符号）
           UNIT_COV_RAW=$(go tool cover -func=coverage_unit.out | grep total | awk '{print $3}' 2>/dev/null || echo "0%")

@@ -137,13 +137,12 @@ func (ctx *TestContext) CreateTestUser(opts ...UserOption) *model.User {
 	ctx.T.Helper()
 
 	user := &model.User{
-		Username:       "test_user_" + uuid.New().String()[:8],
-		Email:          fmt.Sprintf("test_%s@example.com", uuid.New().String()[:8]),
-		Password:       "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
-		Role:           "user",
-		Status:         1,
-		EmailVerified:  true,
-		MembershipTier: "free",
+		Username:      "test_user_" + uuid.New().String()[:8],
+		Email:         fmt.Sprintf("test_%s@example.com", uuid.New().String()[:8]),
+		Password:      "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
+		Role:          "user",
+		Status:        1,
+		EmailVerified: true,
 	}
 
 	// 应用选项
@@ -178,13 +177,6 @@ func WithEmail(email string) UserOption {
 func WithRole(role string) UserOption {
 	return func(u *model.User) {
 		u.Role = role
-	}
-}
-
-// WithMembershipTier 设置会员等级
-func WithMembershipTier(tier string) UserOption {
-	return func(u *model.User) {
-		u.MembershipTier = tier
 	}
 }
 
@@ -362,7 +354,7 @@ func (ctx *TestContext) GenerateTestToken(user *model.User) string {
 	token, err := ctx.JWTService.GenerateAccessToken(
 		user.ID,
 		user.Username,
-		user.MembershipTier,
+		user.Role,
 		"test_app",
 	)
 	require.NoError(ctx.T, err, "生成测试Token失败")
@@ -377,7 +369,7 @@ func (ctx *TestContext) GenerateTestTokenPair(user *model.User) *auth.TokenPair 
 	tokenPair, err := ctx.JWTService.GenerateTokenPair(
 		user.ID,
 		user.Username,
-		user.MembershipTier,
+		user.Role,
 		"test_app",
 	)
 	require.NoError(ctx.T, err, "生成测试TokenPair失败")

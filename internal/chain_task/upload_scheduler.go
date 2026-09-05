@@ -43,9 +43,6 @@ type UploadScheduler struct {
 
 	// 任务取消管理器
 	CancelManager *TaskCancelManager
-
-	// 权限服务（可选注入）
-	PermissionService *services.PermissionService
 }
 
 // NewUploadScheduler 创建上传调度器实例
@@ -231,7 +228,7 @@ func (s *UploadScheduler) uploadNextVideoImpl(useTransactionLock bool) error {
 	// 查询状态为 '200' (准备就绪) 的视频，使用行锁
 	var videos []struct {
 		ID                    uint
-		UserID                uint // 用户ID，用于权限检查
+		UserID                uint // 用户ID，用于日志
 		VideoID               string
 		Title                 string
 		Subtitles             string // 字幕数据，用于判断是否有字幕
@@ -294,35 +291,6 @@ func (s *UploadScheduler) uploadNextVideoImpl(useTransactionLock bool) error {
 	}
 
 	video := videos[0]
-
-	// 检查用户自动上传权限（在事务内，如果无权限则回滚）
-	if s.PermissionService != nil && video.UserID > 0 {
-		userIDStr := fmt.Sprintf("%d", video.UserID)
-		canUpload, reason, err := s.PermissionService.CanAutoUpload(context.Background(), userIDStr)
-		if err != nil {
-			// 使用用户日志助手
-			userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
-			userLogger.Warnm("检查用户上传权限失败",
-				map[string]interface{}{
-					"video_id": video.VideoID,
-					"error":    err,
-				})
-			// 权限检查失败时继续执行（容错）
-		} else if !canUpload {
-			// 无自动上传权限，回滚事务，跳过此视频（保持状态 200）
-			// 用户可以在"定时上传"页面手动触发上传
-			userLogger := applogger.NewUserLogger(s.logger.Desugar(), video.UserID)
-			userLogger.TaskLog(video.VideoID, "upload_video", "skipped",
-				map[string]interface{}{
-					"reason": reason,
-					"title":  video.Title,
-				})
-			if useTransactionLock {
-				tx.Rollback()
-			}
-			return nil
-		}
-	}
 
 	// 立即更新状态为 '201' (上传视频中)，防止其他 goroutine 获取到同一个视频
 	if err := tx.Model(&model.SavedVideo{}).Where("id = ?", video.ID).Update("status", "201").Error; err != nil {

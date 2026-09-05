@@ -15,7 +15,6 @@ import (
 	"github.com/difyz9/ytb2bili/internal/core/services"
 	"github.com/difyz9/ytb2bili/internal/core/types"
 	"github.com/difyz9/ytb2bili/internal/handler"
-	"github.com/difyz9/ytb2bili/internal/middleware"
 	"github.com/difyz9/ytb2bili/pkg/audit"
 	"github.com/difyz9/ytb2bili/pkg/logger"
 	"github.com/difyz9/ytb2bili/pkg/store"
@@ -53,9 +52,6 @@ func main() {
 		appLogger.Fatalf("Failed to migrate database: %v", err)
 	}
 
-	// 初始化服务
-	licenseService := services.NewLicenseService(dbConn)
-	permissionService := services.NewPermissionService(dbConn)
 	savedVideoService := services.NewSavedVideoService(dbConn)
 	taskStepService := services.NewTaskStepService(dbConn)
 	biliAccountService := services.NewBiliAccountService(dbConn) // 只需要 db
@@ -75,28 +71,15 @@ func main() {
 	}
 	jwtService := auth.NewGoAuthJWTService(jwtConfig) // 使用 go-auth 适配器
 	authMiddleware := auth.NewAuthMiddleware(dbConn, jwtService)
-
-	// GoAuth中间件
-	var goAuthConfig *types.GoAuthConfig
-	if cfg.GoAuth != nil {
-		goAuthConfig = cfg.GoAuth
-	} else {
-		goAuthConfig = &types.GoAuthConfig{
-			EnableIPCheck: false,
-		}
-	}
-	goAuthMiddleware := middleware.NewGoAuthMiddleware(goAuthConfig, appLogger)
-
 	// 初始化 Cron 任务调度
 	cronTask := cron.New(cron.WithSeconds())
 
 	// 初始化 Handlers
 	authHandler := handler.NewAuthHandler(server, biliAccountService) // app, biliAccountService
 	videoHandler := handler.NewVideoHandler(server, savedVideoService, taskStepService, auditService)
-	subtitleHandler := handler.NewSubtitleHandler(server, permissionService)
-	biliAccountHandler := handler.NewBiliAccountHandler(server, biliAccountService, permissionService, auditService)
+	subtitleHandler := handler.NewSubtitleHandler(server)
+	biliAccountHandler := handler.NewBiliAccountHandler(server, biliAccountService, auditService)
 	uploadHandler := handler.NewUploadHandler(server) // 只需要 app
-	licenseHandler := handler.NewLicenseHandler(licenseService, appLogger)
 	configHandler := handler.NewConfigHandler(server) // 只需要 app
 	userConfigHandler := handler.NewUserConfigHandler(server, userConfigService)
 	cronHandler := handler.NewCronHandler(server, dbConn, cronTask)
@@ -107,21 +90,6 @@ func main() {
 	// 注册用户认证路由（邮箱/密码登录、注册等）
 	userAuthHandler := auth.NewAuthHandler(dbConn, jwtService, emailService, auditService)
 	userAuthHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
-
-	// 支付产品处理器
-	var paymentProductHandler *handler.PaymentProductHandler
-	if cfg.PaymentConfig != nil && cfg.PaymentConfig.Enabled {
-		paymentConfig := handler.PaymentConfig{
-			Enabled:               cfg.PaymentConfig.Enabled,
-			BaseURL:               cfg.PaymentConfig.BaseURL,
-			AppID:                 cfg.PaymentConfig.AppID,
-			AppSecret:             cfg.PaymentConfig.AppSecret,
-			AllowedProductIDs:     cfg.PaymentConfig.AllowedProductIDs,
-			CacheDurationMinutes:  cfg.PaymentConfig.CacheDurationMinutes,
-			RequestTimeoutSeconds: cfg.PaymentConfig.RequestTimeoutSeconds,
-		}
-		paymentProductHandler = handler.NewPaymentProductHandler(paymentConfig)
-	}
 
 	// 初始化链式任务处理器
 	chainTaskHandler := chain_task.NewChainTaskHandler(
@@ -158,20 +126,8 @@ func main() {
 	subtitleHandler.RegisterRoutes(server, authMiddleware)
 	biliAccountHandler.RegisterRoutes(server, authMiddleware)
 	uploadHandler.RegisterRoutes(server, authMiddleware)
-	licenseHandler.RegisterRoutes(server, authMiddleware, goAuthMiddleware)
 	configHandler.RegisterRoutes(server, authMiddleware)
 	userConfigHandler.RegisterRoutes(server, authMiddleware)
-
-	if paymentProductHandler != nil {
-		paymentProductHandler.RegisterRoutes(server.Engine.Group("/api/v1"))
-	}
-
-	// 注册 GoAuth 验证中间件 protected 路由 (如果有内部回调)
-	internalGroup := server.Engine.Group("/api/v1/internal")
-	internalGroup.Use(goAuthMiddleware.Handle())
-	{
-		// 注册内部回调接口（目前为空）
-	}
 
 	// HTTP 服务器配置
 	srv := &http.Server{

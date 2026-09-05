@@ -29,17 +29,14 @@ func TestCreateTestUser(t *testing.T) {
 	assert.NotZero(t, user1.ID)
 	assert.Contains(t, user1.Username, "test_user_")
 	assert.Equal(t, "user", user1.Role)
-	assert.Equal(t, "free", user1.MembershipTier)
 
 	// 创建自定义用户
 	user2 := ctx.CreateTestUser(
 		WithUsername("custom_user"),
 		WithRole("admin"),
-		WithMembershipTier("pro"),
 	)
 	assert.Equal(t, "custom_user", user2.Username)
 	assert.Equal(t, "admin", user2.Role)
-	assert.Equal(t, "pro", user2.MembershipTier)
 
 	// 验证两个用户ID不同
 	assert.NotEqual(t, user1.ID, user2.ID)

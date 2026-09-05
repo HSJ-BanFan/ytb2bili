@@ -33,39 +33,13 @@ type AppConfig struct {
 	DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`         // 下载配置
 	AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`        // 数据分析配置
 	BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`         // Bilibili上传配置
-	MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`       // 会员系统配置
 	SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`             // SMTP邮件服务配置
-	PaymentConfig          *PaymentConfig          `toml:"PaymentConfig"`          // 支付服务配置
 
 	// AI服务选择配置
 	PrimaryAIService string `toml:"primary_ai_service"` // 用户选择的首选AI服务: openai_compatible, deepseek, gemini
 
 	// 安全配置
 	Security SecurityConfig `toml:"security"`
-
-	// GoAuth认证配置
-	GoAuth *GoAuthConfig `toml:"go_auth"`
-}
-
-// GoAuthConfig GoAuth配置
-type GoAuthConfig struct {
-	TimestampTolerance int64       `toml:"timestamp_tolerance"`
-	DefaultRateLimit   int         `toml:"default_rate_limit"`
-	EnableIPCheck      bool        `toml:"enable_ip_check"`
-	SignIncludeBody    bool        `toml:"sign_include_body"`
-	Apps               []GoAuthApp `toml:"apps"`
-}
-
-// GoAuthApp GoAuth应用配置
-type GoAuthApp struct {
-	AppID           string   `toml:"app_id"`
-	AppSecret       string   `toml:"app_secret"`
-	AppName         string   `toml:"app_name"`
-	RequireSign     bool     `toml:"require_sign"`
-	Enabled         bool     `toml:"enabled"`
-	RateLimit       int      `toml:"rate_limit"`
-	IPWhitelist     []string `toml:"ip_whitelist"`
-	SignIncludeBody *bool    `toml:"sign_include_body,omitempty"`
 }
 
 // SecurityConfig 安全配置
@@ -88,19 +62,6 @@ type SecurityConfig struct {
 	// Permissions-Policy 配置
 	PermissionsPolicyEnabled bool   `toml:"permissions_policy_enabled"`
 	PermissionsPolicy        string `toml:"permissions_policy"`
-}
-
-// MembershipConfig 会员系统配置
-type MembershipConfig struct {
-	Enabled bool        `toml:"enabled"` // 是否启用会员系统
-	Redis   RedisConfig `toml:"redis"`   // Redis 配置
-}
-
-// RedisConfig Redis 配置
-type RedisConfig struct {
-	Addr     string `toml:"addr"`     // Redis 地址 (例如: localhost:6379)
-	Password string `toml:"password"` // Redis 密码
-	DB       int    `toml:"db"`       // Redis 数据库编号
 }
 
 // BilibiliConfig Bilibili上传配置
@@ -344,17 +305,6 @@ type SMTPConfig struct {
 	UseTLS   bool   `toml:"use_tls"`   // 是否使用 TLS
 }
 
-// PaymentConfig 支付服务配置
-type PaymentConfig struct {
-	Enabled               bool     `toml:"enabled"`                 // 是否启用支付功能
-	BaseURL               string   `toml:"base_url"`                // 支付服务 API 地址
-	AppID                 string   `toml:"app_id"`                  // GoAuth AppID
-	AppSecret             string   `toml:"app_secret"`              // GoAuth AppSecret
-	AllowedProductIDs     []string `toml:"allowed_product_ids"`     // 允许展示的商品 ID 白名单
-	CacheDurationMinutes  int      `toml:"cache_duration_minutes"`  // 商品缓存时间（分钟）
-	RequestTimeoutSeconds int      `toml:"request_timeout_seconds"` // 请求超时时间（秒）
-}
-
 // NewDefaultConfig 创建默认配置
 func NewDefaultConfig() *AppConfig {
 	return &AppConfig{
@@ -475,16 +425,6 @@ func NewDefaultConfig() *AppConfig {
 			UpCloseReward:      0,         // 默认开启打赏
 		},
 
-		// 会员系统配置（默认值，可被 config.toml 覆盖）
-		MembershipConfig: &MembershipConfig{
-			Enabled: false, // 默认不启用会员系统
-			Redis: RedisConfig{
-				Addr:     "localhost:6379",
-				Password: "",
-				DB:       1,
-			},
-		},
-
 		// SMTP 邮件服务配置（默认值，可被 config.toml 覆盖）
 		SMTPConfig: &SMTPConfig{
 			Enabled:  false, // 默认禁用，开发环境验证码打印到日志
@@ -494,17 +434,6 @@ func NewDefaultConfig() *AppConfig {
 			Username: "",
 			Password: "",
 			UseTLS:   true,
-		},
-
-		// 支付服务配置（默认值，可被 config.toml 覆盖）
-		PaymentConfig: &PaymentConfig{
-			Enabled:               false, // 默认禁用
-			BaseURL:               "https://api.vtranslink.com",
-			AppID:                 "admin-frontend",
-			AppSecret:             "",
-			AllowedProductIDs:     []string{},
-			CacheDurationMinutes:  10,
-			RequestTimeoutSeconds: 30,
 		},
 	}
 }
@@ -539,11 +468,8 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
-		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
 		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
-		PaymentConfig          *PaymentConfig          `toml:"PaymentConfig"`
 		Security               SecurityConfig          `toml:"security"`
-		GoAuth                 *GoAuthConfig           `toml:"go_auth"`
 	}
 
 	// 解码TOML配置文件
@@ -584,17 +510,8 @@ func LoadConfig(configFile string) (*AppConfig, error) {
 	if fileConfig.BilibiliConfig != nil {
 		config.BilibiliConfig = fileConfig.BilibiliConfig
 	}
-	if fileConfig.MembershipConfig != nil {
-		config.MembershipConfig = fileConfig.MembershipConfig
-	}
 	if fileConfig.SMTPConfig != nil {
 		config.SMTPConfig = fileConfig.SMTPConfig
-	}
-	if fileConfig.PaymentConfig != nil {
-		config.PaymentConfig = fileConfig.PaymentConfig
-	}
-	if fileConfig.GoAuth != nil {
-		config.GoAuth = fileConfig.GoAuth
 	}
 
 	// 应用安全配置
@@ -627,11 +544,8 @@ func SaveConfig(config *AppConfig) error {
 		DownloadConfig         *DownloadConfig         `toml:"DownloadConfig"`
 		AnalyticsConfig        *AnalyticsConfig        `toml:"AnalyticsConfig"`
 		BilibiliConfig         *BilibiliConfig         `toml:"BilibiliConfig"`
-		MembershipConfig       *MembershipConfig       `toml:"MembershipConfig"`
 		SMTPConfig             *SMTPConfig             `toml:"SMTPConfig"`
-		PaymentConfig          *PaymentConfig          `toml:"PaymentConfig"`
 		Security               SecurityConfig          `toml:"security"`
-		GoAuth                 *GoAuthConfig           `toml:"go_auth"`
 	}{
 		Listen:                 config.Listen,
 		Environment:            config.Environment,
@@ -648,11 +562,8 @@ func SaveConfig(config *AppConfig) error {
 		DownloadConfig:         config.DownloadConfig,
 		AnalyticsConfig:        config.AnalyticsConfig,
 		BilibiliConfig:         config.BilibiliConfig,
-		MembershipConfig:       config.MembershipConfig,
 		SMTPConfig:             config.SMTPConfig,
-		PaymentConfig:          config.PaymentConfig,
 		Security:               config.Security,
-		GoAuth:                 config.GoAuth,
 	}
 
 	buf := new(bytes.Buffer)
@@ -739,14 +650,6 @@ func applyEnvOverrides(config *AppConfig) {
 			config.TenCosConfig = &TencentCosConfig{}
 		}
 		config.TenCosConfig.CosSecretKey = v
-	}
-
-	// Redis 密码
-	if v := os.Getenv("REDIS_PASSWORD"); v != "" {
-		if config.MembershipConfig == nil {
-			config.MembershipConfig = &MembershipConfig{}
-		}
-		config.MembershipConfig.Redis.Password = v
 	}
 
 	// SMTP 密码

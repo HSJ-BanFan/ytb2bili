@@ -196,7 +196,7 @@ export default function TaskStepList({ steps, onRetryStep, onResetAllFailed, isR
                       </div>
                     )}
 
-                    {/* 跳过原因（会员限制等） */}
+                    {/* 跳过原因 */}
                     {step.error_msg && step.status === 'skipped' && (
                       <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
                         <span className="font-medium">⚠️ 已跳过：</span>{step.error_msg}

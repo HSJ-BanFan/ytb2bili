@@ -239,3 +239,17 @@ go test -v ./internal/core/services/...
 - **File Naming**: Use `videoID` as base filename (not database ID)
 - **Logging**: Use `h.App.Logger` (structured logger with zap)
 - **Concurrency**: Use channels for worker pools, never unbounded goroutines
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for `HSJ-BanFan/ytb2bili`; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

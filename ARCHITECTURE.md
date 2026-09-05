@@ -21,7 +21,6 @@
 - 自动化视频下载、元数据生成、字幕翻译
 - 定时上传到 Bilibili（视频+字幕）
 - AI 驱动的元数据生成（DeepSeek/Gemini/OpenAI 兼容）
-- 会员系统与权限控制
 - 任务链式处理与状态跟踪
 
 ---
@@ -182,13 +181,11 @@ type TBUser struct {
     Email            string
     PassWord         string  // bcrypt加密
     NickName         string
-    IsVip            bool
-    MembershipTier   string  // free/basic/pro/enterprise
-    MembershipExpire time.Time
-    BoostPackVideos  int     // 加油包剩余视频数
-    DailyUsageCount  int
-    DailyUsageDate   string
-}
+    Status   string
+    Phone    string
+    Avatar   string
+    Platform string
+    Credit   int64
 ```
 
 #### 4. UserAIConfig (`pkg/store/model/user_config.go`)
@@ -300,11 +297,6 @@ type UserBiliAccount struct {
 │   ├── DELETE /:id              # 删除账号
 │   └── POST   /:id/set-default  # 设置默认账号
 │
-├── /membership           # 会员系统
-│   ├── GET    /tier             # 获取会员等级
-│   ├── GET    /quota            # 获取配额
-│   └── POST   /boost-pack       # 购买加油包
-│
 ├── /upload               # 上传接口 (JWT认证)
 │   └── POST   /video            # 上传视频文件
 │
@@ -333,7 +325,6 @@ type UserBiliAccount struct {
 | `/auth/*` | 无/可选 | 注册/登录接口 |
 | `/videos/*` | JWT 必需 | 用户数据隔离 |
 | `/bili-accounts/*` | JWT 必需 | 多账号管理 |
-| `/membership/*` | JWT 可选 | 获取信息不需要登录 |
 | `/config` | 无/可选 | 公开配置无需登录 |
 | `/user/config/*` | JWT 必需 | 用户个人配置 |
 
@@ -443,7 +434,7 @@ func (m *AuthMiddleware) JWTAuth() gin.HandlerFunc {
 │ 1. 获取元数据   ─────┐                                           │
 │ 2. 下载视频     ─────┼───▶ 并行执行 (max 10 workers)              │
 │ 3. 下载字幕     ─────┤    - 下载任务: max 3 并发                  │
-│ 4. 下载封面     ─────┤    - 用户级并发限制 (会员等级)              │
+│ 4. 下载封面     ─────┤    - 全局并发池控制                         │
 │ 5. 翻译字幕     ─────┘                                           │
 │ 6. AI增强元数据                                                 │
 │ 7. 确认元数据                                                   │
@@ -520,9 +511,6 @@ workerPool := make(chan struct{}, 10) // 最多10个并发任务
 
 // 下载专用池
 downloadWorkerPool := make(chan struct{}, 3) // 最多3个并发下载
-
-// 用户级并发限制
-ConcurrencyLimiter.TryAcquire(userID) // 检查用户配额
 ```
 
 ---
@@ -544,7 +532,6 @@ ytb2bili/
 │   │   ├── chain_task_handler.go      # 准备阶段调度
 │   │   ├── upload_scheduler.go        # 上传阶段调度
 │   │   ├── task_cancel_manager.go     # 任务取消
-│   │   ├── concurrency_limiter.go     # 并发控制
 │   │   ├── handlers/                 # 任务处理器
 │   │   │   ├── fetch_metadata.go
 │   │   │   ├── down_load_video.go
@@ -574,11 +561,6 @@ ytb2bili/
 │   │   ├── subtitle_handler.go
 │   │   └── ...
 │   │
-│   ├── membership/         # 会员系统
-│   │   ├── handler.go
-│   │   ├── checker.go
-│   │   ├── quota.go
-│   │   └── store.go
 │   │
 │   ├── logger/             # 日志系统
 │   ├── migration/          # 数据库迁移
@@ -623,7 +605,7 @@ ytb2bili/
 2. **两阶段处理**: 准备阶段（并行）+ 上传阶段（定时）
 3. **任务链式执行**: 支持依赖检查、失败重试、取消机制
 4. **AI 集成**: 支持多家 AI 服务（DeepSeek/Gemini/OpenAI）
-5. **会员系统**: 等级配额、加油包、日限额
+5. **认证与角色**: 普通 JWT 认证，保留 `admin/user` 角色
 6. **状态持久化**: 所有任务状态可恢复、可重试
 
 技术栈：

@@ -55,13 +55,12 @@ func createTestUser(t *testing.T, db *gorm.DB, role string) *model.User {
 	email := fmt.Sprintf("test_%d@example.com", time.Now().UnixNano())
 
 	user := &model.User{
-		Username:       "test_user",
-		Email:          email,
-		Password:       "hashed_password",
-		Role:           role,
-		Status:         1,
-		EmailVerified:  true,
-		MembershipTier: "free",
+		Username:      "test_user",
+		Email:         email,
+		Password:      "hashed_password",
+		Role:          role,
+		Status:        1,
+		EmailVerified: true,
 	}
 	err := db.Create(user).Error
 	require.NoError(t, err)
@@ -107,7 +106,7 @@ func TestDefaultJWTConfig(t *testing.T) {
 func TestJWTService_GenerateAccessToken(t *testing.T) {
 	service := setupTestJWTService()
 
-	token, err := service.GenerateAccessToken(1, "testuser", "free", "test_app")
+	token, err := service.GenerateAccessToken(1, "testuser", "user", "test_app")
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, token)
@@ -126,7 +125,7 @@ func TestJWTService_ParseToken_Valid(t *testing.T) {
 	service := setupTestJWTService()
 
 	// 生成 Token
-	token, err := service.GenerateAccessToken(123, "testuser", "pro", "test_app")
+	token, err := service.GenerateAccessToken(123, "testuser", "admin", "test_app")
 	require.NoError(t, err)
 
 	// 解析 Token
@@ -136,7 +135,7 @@ func TestJWTService_ParseToken_Valid(t *testing.T) {
 	assert.NotNil(t, claims)
 	assert.Equal(t, uint(123), claims.UserID)
 	assert.Equal(t, "testuser", claims.Username)
-	assert.Equal(t, "pro", claims.Tier)
+	assert.Equal(t, "admin", claims.Role)
 	assert.Equal(t, "test_app", claims.AppID)
 }
 
@@ -162,7 +161,7 @@ func TestJWTService_ParseToken_Expired(t *testing.T) {
 	service := NewJWTService(config)
 
 	// 生成 Token
-	token, err := service.GenerateAccessToken(1, "testuser", "free", "app")
+	token, err := service.GenerateAccessToken(1, "testuser", "user", "app")
 	require.NoError(t, err)
 
 	// 等待过期
@@ -190,7 +189,7 @@ func TestJWTService_ParseToken_WrongSecret(t *testing.T) {
 	})
 
 	// 用 service1 生成
-	token, err := service1.GenerateAccessToken(1, "testuser", "free", "app")
+	token, err := service1.GenerateAccessToken(1, "testuser", "user", "app")
 	require.NoError(t, err)
 
 	// 用 service2 解析
@@ -203,7 +202,7 @@ func TestJWTService_ParseToken_WrongSecret(t *testing.T) {
 func TestJWTService_GenerateTokenPair(t *testing.T) {
 	service := setupTestJWTService()
 
-	tokenPair, err := service.GenerateTokenPair(1, "testuser", "free", "test_app")
+	tokenPair, err := service.GenerateTokenPair(1, "testuser", "user", "test_app")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, tokenPair)
@@ -311,7 +310,7 @@ func TestAuthMiddleware_JWTAuth_ValidToken(t *testing.T) {
 	user := createTestUser(t, db, "user")
 
 	// 生成有效 Token
-	token, err := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "test_app")
+	token, err := jwtService.GenerateAccessToken(user.ID, user.Username, "user", "test_app")
 	require.NoError(t, err)
 
 	var capturedUserID uint
@@ -353,7 +352,7 @@ func TestAuthMiddleware_JWTAuth_RevokedToken(t *testing.T) {
 	user := createTestUser(t, db, "user")
 
 	// 生成 Token
-	token, err := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "test_app")
+	token, err := jwtService.GenerateAccessToken(user.ID, user.Username, "user", "test_app")
 	require.NoError(t, err)
 
 	// 将 Token 加入黑名单
@@ -417,7 +416,7 @@ func TestAuthMiddleware_OptionalJWTAuth_ValidToken(t *testing.T) {
 	middleware := NewAuthMiddleware(db, jwtService)
 
 	user := createTestUser(t, db, "admin")
-	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "pro", "app")
+	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "admin", "app")
 
 	var capturedUserID uint
 	var capturedRole string
@@ -665,21 +664,6 @@ func TestGetAppID(t *testing.T) {
 	assert.Equal(t, "my_app_id", appID)
 }
 
-func TestGetUserTier(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-
-	// 未设置时应返回 "free"
-	tier := GetUserTier(c)
-	assert.Equal(t, "free", tier)
-
-	// 设置后
-	c.Set(ContextKeyUserTier, "pro")
-	tier = GetUserTier(c)
-	assert.Equal(t, "pro", tier)
-}
-
 // ============================================================================
 // 用户角色测试
 // ============================================================================
@@ -693,7 +677,7 @@ func TestAuthMiddleware_JWTAuth_AdminRole(t *testing.T) {
 
 	// 创建管理员用户
 	user := createTestUser(t, db, "admin")
-	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "enterprise", "app")
+	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "admin", "app")
 
 	var capturedRole string
 
@@ -724,7 +708,7 @@ func TestAuthMiddleware_JWTAuth_DefaultRoleWhenEmpty(t *testing.T) {
 
 	// 创建角色为空的用户
 	user := createTestUser(t, db, "")
-	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "app")
+	token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "user", "app")
 
 	var capturedRole string
 
@@ -830,32 +814,30 @@ func TestRequireAdmin_WithJWTIntegration(t *testing.T) {
 
 	// 创建管理员用户
 	admin := &model.User{
-		Username:       "admin_user",
-		Email:          fmt.Sprintf("admin_%d@example.com", time.Now().UnixNano()),
-		Password:       "hashed_password",
-		Role:           "admin",
-		Status:         1,
-		EmailVerified:  true,
-		MembershipTier: "pro",
+		Username:      "admin_user",
+		Email:         fmt.Sprintf("admin_%d@example.com", time.Now().UnixNano()),
+		Password:      "hashed_password",
+		Role:          "admin",
+		Status:        1,
+		EmailVerified: true,
 	}
 	err := db.Create(admin).Error
 	require.NoError(t, err)
-	adminToken, _ := jwtService.GenerateAccessToken(admin.ID, admin.Username, "pro", "app")
+	adminToken, _ := jwtService.GenerateAccessToken(admin.ID, admin.Username, "admin", "app")
 
 	// 创建普通用户（添加微小延迟确保时间戳不同）
 	time.Sleep(1 * time.Millisecond)
 	user := &model.User{
-		Username:       "normal_user",
-		Email:          fmt.Sprintf("user_%d@example.com", time.Now().UnixNano()),
-		Password:       "hashed_password",
-		Role:           "user",
-		Status:         1,
-		EmailVerified:  true,
-		MembershipTier: "free",
+		Username:      "normal_user",
+		Email:         fmt.Sprintf("user_%d@example.com", time.Now().UnixNano()),
+		Password:      "hashed_password",
+		Role:          "user",
+		Status:        1,
+		EmailVerified: true,
 	}
 	err = db.Create(user).Error
 	require.NoError(t, err)
-	userToken, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "app")
+	userToken, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "user", "app")
 
 	router := gin.New()
 	router.Use(authMiddleware.JWTAuth())
@@ -1120,7 +1102,7 @@ func TestLoadUserRole_WithJWTIntegration(t *testing.T) {
 
 	// 创建管理员用户
 	admin := createTestUser(t, db, "admin")
-	adminToken, _ := jwtService.GenerateAccessToken(admin.ID, admin.Username, "pro", "app")
+	adminToken, _ := jwtService.GenerateAccessToken(admin.ID, admin.Username, "admin", "app")
 
 	router := gin.New()
 	router.Use(authMiddleware.JWTAuth())
@@ -1148,7 +1130,7 @@ func TestLoadUserRole_UserRole(t *testing.T) {
 
 	// 创建普通用户
 	user := createTestUser(t, db, "user")
-	userToken, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "app")
+	userToken, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "user", "app")
 
 	router := gin.New()
 	router.Use(authMiddleware.JWTAuth())
@@ -1600,13 +1582,13 @@ func BenchmarkJWTService_GenerateAccessToken(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		service.GenerateAccessToken(1, "testuser", "free", "app")
+		service.GenerateAccessToken(1, "testuser", "user", "app")
 	}
 }
 
 func BenchmarkJWTService_ParseToken(b *testing.B) {
 	service := NewJWTService(DefaultJWTConfig())
-	token, _ := service.GenerateAccessToken(1, "testuser", "free", "app")
+	token, _ := service.GenerateAccessToken(1, "testuser", "user", "app")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

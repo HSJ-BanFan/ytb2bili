@@ -60,16 +60,7 @@ type User struct {
 	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`         // 邮箱验证时间
 
 	// 权限和角色
-	Role string `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user（与会员等级解耦）
-
-	// 会员系统字段
-	MembershipTier   string     `gorm:"size:20;default:basic" json:"membership_tier"` // 会员等级: basic/pro/enterprise
-	MembershipExpire *time.Time `json:"membership_expire"`                           // 会员到期时间
-	SubscriptionID   string     `gorm:"size:100" json:"subscription_id"`             // 支付平台订阅ID
-	BoostPackVideos  int        `gorm:"default:0" json:"boost_pack_videos"`          // 加油包剩余视频数
-	BoostPackExpire  *time.Time `json:"boost_pack_expire"`                           // 加油包到期时间
-	DailyUsageCount  int        `gorm:"default:0" json:"daily_usage_count"`          // 今日使用量
-	DailyUsageDate   string     `gorm:"size:10" json:"daily_usage_date"`             // 使用量统计日期 (YYYY-MM-DD)
+	Role string `gorm:"size:20;default:user;index" json:"role"` // 用户角色: admin/user
 }
 
 // TableName 指定表名

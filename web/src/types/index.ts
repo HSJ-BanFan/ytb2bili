@@ -170,6 +170,3 @@ export const TASK_STEP_NAMES = {
   '上传到Bilibili': '上传到Bilibili',
   '上传字幕到Bilibili': '上传字幕到Bilibili',
 } as const;
-
-// 导出会员类型
-export * from './membership';

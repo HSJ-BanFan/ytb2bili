@@ -74,10 +74,6 @@ export default function HomePage() {
           errorMessage = error.message;
         }
 
-        // 特殊处理配额错误
-        if (error.response?.status === 403 || errorMessage.includes('配额')) {
-          errorMessage = '配额已用完，请升级会员或购买加油包';
-        }
 
         errors.push(`${url.substring(0, 50)}...: ${errorMessage}`);
       }

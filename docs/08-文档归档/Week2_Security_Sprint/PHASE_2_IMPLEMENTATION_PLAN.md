@@ -28,7 +28,7 @@ pkg/crypto/                  ← encryption_service_test.go
 pkg/audit/                   ← audit_service_test.go
 internal/chain_task/         ← 3 个 UploadScheduler 测试（478行）
 internal/core/services/      ← ai_service_test.go
-internal/membership/         ← 5 个会员系统测试
+internal/auth/               ← JWT认证测试
 ```
 
 > **重要发现**：`UploadScheduler` 已有详细的**特征测试**，记录了状态机、重试逻辑、延迟策略等核心行为。

@@ -39,18 +39,6 @@ services:
     networks:
       - ytb2bili-network
 
-  # 可选: Redis 缓存
-  redis:
-    image: redis:7-alpine
-    container_name: ytb2bili-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    networks:
-      - ytb2bili-network
-
   # 可选: Nginx 反向代理
   nginx:
     image: nginx:alpine
@@ -73,8 +61,6 @@ volumes:
   ytb2bili_logs:
     driver: local
   mysql_data:
-    driver: local
-  redis_data:
     driver: local
 
 networks:

@@ -17,16 +17,14 @@ import (
 type BiliAccountHandler struct {
 	BaseHandler
 	BiliAccountService *services.BiliAccountService
-	PermissionService  *services.PermissionService
 	AuditService       *audit.AuditService // 审计服务
 }
 
 // NewBiliAccountHandler 创建 B站账号管理 Handler
-func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, permissionService *services.PermissionService, auditService *audit.AuditService) *BiliAccountHandler {
+func NewBiliAccountHandler(app *core.AppServer, biliAccountService *services.BiliAccountService, auditService *audit.AuditService) *BiliAccountHandler {
 	return &BiliAccountHandler{
 		BaseHandler:        BaseHandler{App: app},
 		BiliAccountService: biliAccountService,
-		PermissionService:  permissionService,
 		AuditService:       auditService,
 	}
 }

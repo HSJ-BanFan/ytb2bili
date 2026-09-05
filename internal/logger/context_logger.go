@@ -13,7 +13,6 @@ import (
 type UserContext struct {
 	UserID   string
 	Username string
-	Tier     string
 }
 
 // ContextLogger 带用户上下文的日志记录器
@@ -32,12 +31,9 @@ func NewContextLogger(baseLogger *zap.Logger) *ContextLogger {
 func getUserContext(c *gin.Context) UserContext {
 	userID := c.GetString("user_id")
 	username := c.GetString("username")
-	tier := c.GetString("tier")
-
 	return UserContext{
 		UserID:   userID,
 		Username: username,
-		Tier:     tier,
 	}
 }
 
@@ -47,19 +43,7 @@ func formatUserPrefix(user UserContext) string {
 		return "[SYSTEM]"
 	}
 
-	tierSymbols := map[string]string{
-		"free":       "🆓",
-		"basic":      "🥉",
-		"pro":        "💎",
-		"enterprise": "🏢",
-	}
-
-	tierIcon := ""
-	if icon, ok := tierSymbols[user.Tier]; ok {
-		tierIcon = icon + " "
-	}
-
-	return fmt.Sprintf("[%s@%s %s]", user.Username, user.UserID, tierIcon)
+	return fmt.Sprintf("[%s@%s]", user.Username, user.UserID)
 }
 
 // Infof 记录信息日志（带用户上下文）
@@ -95,11 +79,10 @@ func (l *ContextLogger) WithFields(c *gin.Context, msg string, fields map[string
 	user := getUserContext(c)
 
 	// 构建字段
-	allFields := make([]zap.Field, 0, len(fields)+3)
+	allFields := make([]zap.Field, 0, len(fields)+2)
 	allFields = append(allFields,
 		zap.String("user_id", user.UserID),
 		zap.String("username", user.Username),
-		zap.String("tier", user.Tier),
 	)
 
 	for k, v := range fields {
@@ -127,11 +110,10 @@ func (l *ContextLogger) WithFields(c *gin.Context, msg string, fields map[string
 func (l *ContextLogger) TaskLog(c *gin.Context, videoID, action, status string, fields map[string]interface{}) {
 	user := getUserContext(c)
 
-	allFields := make([]zap.Field, 0, len(fields)+5)
+	allFields := make([]zap.Field, 0, len(fields)+4)
 	allFields = append(allFields,
 		zap.String("user_id", user.UserID),
 		zap.String("username", user.Username),
-		zap.String("tier", user.Tier),
 		zap.String("video_id", videoID),
 		zap.String("action", action),
 		zap.String("status", status),
@@ -157,18 +139,8 @@ func (l *ContextLogger) TaskLog(c *gin.Context, videoID, action, status string, 
 	}
 
 	// 使用动作作为消息
-	tierSymbols := map[string]string{
-		"free":       "🆓",
-		"basic":      "🥉",
-		"pro":        "💎",
-		"enterprise": "🏢",
-	}
-	tierIcon := ""
-	if icon, ok := tierSymbols[user.Tier]; ok {
-		tierIcon = icon
-	}
 
-	prefix := fmt.Sprintf("[%s@%s %s]", user.Username, user.UserID, tierIcon)
+	prefix := fmt.Sprintf("[%s@%s]", user.Username, user.UserID)
 	l.logger.Desugar().Info(prefix, allFields...)
 }
 

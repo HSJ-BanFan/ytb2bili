@@ -175,7 +175,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:           req.Email,
 		Password:        string(hashedPassword),
 		Status:          1,
-		MembershipTier:  "basic",
+		Role:            "user",
 		EmailVerified:   true, // 通过验证码注册，自动标记为已验证
 		EmailVerifiedAt: &now, // 记录验证时间
 	}
@@ -201,7 +201,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	// 生成 Token
 	appID := GetAppID(c)
-	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.MembershipTier, appID)
+	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.Role, appID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -218,7 +218,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 				"id":       user.ID,
 				"username": user.Username,
 				"email":    user.Email,
-				"tier":     user.MembershipTier,
+				"role":     user.Role,
 			},
 			"token": tokenPair,
 		},
@@ -408,7 +408,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// 生成 Token
 	appID := GetAppID(c)
-	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.MembershipTier, appID)
+	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.Role, appID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -445,7 +445,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 				"id":       user.ID,
 				"username": user.Username,
 				"email":    user.Email,
-				"tier":     user.MembershipTier,
 				"role":     user.Role,
 				"avatar":   user.Avatar,
 			},
@@ -499,7 +498,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 
 	// 生成新 Token
 	appID := GetAppID(c)
-	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.MembershipTier, appID)
+	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.Role, appID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -573,14 +572,12 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		"code":    0,
 		"message": "success",
 		"data": gin.H{
-			"id":                user.ID,
-			"username":          user.Username,
-			"email":             user.Email,
-			"avatar":            user.Avatar,
-			"tier":              user.MembershipTier,
-			"role":              user.Role,
-			"membership_expire": user.MembershipExpire,
-			"created_at":        user.CreatedAt,
+			"id":         user.ID,
+			"username":   user.Username,
+			"email":      user.Email,
+			"avatar":     user.Avatar,
+			"role":       user.Role,
+			"created_at": user.CreatedAt,
 		},
 	})
 }
@@ -1190,7 +1187,7 @@ func (h *AuthHandler) LoginWithCode(c *gin.Context) {
 
 	// 生成 Token
 	appID := GetAppID(c)
-	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.MembershipTier, appID)
+	tokenPair, err := h.jwtService.GenerateTokenPair(user.ID, user.Username, user.Role, appID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -1216,7 +1213,6 @@ func (h *AuthHandler) LoginWithCode(c *gin.Context) {
 				"id":                user.ID,
 				"username":          user.Username,
 				"email":             user.Email,
-				"tier":              user.MembershipTier,
 				"role":              user.Role,
 				"avatar":            user.Avatar,
 				"email_verified":    user.EmailVerified,

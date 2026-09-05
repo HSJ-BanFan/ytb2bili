@@ -8,7 +8,6 @@ interface JWTUser {
   id: number;
   username: string;
   email: string;
-  membership_tier: string;
 }
 
 export function useJWTAuth() {

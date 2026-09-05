@@ -1,7 +1,6 @@
 package chain_task
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,9 +47,6 @@ type ChainTaskHandler struct {
 
 	// 任务取消管理器
 	CancelManager *TaskCancelManager
-
-	// 用户级并发控制（可选注入）
-	ConcurrencyLimiter *ConcurrencyLimiter
 }
 
 func NewChainTaskHandler(app *core.AppServer, task *cron.Cron, db *gorm.DB, savedVideoService *services.SavedVideoService, taskStepService *services.TaskStepService, biliAccountService *services.BiliAccountService, auditService *audit.AuditService) *ChainTaskHandler {
@@ -194,18 +190,6 @@ func (h *ChainTaskHandler) SetUp() {
 				continue
 			}
 
-			// 检查用户级并发限制
-			if h.ConcurrencyLimiter != nil && userID > 0 {
-				acquired, current, max, _ := h.ConcurrencyLimiter.TryAcquire(context.Background(), userID)
-				if !acquired {
-					smartLogger.Debugf("⏳ 用户 %d 并发已达上限 (%d/%d)，任务 %s 等待下次调度", userID, current, max, videoID)
-					// 回滚状态
-					h.updateSavedVideoStatus(task.Id, "001")
-					h.inFlightTasks.Delete(videoID)
-					continue
-				}
-			}
-
 			// 尝试获取 worker slot
 			select {
 			case h.workerPool <- struct{}{}:
@@ -214,10 +198,6 @@ func (h *ChainTaskHandler) SetUp() {
 					defer func() {
 						<-h.workerPool
 						h.inFlightTasks.Delete(t.VideoId)
-						// 释放用户级并发槽位
-						if h.ConcurrencyLimiter != nil && uid > 0 {
-							h.ConcurrencyLimiter.Release(uid)
-						}
 					}()
 
 					// 创建用户日志助手
@@ -238,10 +218,6 @@ func (h *ChainTaskHandler) SetUp() {
 				// worker pool 已满，回滚状态并跳过本次调度
 				h.updateSavedVideoStatus(task.Id, "001")
 				h.inFlightTasks.Delete(videoID)
-				// ⚠️ 重要：释放已获取的并发槽位，否则会槽位泄漏
-				if h.ConcurrencyLimiter != nil && userID > 0 {
-					h.ConcurrencyLimiter.Release(userID)
-				}
 				smartLogger.Debugf("Worker pool 已满，任务 %s 回滚状态并等待下次调度", videoID)
 			}
 		}

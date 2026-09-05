@@ -8,8 +8,6 @@ import (
 
 	internalAuth "github.com/difyz9/ytb2bili/internal/auth"
 	"github.com/difyz9/ytb2bili/internal/core"
-	"github.com/difyz9/ytb2bili/internal/core/services"
-	"github.com/difyz9/ytb2bili/internal/middleware"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
 	"github.com/difyz9/ytb2bili/pkg/utils"
 
@@ -19,9 +17,7 @@ import (
 
 type SubtitleHandler struct {
 	BaseHandler
-	permissionService *services.PermissionService
-	authMiddleware    *internalAuth.AuthMiddleware
-	goAuthMiddleware  *middleware.GoAuthMiddleware
+	authMiddleware *internalAuth.AuthMiddleware
 	// 任务取消管理器接口
 	CancelManager interface {
 		Cancel(id uint)
@@ -29,10 +25,9 @@ type SubtitleHandler struct {
 	}
 }
 
-func NewSubtitleHandler(app *core.AppServer, permissionService *services.PermissionService) *SubtitleHandler {
+func NewSubtitleHandler(app *core.AppServer) *SubtitleHandler {
 	return &SubtitleHandler{
-		BaseHandler:       BaseHandler{App: app},
-		permissionService: permissionService,
+		BaseHandler: BaseHandler{App: app},
 	}
 }
 
@@ -95,28 +90,6 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 	}
 
 	fmt.Printf("📋 视频提交请求 - UserID: '%s', URL: %s\n", userID, req.URL)
-
-	// 检查配额
-	if h.permissionService != nil {
-		quotaInfo, err := h.permissionService.GetQuotaInfo(c.Request.Context(), userID)
-		if err == nil && !quotaInfo.IsUnlimited && quotaInfo.TotalRemaining <= 0 {
-			c.JSON(http.StatusForbidden, gin.H{
-				"success": false,
-				"message": "配额已用完，请升级会员或购买加油包",
-				"code":    "QUOTA_EXCEEDED",
-			})
-			return
-		}
-	}
-
-	// 检查 AI 功能权限（Gemini 视频分析需要 Pro 会员）
-	if h.permissionService != nil {
-		allowed, reason, _ := h.permissionService.CanUseFeature(c.Request.Context(), userID, "gemini_video_analysis")
-		if !allowed {
-			fmt.Printf("⚠️ 用户 %s 没有 Gemini 视频分析权限: %s\n", userID, reason)
-			// 不阻止提交，但在日志中记录，任务执行时会跳过 AI 元数据生成
-		}
-	}
 
 	fmt.Println("Received saveVideoSubtitles request for URL:", req.URL)
 	// 从 URL 中提取 videoId
@@ -229,15 +202,6 @@ func (h *SubtitleHandler) saveVideoSubtitles(c *gin.Context) {
 
 	// 计算字幕数量
 	subtitleCount := len(req.Subtitles)
-
-	// 消耗配额（仅对新视频，不是更新已存在的视频）
-	if !isExisting && userID != "" && h.permissionService != nil {
-		if err := h.permissionService.ConsumeQuota(c.Request.Context(), userID); err != nil {
-			fmt.Printf("⚠️ 消耗配额失败: %v\n", err)
-		} else {
-			fmt.Printf("✅ 已消耗用户 %s 的配额\n", userID)
-		}
-	}
 
 	message := "Video saved successfully"
 	if isExisting {

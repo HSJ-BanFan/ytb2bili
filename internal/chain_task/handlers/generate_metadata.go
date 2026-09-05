@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -86,55 +85,8 @@ func sanitizeUTF8(text string) string {
 	return strings.ToValidUTF8(text, "")
 }
 
-// checkUserPermission 检查用户是否有 AI 元数据生成权限
-func (g *GenerateMetadata) checkUserPermission() bool {
-	// 获取视频信息，包含提交用户ID
-	savedVideo, err := g.SavedVideoService.GetVideoByVideoID(g.StateManager.VideoID)
-	if err != nil {
-		g.App.Logger.Debugf("无法获取视频信息: %v，默认允许执行", err)
-		return true // 获取失败时默认允许（向后兼容）
-	}
-
-	// 如果没有用户ID（旧数据），默认允许
-	if savedVideo.UserID == 0 {
-		return true
-	}
-
-	userID := strconv.FormatUint(uint64(savedVideo.UserID), 10)
-
-	// 使用 PermissionService 检查权限
-	permissionService := services.NewPermissionService(g.App.DB)
-
-	// 获取用户会员信息用于日志
-	userMembership, err := permissionService.GetUserMembership(context.Background(), userID)
-	if err == nil {
-		g.App.Logger.Infof("  │ 用户 %s (%s) - AI元数据权限检查",
-			userID, userMembership.GetEffectiveTier())
-	}
-
-	// 检查 AI 元数据生成权限（使用 metadata_generation 作为 feature key）
-	canUse, reason, err := permissionService.CanUseFeature(context.Background(), userID, "metadata_generation")
-	if err != nil {
-		g.App.Logger.Warnf("  │ 检查权限失败: %v，默认允许", err)
-		return true
-	}
-	if !canUse {
-		g.App.Logger.Warnf("  │ 用户 %s 无 AI 元数据权限: %s", userID, reason)
-		return false
-	}
-
-	return true
-}
-
 func (g *GenerateMetadata) Execute(ctx map[string]interface{}) bool {
 	startTime := time.Now()
-
-	// 0. 检查用户会员权限
-	if !g.checkUserPermission() {
-		g.App.Logger.Warn("  │ ⚠️ 无 AI 权限，跳过 (升级 Pro 可解锁)")
-		ctx["skipped"] = "需要 Pro 会员才能使用 AI 生成元数据功能"
-		return true
-	}
 
 	// 列出工作目录中的文件
 	g.logDirectoryContents()

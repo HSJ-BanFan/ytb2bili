@@ -592,66 +592,6 @@ yt_dlp_path = ""
   # 是否使用 TLS 加密
   use_tls = true
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 支付服务配置（pay-unify 集成）
-# ───────────────────────────────────────────────────────────────────────────────
-
-[PaymentConfig]
-  # 是否启用支付功能
-  enabled = false
-
-  # 支付服务 API 地址
-  # 本地测试: http://localhost:8098
-  # 生产环境: https://api.vtranslink.com
-  base_url = "https://api.vtranslink.com"
-
-  # GoAuth 认证配置
-  app_id = "admin-frontend"
-  app_secret = "admin-frontend-secret-key-32chars"
-
-  # 允许展示的商品 ID 白名单
-  # 只有这些 ID 的商品会从 pay-unify 获取并展示给用户
-  # 商品需要先在 pay-unify 管理后台创建
-  allowed_product_ids = [
-    "ytb2bili_vip_enterprise_monthly",   # 企业版月卡 ¥29.88
-    "ytb2bili_vip_enterprise_yearly",    # 企业版年卡 ¥298.80
-  ]
-
-  # 商品缓存时间（分钟）
-  # 推荐值: 10（商品信息不频繁变化）
-  cache_duration_minutes = 10
-
-  # 请求超时时间（秒）
-  request_timeout_seconds = 30
-
-# ───────────────────────────────────────────────────────────────────────────────
-# GoAuth 认证系统配置 (新增)
-# ───────────────────────────────────────────────────────────────────────────────
-
-[go_auth]
-  # 时间戳容差（秒），防止重放攻击
-  timestamp_tolerance = 300
-
-  # 默认限流（每分钟请求数）
-  default_rate_limit = 60
-
-  # 是否启用 IP 检查
-  enable_ip_check = false
-
-  # 签名是否包含 Body
-  sign_include_body = true
-
-  # 应用列表
-  [[go_auth.apps]]
-    app_id = "pay-unify-backend"
-    app_secret = "pay-unify-secret-key-2024"
-    app_name = "Unified Payment System"
-    require_sign = true
-    enabled = true
-    rate_limit = 100
-    # ip_whitelist = ["127.0.0.1"]
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 📖 配置完成检查清单
 # ═══════════════════════════════════════════════════════════════════════════════

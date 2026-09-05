@@ -67,7 +67,7 @@ func TestSmokeTest_AuthFlow(t *testing.T) {
 		}
 
 		// 生成 token
-		token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, "free", "test")
+		token, _ := jwtService.GenerateAccessToken(user.ID, user.Username, user.Role, "test")
 		c.JSON(200, gin.H{"token": token})
 	})
 

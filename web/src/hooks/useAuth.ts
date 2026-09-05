@@ -6,7 +6,6 @@ interface UserInfo {
   mid?: string;
   avatar?: string;
   username?: string;
-  tier?: string;
   role?: string; // 'admin' or 'user'
   bili_mid?: string;
 }
@@ -47,7 +46,6 @@ export function useAuth() {
                 name: data.data.username,
                 username: data.data.username,
                 avatar: data.data.avatar,
-                tier: data.data.tier,
                 role: data.data.role,
                 bili_mid: data.data.bili_mid,
               };
@@ -84,7 +82,7 @@ export function useAuth() {
   }, [checkAuthStatus]);
 
   // B站账户绑定成功后调用（刷新用户状态）
-  const handleLoginSuccess = async (biliUserData?: UserInfo) => {
+  const handleLoginSuccess = async (_biliUserData?: UserInfo) => {
     // 绑定成功后，刷新用户状态
     await checkAuthStatus();
   };

@@ -40,7 +40,7 @@ ytb2bili 是一个**基础可运维**的视频转存系统，具备良好的构�
 ### 📊 总体评估
 
 **CI/CD 成熟度**: **2/5** (基本构建)
-**自动化测试覆盖率**: **<5%** (仅 membership 模块)
+**自动化测试覆盖率**: **<5%** (部分 Go 包已有测试)
 **部署自动化**: **1/5** (手动部署)
 
 **结论**: 项目具备良好的工程基础，但**缺乏完整的 CI/CD 流水线**，每次修改核心逻辑依赖人工测试，存在高回归风险。
@@ -194,7 +194,7 @@ jobs:
 $ go test ./... -cover
 
 # ✅ 有测试的模块 (覆盖率: 70-90%)
-ok  github.com/difyz9/ytb2bili/internal/membership    85.2% coverage
+ok  github.com/difyz9/ytb2bili/internal/auth          85.2% coverage
 ok  github.com/difyz9/ytb2bili/pkg/prompts            78.5% coverage
 
 # ❌ 核心模块无测试
@@ -1732,12 +1732,12 @@ spec:
 #### Week 1: 单元测试框架
 - [ ] 配置 golangci-lint
 - [ ] 编写测试工具包 (Mock, Test Helpers)
-- [ ] 覆盖核心模块: `membership` (已有), `quota`
+- [ ] 覆盖核心模块: `chain_task`、`auth`、`services`
 - [ ] 覆盖 `auth` 模块 (JWT, Middleware)
 
 **验收标准**:
 - ✅ `make lint` 通过
-- ✅ `go test ./internal/membership/...` 覆盖率 ≥80%
+- [ ] `go test ./...` 覆盖率达到 80%
 - ✅ CI 流水线集成 Lint
 
 #### Week 2: 核心逻辑测试
@@ -1908,7 +1908,7 @@ spec:
 1. **完善的构建工具**: Makefile、GitHub Actions
 2. **容器化支持**: Dockerfile、Docker Compose
 3. **良好的代码结构**: Uber FX、分层架构
-4. **部分测试覆盖**: membership 模块
+4. **部分测试覆盖**: auth、chain_task 等模块
 
 ### ⚠️ 主要差距
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/difyz9/ytb2bili/internal/core/types"
 	db_migration "github.com/difyz9/ytb2bili/internal/db"
 	"github.com/difyz9/ytb2bili/pkg/crypto"
 	"github.com/difyz9/ytb2bili/pkg/store/model"
@@ -25,8 +24,6 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.UserPreference{},    // 用户偏好设置
 		&model.EmailVerification{}, // 邮箱验证码
 		&model.AuditLog{},          // 审计日志
-		&types.LicenseActivation{}, // 许可证激活记录
-		&types.UserMembership{},    // 用户会员状态
 	); err != nil {
 		return err
 	}
@@ -58,13 +55,12 @@ func seedInitialData(db *gorm.DB) error {
 	if count == 0 {
 		fmt.Println("🌟 数据库为空，正在创建初始管理员用户...")
 		user := model.User{
-			Username:       "Admin",
-			Email:          "3330876408@qq.com",
-			Password:       "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
-			Role:           "admin",
-			Status:         1,
-			EmailVerified:  true,
-			MembershipTier: "enterprise", // 给个最高等级方便测试
+			Username:      "Admin",
+			Email:         "3330876408@qq.com",
+			Password:      "$2a$10$vIysWJwYXHJECRrret5pAeuwpzjwzVeXDDLPbWJrzng7Xx6oRS6sK", // 123456
+			Role:          "admin",
+			Status:        1,
+			EmailVerified: true,
 		}
 		if err := db.Create(&user).Error; err != nil {
 			return fmt.Errorf("创建初始用户失败: %w", err)

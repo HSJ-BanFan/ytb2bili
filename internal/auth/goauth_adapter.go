@@ -25,11 +25,8 @@ func NewGoAuthJWTService(config JWTConfig) *GoAuthJWTService {
 }
 
 // GenerateAccessToken 生成 Access Token（兼容旧接口）
-func (s *GoAuthJWTService) GenerateAccessToken(userID uint, username, tier, appID string) (string, error) {
-	custom := map[string]interface{}{
-		"tier": tier,
-	}
-	return s.service.GenerateAccessToken(uint64(userID), username, tier, appID, custom)
+func (s *GoAuthJWTService) GenerateAccessToken(userID uint, username, role, appID string) (string, error) {
+	return s.service.GenerateAccessToken(uint64(userID), username, role, appID, nil)
 }
 
 // GenerateRefreshToken 生成 Refresh Token（兼容旧接口）
@@ -54,33 +51,18 @@ func (s *GoAuthJWTService) ParseToken(tokenString string) (*UserClaims, error) {
 		}
 	}
 
-	// 从 Custom 或 Role 中提取 tier
-	tier := ""
-	if claims.Custom != nil {
-		if t, ok := claims.Custom["tier"].(string); ok {
-			tier = t
-		}
-	}
-	if tier == "" {
-		tier = claims.Role // fallback 到 Role 字段
-	}
-
 	return &UserClaims{
 		UserID:           uint(claims.UserID),
 		Username:         claims.Username,
-		Tier:             tier,
+		Role:             claims.Role,
 		AppID:            claims.AppID,
 		RegisteredClaims: claims.RegisteredClaims,
 	}, nil
 }
 
 // GenerateTokenPair 生成 Token 对（兼容旧接口）
-func (s *GoAuthJWTService) GenerateTokenPair(userID uint, username, tier, appID string) (*TokenPair, error) {
-	custom := map[string]interface{}{
-		"tier": tier,
-	}
-
-	pair, err := s.service.GenerateTokenPair(uint64(userID), username, tier, appID, custom)
+func (s *GoAuthJWTService) GenerateTokenPair(userID uint, username, role, appID string) (*TokenPair, error) {
+	pair, err := s.service.GenerateTokenPair(uint64(userID), username, role, appID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -114,20 +96,10 @@ func (s *GoAuthJWTService) ValidateAccessToken(tokenString string) (*UserClaims,
 		}
 	}
 
-	tier := ""
-	if claims.Custom != nil {
-		if t, ok := claims.Custom["tier"].(string); ok {
-			tier = t
-		}
-	}
-	if tier == "" {
-		tier = claims.Role
-	}
-
 	return &UserClaims{
 		UserID:           uint(claims.UserID),
 		Username:         claims.Username,
-		Tier:             tier,
+		Role:             claims.Role,
 		AppID:            claims.AppID,
 		RegisteredClaims: claims.RegisteredClaims,
 	}, nil
@@ -144,11 +116,8 @@ func (s *GoAuthJWTService) GetGoAuthService() *goauth.JWTService {
 }
 
 // RefreshAccessToken 刷新 Access Token
-func (s *GoAuthJWTService) RefreshAccessToken(refreshToken, tier, appID string) (string, error) {
-	custom := map[string]interface{}{
-		"tier": tier,
-	}
-	return s.service.RefreshAccessToken(refreshToken, tier, appID, custom)
+func (s *GoAuthJWTService) RefreshAccessToken(refreshToken, role, appID string) (string, error) {
+	return s.service.RefreshAccessToken(refreshToken, role, appID, nil)
 }
 
 // WithDatabaseBlacklist 设置数据库黑名单（可选）

@@ -77,7 +77,6 @@ ytb2bili/
 ├── config.toml.example          # 📋 配置文件模板
 ├── go.mod                       # 📦 Go 模块依赖管理
 ├── README.md                    # 📖 项目文档
-├── references/                  # 📚 参考资源与独立模块 (会员前端、示例等)
 ├── migrations/                  # 🗄️ 数据库迁移文件
 └── memory-bank/                 # 🧠 项目上下文记忆库
 

@@ -129,12 +129,11 @@ db.RunMigrations(database, cfg)
 | `running` | 正在执行 | 蓝色 |
 | `completed` | 成功完成 | 绿色 |
 | `failed` | 失败（可重试） | 红色 |
-| `skipped` | 跳过（无权限/禁用） | 黄色 |
+| `skipped` | 跳过（未启用或无需执行） | 黄色 |
 | `failed_permanent` | 永久失败（不可重试） | 深红色 |
 
 **AI增强元数据的特殊处理**:
 - AI 失败但回退到原始数据 → 状态=`skipped`, `result_data` 说明原因
-- AI 无权限 → 状态=`skipped`, 原因=`"需要 Pro 会员"`
 - AI 真正失败 → 状态=`failed`
 
 ## 🚀 后续工作

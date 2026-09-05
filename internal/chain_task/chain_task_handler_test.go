@@ -143,8 +143,6 @@ func TestTaskCancelManager_ContextCancellation(t *testing.T) {
 	}
 }
 
-// ConcurrencyLimiter 测试需要 Mock PermissionService，将在集成测试中覆盖
-
 // ═══════════════════════════════════════════════════════════════
 // Database-dependent Tests (Skip with SQLite)
 // 这些测试依赖 MySQL 的布尔值处理行为，在 SQLite 下可能不一致

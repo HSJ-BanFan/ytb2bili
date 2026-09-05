@@ -364,8 +364,7 @@ func TestUploadScheduler_ImpactAnalysis(t *testing.T) {
 		"1. 添加并发数限制（防止资源耗尽）",
 		"2. 监控数据库连接池使用率",
 		"3. 添加 Bilibili API 速率限制",
-		"4. 考虑添加上传队列优先级（VIP 用户优先）",
-		"5. 实施分布式锁（Redis）支持多实例部署",
+		"4. 持续监控上传队列延迟",
 	}
 
 	for _, suggestion := range suggestions {

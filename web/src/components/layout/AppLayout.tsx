@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Crown, Sparkles } from 'lucide-react';
-import { UpgradeModal } from '@/components/membership';
+import { User, LogOut, Settings, BarChart3, Clock, Puzzle, Sparkles } from 'lucide-react';
 import { useJWTAuth } from '@/hooks/useJWTAuth';
 
 interface AppLayoutProps {
@@ -16,7 +14,6 @@ interface AppLayoutProps {
 export default function AppLayout({ children, userName, onLogout }: AppLayoutProps) {
   const { user: jwtUser, logout: jwtLogout } = useJWTAuth();
   const pathname = usePathname();
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const displayName = userName || jwtUser?.username || '用户';
   const handleLogout = onLogout || jwtLogout;
@@ -80,12 +77,6 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                   </Link>
                 </li>
                 <li>
-                  <Link href="/membership" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/membership' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
-                    <Crown className="w-5 h-5" />
-                    <span>会员中心</span>
-                  </Link>
-                </li>
-                <li>
                   <Link href="/user-settings" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/user-settings' ? 'bg-purple-50 text-purple-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <Sparkles className="w-5 h-5" />
                     <span>个人设置</span>
@@ -99,12 +90,10 @@ export default function AppLayout({ children, userName, onLogout }: AppLayoutPro
                 </li>
               </ul>
             </nav>
-            {/* 暂时隐藏侧边栏的 MembershipCard，等待新版组件 */}
           </div>
           <div className="flex-1">{children}</div>
         </div>
       </div>
-      <UpgradeModal isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </div>
   );
 }

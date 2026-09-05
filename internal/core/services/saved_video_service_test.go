@@ -54,13 +54,12 @@ func createTestUser(t *testing.T, db *gorm.DB) *model.User {
 
 	email := fmt.Sprintf("test_%d@example.com", time.Now().UnixNano())
 	user := &model.User{
-		Username:       "test_user",
-		Email:          email,
-		Password:       "hashed_password",
-		Role:           "user",
-		Status:         1,
-		EmailVerified:  true,
-		MembershipTier: "free",
+		Username:      "test_user",
+		Email:         email,
+		Password:      "hashed_password",
+		Role:          "user",
+		Status:        1,
+		EmailVerified: true,
 	}
 	err := db.Create(user).Error
 	require.NoError(t, err)

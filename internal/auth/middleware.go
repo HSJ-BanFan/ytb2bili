@@ -15,7 +15,6 @@ import (
 const (
 	ContextKeyUserID   = "user_id"
 	ContextKeyUsername = "username"
-	ContextKeyUserTier = "user_tier"
 	ContextKeyUserRole = "user_role" // 用户角色: admin/user
 	ContextKeyAppID    = "app_id"
 	ContextKeyApp      = "app"
@@ -25,8 +24,8 @@ const (
 // JWTServiceInterface JWT 服务接口（用于支持多种实现）
 type JWTServiceInterface interface {
 	ParseToken(tokenString string) (*UserClaims, error)
-	GenerateTokenPair(userID uint, username, tier, appID string) (*TokenPair, error)
-	GenerateAccessToken(userID uint, username, tier, appID string) (string, error)
+	GenerateTokenPair(userID uint, username, role, appID string) (*TokenPair, error)
+	GenerateAccessToken(userID uint, username, role, appID string) (string, error)
 	GenerateRefreshToken(userID uint) (string, error)
 }
 
@@ -213,7 +212,6 @@ func (m *AuthMiddleware) JWTAuth() gin.HandlerFunc {
 		// 设置用户信息到 Context
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeyUsername, claims.Username)
-		c.Set(ContextKeyUserTier, claims.Tier)
 		c.Set(ContextKeyClaims, claims)
 
 		// 从数据库加载用户角色
@@ -254,7 +252,6 @@ func (m *AuthMiddleware) OptionalJWTAuth() gin.HandlerFunc {
 		if err == nil {
 			c.Set(ContextKeyUserID, claims.UserID)
 			c.Set(ContextKeyUsername, claims.Username)
-			c.Set(ContextKeyUserTier, claims.Tier)
 			c.Set(ContextKeyClaims, claims)
 
 			// 从数据库加载用户角色
@@ -304,13 +301,4 @@ func GetAppID(c *gin.Context) string {
 		return id
 	}
 	return ""
-}
-
-// GetUserTier 从 Context 获取用户等级
-func GetUserTier(c *gin.Context) string {
-	tier, _ := c.Get(ContextKeyUserTier)
-	if t, ok := tier.(string); ok {
-		return t
-	}
-	return "free"
 }
