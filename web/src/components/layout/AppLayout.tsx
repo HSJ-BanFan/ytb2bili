@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Settings, BarChart3, Clock, Puzzle, Sparkles } from 'lucide-react';
+import { Settings, BarChart3, Clock, Puzzle, Sparkles, Network, Bot } from 'lucide-react';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -47,6 +47,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
                   <Link href="/dashboard" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/dashboard' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
                     <BarChart3 className="w-5 h-5" />
                     <span>任务队列</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/strategy" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/strategy' ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+                    <Network className="w-5 h-5" />
+                    <span>策略矩阵</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/agent-trace" className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-left transition-colors ${pathname === '/agent-trace' ? 'bg-purple-50 text-purple-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+                    <Bot className="w-5 h-5" />
+                    <span>决策追溯</span>
                   </Link>
                 </li>
                 <li>
